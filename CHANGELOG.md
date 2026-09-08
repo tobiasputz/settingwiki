@@ -1,3 +1,12 @@
+## 1.3.11 — section-card navigation art
+
+- Restored the earlier Codex visual hierarchy: automatic first-image artwork now belongs to the **whole large chapter/section block**, not behind each individual entry headline.
+- The reading sidebar and entry links are text-only again; the small thumbnail treatment remains disabled.
+- Automatic section art is still enabled by default. Loreforge uses the first meaningful image found in that chapter, while skipping PF2e action-symbol utility images.
+- Explicit chapter artwork overrides the automatic section image. Entry-level TOC artwork remains deliberate metadata and is no longer auto-painted behind every navigation row.
+- Updated Project settings and Codex Studio copy/preview so the behavior is clear: `AUTO · SECTION BACKGROUND` is shown for automatically illustrated chapter cards.
+- Added regression coverage for section-level image promotion and for keeping individual entry navigation free of automatic image backgrounds.
+
 # Changelog
 
 ## 1.3.10 — zero-copy PDF previews and ENOSPC false-failure fix

@@ -16,7 +16,7 @@
         </button>
         <div class="sidebar-links">
         {% for p in category.pages %}
-          <a href="/wiki/{{ p.slug }}" class="{% if p.slug == page.slug %}active {% endif %}{% if p.presentation and p.presentation.navigation_background_url %}has-nav-art{% endif %}" data-codex-entry data-entry-slug="{{ p.slug }}"{% if p.presentation and p.presentation.navigation_background_url %} style="--nav-entry-art:url('{{ p.presentation.navigation_background_url }}')"{% endif %}>
+          <a href="/wiki/{{ p.slug }}" class="{% if p.slug == page.slug %}active{% endif %}" data-codex-entry data-entry-slug="{{ p.slug }}">
             <span>{{ p.title }}</span>{% if p.presentation and p.presentation.visibility == 'teaser' %}<small title="Teaser">◇</small>{% endif %}
           </a>
         {% endfor %}

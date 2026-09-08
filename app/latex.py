@@ -443,7 +443,7 @@ def _first_rendered_image_url(html_body: str) -> str:
     """Return the first *content* image suitable for atmospheric navigation art.
 
     PF2e action glyphs are real image tags too, but using a one-action/reaction
-    symbol as a full navigation background is almost never useful.  Skip the
+    symbol as a full section-card background is almost never useful.  Skip the
     project's Symbols folder and action-symbol markup, then use the next image.
     """
     for match in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html_body, flags=re.IGNORECASE):
@@ -661,16 +661,15 @@ def build_wiki(settings: Settings) -> dict:
         item["presentation"] = _presentation_for_web(settings, presentations.get(("page", page.slug), {}))
         item["html"], item["outline"] = _annotate_headings(item.get("html", ""))
         auto_image = _first_rendered_image_url(item["html"])
-        # Navigation artwork can follow the first image in an entry.  Explicit TOC
-        # artwork always wins.  The automatic mode is intentionally a project-level
-        # preference so campaigns can turn it off without clearing per-entry art.
-        # The player UI uses this as a broad, darkened row background -- never as the
-        # small thumbnail treatment removed in v1.3.1.
+        # Keep automatic first-image artwork at the *section-card* level, not
+        # behind every individual entry headline.  Explicit per-entry TOC artwork
+        # remains available as a deliberate override, but automatic imagery is
+        # promoted later to the containing chapter/category card.
         item["presentation"]["auto_image_url"] = auto_image
         item["presentation"]["suggested_toc_image_url"] = auto_image if not item["presentation"].get("toc_image_url") else ""
         item["presentation"]["display_toc_image_url"] = item["presentation"].get("toc_image_url") or ""
-        item["presentation"]["navigation_background_url"] = item["presentation"].get("toc_image_url") or (auto_image if auto_navigation_art else "")
-        item["presentation"]["navigation_art_is_auto"] = bool(auto_navigation_art and auto_image and not item["presentation"].get("toc_image_url"))
+        item["presentation"]["navigation_background_url"] = item["presentation"].get("toc_image_url") or ""
+        item["presentation"]["navigation_art_is_auto"] = False
         page_dicts.append(item)
 
     # Turn ordinary mentions of unique codex entry names into links. This is
@@ -731,9 +730,10 @@ def build_wiki(settings: Settings) -> dict:
         })
 
     for bucket in categories:
-        # Chapter navigation art follows the same preference: explicit chapter art
-        # wins, otherwise the first illustrated entry can provide an atmospheric
-        # background when automatic navigation artwork is enabled.
+        # Big chapter/section cards own automatic navigation atmosphere.  Explicit
+        # chapter artwork wins; otherwise the first meaningful image found in one
+        # of the chapter's entries becomes the whole card background when the
+        # project preference is enabled.  Individual headlines stay clean.
         auto_cover = next((
             p.get("presentation", {}).get("auto_image_url")
             for p in bucket.get("pages", [])
@@ -741,8 +741,8 @@ def build_wiki(settings: Settings) -> dict:
         ), "")
         bucket["presentation"]["auto_image_url"] = auto_cover
         bucket["presentation"]["suggested_toc_image_url"] = auto_cover if not bucket["presentation"].get("toc_image_url") else ""
-        bucket["presentation"]["display_toc_image_url"] = bucket["presentation"].get("toc_image_url") or ""
-        bucket["presentation"]["navigation_background_url"] = bucket["presentation"].get("toc_image_url") or (auto_cover if auto_navigation_art else "")
+        bucket["presentation"]["display_toc_image_url"] = bucket["presentation"].get("toc_image_url") or (auto_cover if auto_navigation_art else "")
+        bucket["presentation"]["navigation_background_url"] = bucket["presentation"]["display_toc_image_url"]
         bucket["presentation"]["navigation_art_is_auto"] = bool(auto_navigation_art and auto_cover and not bucket["presentation"].get("toc_image_url"))
 
     payload = {

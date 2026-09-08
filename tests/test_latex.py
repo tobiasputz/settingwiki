@@ -188,7 +188,7 @@ Beyond it lies the drowned road.
     assert "The old gate hums" in page["plain_text"]
 
 
-def test_first_page_image_is_automatic_navigation_background_by_default(tmp_path: Path):
+def test_first_page_image_becomes_large_section_card_background_by_default(tmp_path: Path):
     from app.storage import set_setting
     s = make_settings(tmp_path); init_db(s)
     (s.project_dir / "Images").mkdir()
@@ -208,18 +208,24 @@ The silver city.
     assert page["presentation"]["toc_image_url"] == ""
     assert page["presentation"]["auto_image_url"].endswith("/project-asset/Images/selen.png")
     assert page["presentation"]["display_toc_image_url"] == ""
-    assert page["presentation"]["navigation_background_url"].endswith("/project-asset/Images/selen.png")
-    assert page["presentation"]["navigation_art_is_auto"] is True
-    assert category["presentation"]["display_toc_image_url"] == ""
+    # Automatic images no longer sit behind individual entry headlines/sidebar links.
+    assert page["presentation"]["navigation_background_url"] == ""
+    assert page["presentation"]["navigation_art_is_auto"] is False
+    # Instead, the first meaningful image illustrates the whole chapter/section card.
+    assert category["presentation"]["display_toc_image_url"].endswith("/project-asset/Images/selen.png")
     assert category["presentation"]["navigation_background_url"].endswith("/project-asset/Images/selen.png")
+    assert category["presentation"]["navigation_art_is_auto"] is True
 
     set_setting(s, "auto_navigation_art", "0")
     wiki = build_wiki(s)
     page = next(x for x in wiki["pages"] if x["title"] == "Selenia")
-    assert page["presentation"]["display_toc_image_url"] == ""
+    category = next(x for x in wiki["categories"] if x["title"] == "Cities")
     assert page["presentation"]["navigation_background_url"] == ""
-    assert page["presentation"]["navigation_art_is_auto"] is False
+    assert category["presentation"]["display_toc_image_url"] == ""
+    assert category["presentation"]["navigation_background_url"] == ""
 
+    # Explicit entry artwork remains deliberate metadata, but does not bring back
+    # automatic row backgrounds in the player navigation.
     save_codex_presentation(s, "page", page["slug"], {"toc_image": "project:Images/selen.png"})
     wiki = build_wiki(s)
     page = next(x for x in wiki["pages"] if x["title"] == "Selenia")
@@ -668,7 +674,7 @@ def test_failure_excerpt_prefers_pipeline_timeout_over_clean_engine_tail():
     assert "stopped this build stage after 60s" in excerpt
 
 
-def test_automatic_navigation_background_skips_pf2e_action_symbol_images(tmp_path: Path):
+def test_automatic_section_background_skips_pf2e_action_symbol_images(tmp_path: Path):
     s = make_settings(tmp_path); init_db(s)
     (s.project_dir / "Images" / "Symbols").mkdir(parents=True)
     (s.project_dir / "Images" / "NPCs").mkdir(parents=True)
@@ -683,8 +689,12 @@ def test_automatic_navigation_background_skips_pf2e_action_symbol_images(tmp_pat
 \includegraphics[width=.6\linewidth]{Images/NPCs/hero.png}
 \end{document}
 """, encoding="utf-8")
-    page = next(x for x in build_wiki(s)["pages"] if x["title"] == "Hero")
-    assert page["presentation"]["navigation_background_url"].endswith("/project-asset/Images/NPCs/hero.png")
+    wiki = build_wiki(s)
+    page = next(x for x in wiki["pages"] if x["title"] == "Hero")
+    category = next(x for x in wiki["categories"] if x["title"] == "People")
+    assert page["presentation"]["auto_image_url"].endswith("/project-asset/Images/NPCs/hero.png")
+    assert page["presentation"]["navigation_background_url"] == ""
+    assert category["presentation"]["display_toc_image_url"].endswith("/project-asset/Images/NPCs/hero.png")
 
 
 def test_nonzero_latexmk_wrapper_is_success_when_final_pdf_is_explicitly_confirmed(tmp_path: Path, monkeypatch):
@@ -871,3 +881,15 @@ def test_compile_reclaims_legacy_duplicate_preview_before_running_tex(tmp_path: 
     assert "Reclaimed" in result.recovery
     assert legacy.exists()  # recreated only as a zero-copy alias after success
     assert legacy.is_symlink() or os.path.samefile(source, legacy)
+
+
+def test_player_navigation_templates_keep_entry_headlines_text_only():
+    """Automatic first-image art must not regress back onto individual links."""
+    root = Path(__file__).resolve().parents[1]
+    home = (root / "templates" / "home.html").read_text(encoding="utf-8")
+    page = (root / "templates" / "page.html").read_text(encoding="utf-8")
+    assert "has-toc-art" not in home
+    assert "--toc-row-art" not in home
+    assert "has-nav-art" not in page
+    assert "--nav-entry-art" not in page
+    assert "category.presentation.display_toc_image_url" in home

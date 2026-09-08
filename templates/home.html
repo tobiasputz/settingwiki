@@ -51,7 +51,7 @@
           <h3>{{ category.title }}</h3>
           <div class="chapter-links">
           {% for p in category.pages[:7] %}
-            <a href="/wiki/{{ p.slug }}" class="{% if p.presentation.visibility == 'teaser' %}teaser-link{% endif %}{% if p.presentation.navigation_background_url %} has-toc-art{% endif %}" {% if p.presentation.navigation_background_url %}style="--toc-row-art:url('{{ p.presentation.navigation_background_url }}')"{% endif %}>
+            <a href="/wiki/{{ p.slug }}" class="{% if p.presentation.visibility == 'teaser' %}teaser-link{% endif %}">
               <span class="toc-entry-title">{{ p.title }}</span>{% if p.presentation.visibility == 'teaser' %}<i title="Teaser">◇</i>{% endif %}<small>→</small>
             </a>
           {% endfor %}

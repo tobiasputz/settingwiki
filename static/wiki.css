@@ -150,17 +150,8 @@
 
 @media(max-width:700px){.pf2-rule-header,.pf2-monster-header{display:block}.pf2-rule-header>strong,.pf2-monster-header>strong{display:block;margin-top:7px}.pf2-ability-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.pf2-stat-line{display:block}.pf2-stat-line>strong{margin-right:5px}}
 
-/* v1.3.1 — deliberate navigation art only */
+/* v1.3.11 — section-card navigation art
+   Automatic first-image art belongs to the large chapter card. Entry headlines
+   and the reading sidebar intentionally remain text-only. */
 .sidebar-category-thumb,.sidebar-entry-thumb,.toc-entry-thumb{display:none!important}
-.chapter-links a.has-toc-art{position:relative;isolation:isolate;overflow:hidden;padding-left:10px;padding-right:8px}
-.chapter-links a.has-toc-art:before{content:"";position:absolute;z-index:-2;inset:0;background:linear-gradient(90deg,rgba(17,16,14,.94) 0%,rgba(17,16,14,.78) 58%,rgba(17,16,14,.42) 100%),var(--toc-row-art);background-size:cover;background-position:center;opacity:.58;transition:opacity .25s,transform .35s}
-.chapter-links a.has-toc-art:after{content:"";position:absolute;z-index:-1;inset:0;border-left:1px solid rgba(183,150,97,.42);pointer-events:none}
-.chapter-links a.has-toc-art:hover:before{opacity:.82;transform:scale(1.018)}
 
-/* v1.3.7 — image-backed navigation without thumbnail icons */
-.sidebar-group a.has-nav-art{position:relative;isolation:isolate;overflow:hidden;min-height:42px;padding-top:10px;padding-bottom:10px;color:#c9c1b4;text-shadow:0 1px 3px #000}
-.sidebar-group a.has-nav-art:before{content:"";position:absolute;z-index:-2;inset:0;background:linear-gradient(90deg,rgba(15,15,14,.92) 0%,rgba(15,15,14,.78) 56%,rgba(15,15,14,.58) 100%),var(--nav-entry-art);background-size:cover;background-position:center;opacity:.62;transform:scale(1.01);transition:opacity .24s ease,transform .35s ease,filter .24s ease;filter:saturate(.78) contrast(1.02)}
-.sidebar-group a.has-nav-art:after{content:"";position:absolute;z-index:-1;inset:0;background:linear-gradient(90deg,rgba(183,150,97,.07),transparent 45%);pointer-events:none}
-.sidebar-group a.has-nav-art:hover:before,.sidebar-group a.has-nav-art.active:before{opacity:.82;transform:scale(1.035);filter:saturate(.92) contrast(1.06)}
-.sidebar-group a.has-nav-art.active{background:none;border-left-color:var(--gold);color:#f3ece0}
-.sidebar-group a.has-nav-art.active:after{background:linear-gradient(90deg,rgba(183,150,97,.18),rgba(15,15,14,.08) 52%,transparent)}
