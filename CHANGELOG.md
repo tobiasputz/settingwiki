@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1
+
+- Removed automatic first-image thumbnails from compact Codex navigation. Sidebar navigation is now clean, text-first, and never shows arbitrary action-symbol or decorative-image crops.
+- Table-of-contents artwork is now deliberate: choose an image in Codex Studio, or explicitly click **Use first entry image**. Nothing is auto-promoted anymore.
+- Manually selected entry TOC artwork is rendered as a subtle full-row backdrop in the main Codex instead of a tiny square icon; chapter artwork and large featured cards remain intact.
+- Improved Build Doctor wording so engine/cache adjustments are not described as a successful recovery when the underlying LaTeX source still contains errors.
+- Added source excerpts directly beneath clickable compile diagnostics and targeted explanations for `geometry` option clashes, stray `\\` line breaks, invalid dimensions, and mismatched environments. These diagnostics are read-only and never rewrite the campaign source.
+
+
 ## 1.3.0
 
 - Fixed `fontspec` projects being sent to pdfLaTeX. Loreforge now detects `fontspec`, `\setmainfont`, `\setsansfont`, `\setmonofont`, `unicode-math`, and Lua-only source across `.tex`, `.sty`, and `.cls` files and automatically selects XeLaTeX/LuaLaTeX even when an older Railway environment still says `LATEX_ENGINE=pdflatex`.

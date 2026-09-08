@@ -637,8 +637,12 @@ def build_wiki(settings: Settings) -> dict:
         item["presentation"] = _presentation_for_web(settings, presentations.get(("page", page.slug), {}))
         item["html"], item["outline"] = _annotate_headings(item.get("html", ""))
         auto_image = _first_rendered_image_url(item["html"])
+        # First-entry artwork is only a suggestion. Automatically promoting it to
+        # navigation art produced odd crops (action icons, decorative separators,
+        # tiny symbols, etc.). Compact navigation therefore uses deliberate art only.
         item["presentation"]["auto_image_url"] = auto_image
-        item["presentation"]["display_toc_image_url"] = item["presentation"].get("toc_image_url") or auto_image
+        item["presentation"]["suggested_toc_image_url"] = auto_image if not item["presentation"].get("toc_image_url") else ""
+        item["presentation"]["display_toc_image_url"] = item["presentation"].get("toc_image_url") or ""
         page_dicts.append(item)
 
     # Turn ordinary mentions of unique codex entry names into links. This is
@@ -699,13 +703,16 @@ def build_wiki(settings: Settings) -> dict:
         })
 
     for bucket in categories:
+        # Chapter covers are deliberate too. Keep a first-page image only as a
+        # possible future/admin suggestion; never silently promote it to cover art.
         auto_cover = next((
-            p.get("presentation", {}).get("display_toc_image_url")
+            p.get("presentation", {}).get("auto_image_url")
             for p in bucket.get("pages", [])
-            if p.get("presentation", {}).get("display_toc_image_url")
+            if p.get("presentation", {}).get("auto_image_url")
         ), "")
         bucket["presentation"]["auto_image_url"] = auto_cover
-        bucket["presentation"]["display_toc_image_url"] = bucket["presentation"].get("toc_image_url") or auto_cover
+        bucket["presentation"]["suggested_toc_image_url"] = auto_cover if not bucket["presentation"].get("toc_image_url") else ""
+        bucket["presentation"]["display_toc_image_url"] = bucket["presentation"].get("toc_image_url") or ""
 
     payload = {
         "title": get_setting(settings, "site_title", "") or analysis["title"],
@@ -1637,8 +1644,16 @@ def _latex_failure_suggestions(log: str) -> list[str]:
     if missing:
         names = ", ".join(dict.fromkeys(missing[:4]))
         suggestions.append(f"Missing LaTeX file/package: {names}. If it is a project .sty/.cls, upload it with the source; otherwise add the corresponding TeX Live package to the Dockerfile.")
+    if "Option clash for package geometry" in log:
+        suggestions.append("The geometry package is being loaded more than once with options. Keep one \\usepackage[...]{geometry}; after geometry is loaded, change later option changes to \\geometry{...}. This is a real source-level conflict, not a XeLaTeX problem.")
+    if "There's no line here to end" in log:
+        suggestions.append("One or more files use \\ where TeX is not inside a line/paragraph (often immediately after a heading, blank line, environment boundary, or custom block). Open the first reported line and remove that forced line break or replace it with paragraph spacing.")
+    if "Missing number, treated as zero" in log:
+        suggestions.append("TeX expected a numeric dimension but received something else. Check widths/heights, spacing lengths, and custom image calls around the first reported line (for example use 0.6\\textwidth rather than a bare 0.6 where a length is required).")
+    if re.search(r"\\begin\{([^}]+)\}.*ended by \\end\{([^}]+)\}", log, re.IGNORECASE | re.DOTALL):
+        suggestions.append("A LaTeX environment is unbalanced: a \\begin{...} is being closed by a different \\end{...}. Fix the first mismatch; many later errors can be cascading consequences.")
     if "Undefined control sequence" in log:
-        suggestions.append("An undefined LaTeX command was encountered. Open the first file/line error below; this is often a missing package, misspelled macro, or custom command file that was not imported.")
+        suggestions.append("An undefined LaTeX command was encountered. Open the first file/line error below; this is often a missing package, misspelled macro, or a custom command definition file that was not imported/included.")
     if "Emergency stop" in log or "Fatal error occurred" in log:
         suggestions.append("TeX stopped fatally. The first error above the emergency-stop line is normally the real cause; later messages are often cascading errors.")
     if "shell escape" in log.lower() and ("disabled" in log.lower() or "restricted" in log.lower()):
@@ -1656,6 +1671,49 @@ def _latex_failure_suggestions(log: str) -> list[str]:
     if not suggestions:
         suggestions.append("No specific TeX diagnosis was detected. Use the first file/line entry in Build Log; Loreforge has appended the underlying engine .log when available.")
     return suggestions[:5]
+
+
+def _attach_source_context(errors: list[dict], project_root: Path, radius: int = 1) -> list[dict]:
+    """Attach a small source excerpt to clickable diagnostics.
+
+    TeX logs are often cryptic; seeing the exact line next to the diagnostic makes
+    imported projects dramatically faster to repair. This is read-only and never
+    changes the campaign source.
+    """
+    cache: dict[str, list[str]] = {}
+    by_name: dict[str, list[Path]] = {}
+    try:
+        for path in project_root.rglob("*"):
+            if path.is_file() and path.suffix.lower() in {".tex", ".sty", ".cls", ".bib"}:
+                by_name.setdefault(path.name, []).append(path)
+    except OSError:
+        return errors
+    for error in errors:
+        name = error.get("file")
+        line_no = error.get("line")
+        if not name or not line_no or name not in by_name:
+            continue
+        path = by_name[name][0]
+        key = str(path)
+        if key not in cache:
+            try:
+                cache[key] = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+        lines = cache[key]
+        idx = max(0, int(line_no) - 1)
+        start = max(0, idx - radius)
+        end = min(len(lines), idx + radius + 1)
+        excerpt = []
+        for i in range(start, end):
+            marker = "›" if i == idx else " "
+            excerpt.append(f"{marker} {i + 1}: {lines[i]}")
+        error["source"] = "\n".join(excerpt)
+        try:
+            error["path"] = path.relative_to(project_root).as_posix()
+        except ValueError:
+            pass
+    return errors
 
 
 def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool = False) -> BuildResult:
@@ -1774,7 +1832,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
             shutil.copy2(pdf, pdf_out)
         except OSError:
             build_ok = False
-    errors = parse_latex_errors(log, main.parent)
+    errors = _attach_source_context(parse_latex_errors(log, main.parent), settings.project_dir)
     suggestions = [] if build_ok else _latex_failure_suggestions(log)
     settings.build_dir.mkdir(parents=True, exist_ok=True)
     (settings.build_dir / "latex.log").write_text(log[-260000:], encoding="utf-8", errors="replace")

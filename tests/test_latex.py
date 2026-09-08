@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.config import Settings
-from app.storage import init_db
+from app.storage import init_db, save_codex_presentation
 from app.latex import analyze_project, build_wiki, compile_pdf
 
 
@@ -188,11 +188,11 @@ Beyond it lies the drowned road.
     assert "The old gate hums" in page["plain_text"]
 
 
-def test_first_page_image_becomes_automatic_toc_art(tmp_path: Path):
+def test_first_page_image_is_suggestion_not_automatic_nav_art(tmp_path: Path):
     s = make_settings(tmp_path); init_db(s)
     (s.project_dir / "Images").mkdir()
     (s.project_dir / "Images" / "selen.png").write_bytes(b"image")
-    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+    (s.project_dir / "main.tex").write_text(r"""\documentclass{book}
 \usepackage{graphicx}
 \begin{document}
 \chapter{Cities}
@@ -200,14 +200,20 @@ def test_first_page_image_becomes_automatic_toc_art(tmp_path: Path):
 \includegraphics[width=.8\linewidth]{Images/selen.png}
 The silver city.
 \end{document}
-''', encoding="utf-8")
+""", encoding="utf-8")
     wiki = build_wiki(s)
     page = next(x for x in wiki["pages"] if x["title"] == "Selenia")
     category = next(x for x in wiki["categories"] if x["title"] == "Cities")
     assert page["presentation"]["toc_image_url"] == ""
     assert page["presentation"]["auto_image_url"].endswith("/project-asset/Images/selen.png")
+    assert page["presentation"]["suggested_toc_image_url"].endswith("/project-asset/Images/selen.png")
+    assert page["presentation"]["display_toc_image_url"] == ""
+    assert category["presentation"]["display_toc_image_url"] == ""
+
+    save_codex_presentation(s, "page", page["slug"], {"toc_image": "project:Images/selen.png"})
+    wiki = build_wiki(s)
+    page = next(x for x in wiki["pages"] if x["title"] == "Selenia")
     assert page["presentation"]["display_toc_image_url"].endswith("/project-asset/Images/selen.png")
-    assert category["presentation"]["display_toc_image_url"].endswith("/project-asset/Images/selen.png")
 
 
 def test_unique_codex_names_are_auto_linked_and_create_backlinks(tmp_path: Path):

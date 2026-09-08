@@ -2,7 +2,7 @@
 {% block title %}{{ page.title }} · {{ wiki.title }}{% endblock %}
 {% block body %}
 {% set pres = page.presentation or {} %}
-<div class="reading-shell layout-{{ pres.article_layout or 'standard' }}" data-page-slug="{{ page.slug }}" data-page-title="{{ page.title }}" data-page-chapter="{{ page.chapter or 'Setting' }}" data-page-image="{{ pres.display_toc_image_url or pres.hero_image_url or pres.auto_image_url or '' }}">
+<div class="reading-shell layout-{{ pres.article_layout or 'standard' }}" data-page-slug="{{ page.slug }}" data-page-title="{{ page.title }}" data-page-chapter="{{ page.chapter or 'Setting' }}" data-page-image="{{ pres.display_toc_image_url or pres.hero_image_url or '' }}">
   {% if pres.background_image_url %}
   <div class="lore-page-background" aria-hidden="true" style="--page-bg:url('{{ pres.background_image_url }}');--page-bg-opacity:{{ pres.background_opacity or 0.16 }};--page-bg-x:{{ pres.background_x or 50 }}%;--page-bg-y:{{ pres.background_y or 50 }}%"></div>
   {% endif %}
@@ -12,13 +12,11 @@
       {% for category in wiki.categories %}
       <div class="sidebar-group {% if category.title == page.chapter %}active-group{% endif %}" data-sidebar-group="{{ category.slug }}">
         <button type="button" class="sidebar-label" data-sidebar-toggle aria-expanded="{{ 'true' if category.title == page.chapter else 'false' }}">
-          {% if category.presentation and category.presentation.display_toc_image_url %}<span class="sidebar-category-thumb" style="background-image:url('{{ category.presentation.display_toc_image_url }}')"></span>{% endif %}
           <span>{{ category.title }}</span><i>⌄</i>
         </button>
         <div class="sidebar-links">
         {% for p in category.pages %}
           <a href="/wiki/{{ p.slug }}" class="{% if p.slug == page.slug %}active{% endif %}" data-codex-entry data-entry-slug="{{ p.slug }}">
-            {% if p.presentation and p.presentation.display_toc_image_url %}<span class="sidebar-entry-thumb" style="background-image:url('{{ p.presentation.display_toc_image_url }}')"></span>{% endif %}
             <span>{{ p.title }}</span>{% if p.presentation and p.presentation.visibility == 'teaser' %}<small title="Teaser">◇</small>{% endif %}
           </a>
         {% endfor %}

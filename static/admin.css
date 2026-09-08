@@ -26,3 +26,9 @@
 
 /* Pathfinder 2e snippet palette */
 .pf2-snippet-modal{width:min(820px,88vw)}.pf2-snippet-modal>p{color:#8f897e;line-height:1.55}.pf2-snippet-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:20px 0}.pf2-snippet-card{display:flex;gap:14px;align-items:flex-start;text-align:left;border:1px solid #38342d;background:#151411;color:#d8d1c5;padding:15px 16px;border-radius:4px;cursor:pointer}.pf2-snippet-card:hover{border-color:#725e40;background:#1b1915}.pf2-snippet-card>span{width:34px;height:34px;display:grid;place-items:center;border:1px solid #514431;color:#c5a46f;border-radius:50%;flex:0 0 auto}.pf2-snippet-card strong{display:block;font:500 17px/1.2 Georgia,serif;color:#eee6da}.pf2-snippet-card small{display:block;color:#858076;font-size:11px;line-height:1.45;margin-top:4px}.pf2-inline-tools{border-top:1px solid #302d27;padding-top:15px}.pf2-inline-tools>strong{display:block;font-size:9px;letter-spacing:.14em;color:#b69a6e;text-transform:uppercase;margin-bottom:9px}.pf2-inline-tools>div{display:flex;gap:7px;flex-wrap:wrap}.modal-note{font-size:11px!important;color:#706b63!important;border-left:2px solid #6d5738;padding-left:12px}@media(max-width:700px){.pf2-snippet-grid{grid-template-columns:1fr}}
+
+/* Build diagnostics with source context */
+.error-item{display:block;width:100%;text-align:left}
+.error-item strong{display:block;font-weight:500}
+.error-item code{display:block;margin-top:7px;padding:7px 8px;white-space:pre-wrap;overflow-wrap:anywhere;background:#0e1011;border:1px solid #2c3034;color:#9fa5aa;font:9px/1.5 var(--mono,monospace)}
+#useFirstEntryImageBtn:disabled{opacity:.38;cursor:not-allowed}
