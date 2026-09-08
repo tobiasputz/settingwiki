@@ -18,6 +18,13 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Understands campaign-book layouts.** `longtable`, `tabular`, `tabularx` and `tabulary` are converted to responsive HTML tables without leaking TeX column declarations such as `>{\raggedright}p{3.5cm}` into player text. `multicols` profile blocks become compact metadata grids.
 - **Smart imported images.** `\includegraphics` assets are resolved even when extensions are omitted or assets live below graphics folders. Figure/wrapfigure layouts, PDF graphics, captions and common TikZ page-overlay portraits are translated to web-friendly layouts. Players can click rendered images for a full-resolution lightbox, and portrait/landscape/panorama treatment is inferred from the actual image dimensions.
 - **Compiles the original PDF.** The Docker image includes `latexmk`, pdfLaTeX, XeLaTeX, LuaLaTeX, common LaTeX-extra packages, fonts and graphics packages. Project-local `.cls` and `.sty` files work normally.
+- **Codex Studio / art direction.** Every chapter and entry can have its own table-of-contents artwork. Entries can additionally have a cinematic hero, full-page background, focal point, background strength, article width, feature status, and public/teaser/hidden discovery state. If you do not choose TOC art manually, Loreforge can automatically use the first image already present in that LaTeX entry.
+- **Free-form web artwork without giving up LaTeX.** The **Artwork** tool inserts an ordinary `\includegraphics` figure for the PDF plus a harmless `% loreforge-image:` comment for the wiki. Layouts include centered, floating left/right, wide, breakout, full-bleed, portrait, banner, decorative edge art, and watermark, with independent width, opacity, crop focus, blend mode, frame, caption, and parallax controls. Existing automatic image handling still works when you do not add a directive.
+- **Atmospheric scene panels.** Select any normal LaTeX prose and press **Scene** to place that passage over an image in the player wiki. The source remains valid ordinary LaTeX because Loreforge stores the web presentation as comments around the selected text. Scene tones include dark, light, sepia, arcane, mist, and blood, with focus, image strength, height, and optional parallax.
+- **Living lore connections.** Unique codex names mentioned naturally in prose can be cross-linked automatically (optional in Project settings), explicit `\wiki{}` links remain supported, and pages show related lore/backlinks. The **Lore Network** player view turns these relationships into a pan/zoom interactive graph with artwork-backed nodes.
+- **Long-entry navigation.** Section/subsection headings receive stable deep links and long articles get an **On this page** navigator with scroll tracking. Player bookmarks/recently viewed entries form a private browser-side reading trail.
+- **Stable codex sidebar.** Opening another entry no longer throws the player back to the top of the navigation. Loreforge remembers expanded chapter groups, scroll position, and the clicked row position across full page navigation.
+- **Build Doctor.** `latexmk` stale-failure states are detected and repaired automatically, the underlying TeX engine is invoked for a diagnostic pass when `latexmk` only returns a wrapper summary, and the editor surfaces likely fixes rather than only showing `pdflatex: gave an error`.
 - **Interactive atlas.** Upload a map image, enter explicit **＋ Location** placement mode, follow the placement crosshair, click once to place a marker, drag markers into position, attach descriptions and link them to codex pages. A searchable marker directory makes existing locations easy to find/focus. Player maps also expose a searchable location panel and category filters. Markers can be player-visible or GM-only and use distinct symbols for cities, ports, ruins, danger, secrets, temples, portals, quests, and more.
 - **Edge-locked map navigation.** Player maps use a cover-style minimum zoom by default: when you pan, the map cannot be pushed past the viewport and reveal empty space beyond its edges. Wheel, buttons, and touch pinch all zoom around the pointer/fingers.
 - **Fantasy atmosphere studio.** Per-map switches include moving clouds, cloud shadows, rolling fog, valley mist, god rays, rain, lightning, snow, blizzards, ashfall, sand/dust, heat haze, ocean shimmer, moving wave crests, embers, fireflies, pollen, leaves, petals, birds, bats, rare dragon shadows, arcane motes, spectral wisps, cursed miasma, ley lines, rune pulses, glowing spores, aurora, stars, shooting stars, vignette, fogged edges, parchment warmth, moonlight, blood-moon tint, cartographer grid, and compass rose. Presets now include Calm Fantasy, Stormbound, Frozen North, Haunted Realm, Arcane Night, Volcanic Wastes, Ancient Parchment, Coastal Breeze, Autumn Road, Feywild Glade, Scorched Desert, Underdark, Blood Moon, Ancient Ruins, Blighted Realm, and High Fantasy.
@@ -154,6 +161,63 @@ The PDF fallback macro can be defined in your source however you like, for examp
 
 In the player wiki, this becomes a link to the matching slug.
 
+## Codex Studio and art direction
+
+Open **Admin → Codex Studio** and select either a chapter or a specific entry.
+
+For a **chapter**, assign a table-of-contents cover. For an **entry**, you can independently assign:
+
+- table-of-contents thumbnail;
+- hero/banner artwork;
+- full-page background artwork;
+- cinematic banner, split, portrait-panel, or minimal hero style;
+- standard, wide, or cinematic article width;
+- background opacity and X/Y focal point;
+- featured-home-page status;
+- public, teaser, or hidden discovery state.
+
+When **Table-of-contents image** is left empty, Loreforge uses the first usable image rendered inside that entry as an automatic fallback. The inspector labels that preview `AUTO · first entry image`, so you can tell automatic and manually curated artwork apart. A manually chosen image always wins.
+
+The editor toolbar has two complementary tools:
+
+### Artwork
+
+**Artwork** inserts a standard LaTeX `figure` plus a web-only comment. The PDF therefore remains portable to Overleaf, while the wiki can use richer responsive placement:
+
+```latex
+% loreforge-image: layout=edge-right width=34 opacity=0.80 blend=soft-light frame=none
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.34\linewidth]{Images/sigil.png}
+\end{figure}
+```
+
+You can also use `watermark`, `fullbleed`, `breakout`, `banner`, `portrait`, `left`, `right`, `edge-left`, and the ordinary automatic layout. If you never use these comments, all pre-v1.2 automatic figure/portrait behavior remains active.
+
+### Scene
+
+Select a paragraph, quotation, subsection introduction, or other ordinary LaTeX and press **Scene**. Loreforge wraps it like this:
+
+```latex
+% loreforge-panel-start: image="Images/Places/stormgate.jpg" opacity=0.38 x=65 y=42 tone=arcane min_height=360 parallax=true
+The gate wakes only when both moons stand above the eastern sea.
+% loreforge-panel-end
+```
+
+TeX sees two comments plus the unchanged prose. The player wiki renders the same passage as an atmospheric image-backed scene. This is useful for chapter openings, dream sequences, major reveals, cities, dungeons, gods, and historical interludes.
+
+## Lore relationships
+
+Loreforge can automatically link the first natural mention of a **unique** codex entry name in another article. It deliberately ignores ambiguous duplicate titles and generic headings. Disable this globally with **Admin → Project → Automatically cross-link codex names in prose** if you prefer only explicit links.
+
+Automatic and explicit links feed three systems:
+
+1. **Related lore** suggestions on entries;
+2. **Backlinks** showing which other entries refer to the current subject; and
+3. **Lore Network** in the player navigation, an interactive visual graph of the setting.
+
+This means the wiki becomes progressively more interconnected as the LaTeX source grows, without requiring a second manual relationship database.
+
 ## Live editing behavior
 
 - Browser changes autosave after roughly 0.7 seconds of inactivity.
@@ -221,6 +285,16 @@ pytest -q
 
 Doing that would create a flood of commits and, with Railway GitHub auto-deploys enabled, could repeatedly redeploy the whole application while you type. Loreforge therefore treats the persistent project volume as the authoring store and provides project ZIP export for backups/Overleaf interchange. GitHub remains the clean application/deployment repository.
 
+## Troubleshooting: `latexmk` says “Nothing to do” but also “pdflatex: gave an error”
+
+That exact combination is usually a stale failed-build state in `latexmk`: its dependency database remembers a previous engine failure, then a later run decides there is nothing new to compile and only repeats the old failure summary.
+
+Loreforge v1.2 detects this pattern automatically. It removes only generated LaTeX dependency/auxiliary state (`.fdb_latexmk`, `.fls`, `.aux`, `.toc`, etc.), retries with a forced dependency rebuild, and—if the wrapper still has no useful source diagnostic—runs the selected TeX engine directly once to recover the actual error message. The **Build log** shows a **Build Doctor** card describing any recovery step and likely fixes.
+
+You can still press **↻ Clean** manually at any time. It does not delete your `.tex`, images, `.sty`, `.cls`, bibliography, maps, or Loreforge metadata; it only clears generated compilation state before rebuilding.
+
+If the underlying problem is real rather than stale state—for example a missing package, missing project `.sty`, undefined command, unmatched brace/environment, shell-escape requirement, or unavailable font—Build Doctor will keep the compile failed and show that cause instead of disguising it as the generic `latexmk` summary.
+
 ## Troubleshooting: `No space left on device` while importing
 
 Loreforge v1.0.1+ stages uploaded ZIP archives, extraction, and transactional rollback data in the service's ephemeral temporary filesystem rather than the persistent `/data` volume. This avoids requiring several copies of the same Overleaf project on the Railway volume during import.
@@ -232,4 +306,4 @@ The Project screen also reports total, used, and free persistent storage. If the
 
 ## v1.1 formatting and atlas fixes
 
-This build adds regression coverage for longtable column-spec leakage, `\pon` entity grouping/profile rendering, TikZ NPC portrait extraction, persistent-volume migration for map atmosphere settings, and effect-setting validation. The test suite currently contains 12 passing tests.
+This build adds regression coverage for longtable column-spec leakage, `\pon` entity grouping/profile rendering, TikZ NPC portrait extraction, persistent-volume migration for map atmosphere settings, and effect-setting validation. The test suite currently contains 20 passing regression tests, including the v1.2 Build Doctor, scene-art, automatic TOC-art, and lore-linking cases.

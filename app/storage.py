@@ -52,6 +52,22 @@ CREATE TABLE IF NOT EXISTS edit_log (
     sha256 TEXT NOT NULL,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS codex_presentation (
+    target_type TEXT NOT NULL,
+    target_key TEXT NOT NULL,
+    toc_image TEXT NOT NULL DEFAULT '',
+    hero_image TEXT NOT NULL DEFAULT '',
+    background_image TEXT NOT NULL DEFAULT '',
+    background_opacity REAL NOT NULL DEFAULT 0.16,
+    background_x REAL NOT NULL DEFAULT 50,
+    background_y REAL NOT NULL DEFAULT 50,
+    hero_style TEXT NOT NULL DEFAULT 'banner',
+    article_layout TEXT NOT NULL DEFAULT 'standard',
+    visibility TEXT NOT NULL DEFAULT 'public',
+    featured INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY(target_type, target_key)
+);
 """
 
 
@@ -85,6 +101,94 @@ def set_setting(settings: Settings, key: str, value: str) -> None:
             "INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value),
         )
+
+
+
+
+def _clamp_number(value, minimum: float, maximum: float, default: float) -> float:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def _normalize_codex_presentation(payload: dict | None = None) -> dict:
+    payload = payload or {}
+    visibility = str(payload.get("visibility") or "public").lower()
+    if visibility not in {"public", "teaser", "hidden"}:
+        visibility = "public"
+    hero_style = str(payload.get("hero_style") or "banner").lower()
+    if hero_style not in {"banner", "split", "portrait", "minimal"}:
+        hero_style = "banner"
+    article_layout = str(payload.get("article_layout") or "standard").lower()
+    if article_layout not in {"standard", "wide", "cinematic"}:
+        article_layout = "standard"
+    return {
+        "toc_image": str(payload.get("toc_image") or "").strip(),
+        "hero_image": str(payload.get("hero_image") or "").strip(),
+        "background_image": str(payload.get("background_image") or "").strip(),
+        "background_opacity": _clamp_number(payload.get("background_opacity"), 0, 0.8, 0.16),
+        "background_x": _clamp_number(payload.get("background_x"), 0, 100, 50),
+        "background_y": _clamp_number(payload.get("background_y"), 0, 100, 50),
+        "hero_style": hero_style,
+        "article_layout": article_layout,
+        "visibility": visibility,
+        "featured": bool(payload.get("featured", False)),
+    }
+
+
+def get_codex_presentation(settings: Settings, target_type: str, target_key: str) -> dict:
+    target_type = str(target_type or "").lower()
+    target_key = str(target_key or "")
+    with connect(settings) as conn:
+        row = conn.execute(
+            "SELECT * FROM codex_presentation WHERE target_type=? AND target_key=?",
+            (target_type, target_key),
+        ).fetchone()
+    if not row:
+        return _normalize_codex_presentation()
+    return _normalize_codex_presentation(dict(row))
+
+
+def list_codex_presentations(settings: Settings) -> dict[tuple[str, str], dict]:
+    with connect(settings) as conn:
+        rows = conn.execute("SELECT * FROM codex_presentation").fetchall()
+    return {(row["target_type"], row["target_key"]): _normalize_codex_presentation(dict(row)) for row in rows}
+
+
+def save_codex_presentation(settings: Settings, target_type: str, target_key: str, payload: dict) -> dict:
+    target_type = str(target_type or "").lower().strip()
+    target_key = str(target_key or "").strip()
+    if target_type not in {"page", "category"}:
+        raise ValueError("Codex presentation target must be a page or category.")
+    if not target_key or len(target_key) > 240:
+        raise ValueError("Invalid codex presentation target.")
+    current = get_codex_presentation(settings, target_type, target_key)
+    current.update({k: v for k, v in (payload or {}).items() if k in current})
+    data = _normalize_codex_presentation(current)
+    now = time.time()
+    with connect(settings) as conn:
+        conn.execute(
+            """
+            INSERT INTO codex_presentation(
+                target_type,target_key,toc_image,hero_image,background_image,background_opacity,
+                background_x,background_y,hero_style,article_layout,visibility,featured,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(target_type,target_key) DO UPDATE SET
+                toc_image=excluded.toc_image, hero_image=excluded.hero_image,
+                background_image=excluded.background_image, background_opacity=excluded.background_opacity,
+                background_x=excluded.background_x, background_y=excluded.background_y,
+                hero_style=excluded.hero_style, article_layout=excluded.article_layout,
+                visibility=excluded.visibility, featured=excluded.featured, updated_at=excluded.updated_at
+            """,
+            (
+                target_type, target_key, data["toc_image"], data["hero_image"], data["background_image"],
+                data["background_opacity"], data["background_x"], data["background_y"], data["hero_style"],
+                data["article_layout"], data["visibility"], int(data["featured"]), now,
+            ),
+        )
+    return data
 
 
 def safe_project_path(settings: Settings, relative: str) -> Path:

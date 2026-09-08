@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>{% block title %}{{ wiki.title if wiki else 'Loreforge' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=3">
+  <link rel="stylesheet" href="/static/wiki.css?v=5">
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -17,7 +17,8 @@
     </a>
     <nav class="site-nav">
       <a href="/">Codex</a>
-      {% if maps %}<a href="#atlas">Atlas</a>{% endif %}
+      <a href="/network">Lore Network</a>
+      {% if maps %}<a href="/#atlas">Atlas</a>{% endif %}
       <button class="search-open" data-open-search aria-label="Search">⌕ <span>Search</span><kbd>/</kbd></button>
     </nav>
   </header>
@@ -30,7 +31,7 @@
       <div id="searchResults" class="search-results"><div class="search-hint">Type a place, person, faction, item, or phrase.</div></div>
     </div>
   </div>
-  <script src="/static/wiki.js?v=3"></script>
+  <script src="/static/wiki.js?v=5"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

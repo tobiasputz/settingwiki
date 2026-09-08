@@ -53,3 +53,21 @@ def test_cleanup_removes_only_legacy_import_artifacts(tmp_path: Path):
     assert (s.uploads_dir/'keep.bin').exists()
     assert not (s.data_dir/'project-backup-1').exists()
     assert not (s.data_dir/'upload-1.zip').exists()
+
+
+def test_codex_presentation_roundtrip_and_validation(tmp_path: Path):
+    from app.storage import get_codex_presentation, save_codex_presentation
+    s=settings(tmp_path);init_db(s)
+    saved=save_codex_presentation(s,'page','black-tower',{
+        'toc_image':'project:Images/tower.png','visibility':'nonsense','hero_style':'split',
+        'article_layout':'cinematic','background_opacity':9,'background_x':-5,'background_y':120,'featured':True,
+    })
+    assert saved['visibility']=='public'
+    assert saved['background_opacity']==0.8
+    assert saved['background_x']==0
+    assert saved['background_y']==100
+    loaded=get_codex_presentation(s,'page','black-tower')
+    assert loaded['toc_image']=='project:Images/tower.png'
+    assert loaded['hero_style']=='split'
+    assert loaded['article_layout']=='cinematic'
+    assert loaded['featured'] is True

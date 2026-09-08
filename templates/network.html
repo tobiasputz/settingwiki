@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Lore Network · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="network-page">
+  <section class="network-toolbar">
+    <div><span class="eyebrow">LORE NETWORK</span><h1>The threads of {{ wiki.title }}</h1><p>Connections are discovered from explicit and automatic codex links. Hover a node to trace its relationships; click to open the entry.</p></div>
+    <div class="network-tools"><label><span>⌕</span><input id="networkSearch" placeholder="Find lore"></label><button id="networkReset" type="button">Reset view</button></div>
+  </section>
+  <section class="network-stage" id="networkStage">
+    <svg id="loreNetwork" role="img" aria-label="Interactive network of connected codex entries"><g id="networkViewport"><g id="networkEdges"></g><g id="networkNodes"></g></g></svg>
+    <div class="network-empty hidden" id="networkEmpty"><strong>No links yet</strong><p>As entry names are mentioned or you use <code>\wiki{}</code>, relationships will appear here automatically.</p></div>
+    <div class="network-hint">Drag to pan · wheel to zoom · hover to trace · click to open</div>
+  </section>
+  <aside class="network-detail" id="networkDetail"><span class="eyebrow">CONNECTION</span><h2>Explore the web</h2><p>Hover or focus a lore node to see its chapter and connections.</p></aside>
+</main>
+<script id="networkData" type="application/json">{{ network|tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="/static/network.js?v=2"></script>{% endblock %}

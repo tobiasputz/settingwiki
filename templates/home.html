@@ -21,17 +21,40 @@
     <div class="scroll-cue"><span></span>SCROLL TO EXPLORE</div>
   </section>
 
+  {% if featured %}
+  <section class="home-section featured-section reveal">
+    <div class="section-heading"><div><span class="eyebrow">FEATURED LORE</span><h2>Threads worth following</h2></div><p>The GM can pin important people, places, revelations, and current story threads here.</p></div>
+    <div class="featured-lore-grid">
+      {% for p in featured %}
+      <a class="featured-lore-card" href="/wiki/{{ p.slug }}">
+        {% if p.presentation.display_toc_image_url or p.presentation.hero_image_url or p.presentation.auto_image_url %}<div class="featured-lore-image" style="background-image:url('{{ p.presentation.display_toc_image_url or p.presentation.hero_image_url or p.presentation.auto_image_url }}')"></div>{% endif %}
+        <div class="featured-lore-copy"><span class="eyebrow">{{ p.chapter or 'SETTING' }}</span><h3>{{ p.title }}</h3><p>{{ p.excerpt }}</p><small>Open entry →</small></div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="home-section personal-trail-section hidden" id="personalTrailSection">
+    <div class="section-heading"><div><span class="eyebrow">YOUR JOURNAL</span><h2>Continue where you left off</h2></div><p>Bookmarks and recently viewed lore stay privately in this browser.</p></div>
+    <div id="personalTrail" class="personal-trail-grid"></div>
+  </section>
+
   <section class="home-section reveal" id="codex">
     <div class="section-heading"><div><span class="eyebrow">THE CODEX</span><h2>World knowledge</h2></div><p>Everything here is generated from the campaign's LaTeX source.</p></div>
     <div class="chapter-grid">
       {% for category in wiki.categories %}
-      <article class="chapter-card">
+      <article class="chapter-card {% if category.presentation.display_toc_image_url %}chapter-card-art{% endif %}" {% if category.presentation.display_toc_image_url %}style="--chapter-art:url('{{ category.presentation.display_toc_image_url }}')"{% endif %}>
+        {% if category.presentation.display_toc_image_url %}<div class="chapter-art" aria-hidden="true"></div>{% endif %}
         <div class="chapter-number">{{ '%02d'|format(loop.index) }}</div>
         <div class="chapter-card-content">
           <h3>{{ category.title }}</h3>
           <div class="chapter-links">
           {% for p in category.pages[:7] %}
-            <a href="/wiki/{{ p.slug }}"><span>{{ p.title }}</span><small>→</small></a>
+            <a href="/wiki/{{ p.slug }}" class="{% if p.presentation.visibility == 'teaser' %}teaser-link{% endif %}">
+              {% if p.presentation.display_toc_image_url %}<span class="toc-entry-thumb" style="background-image:url('{{ p.presentation.display_toc_image_url }}')"></span>{% endif %}
+              <span class="toc-entry-title">{{ p.title }}</span>{% if p.presentation.visibility == 'teaser' %}<i title="Teaser">◇</i>{% endif %}<small>→</small>
+            </a>
           {% endfor %}
           {% if category.pages|length > 7 %}<span class="more-count">+ {{ category.pages|length - 7 }} more entries</span>{% endif %}
           </div>

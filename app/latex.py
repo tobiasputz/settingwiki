@@ -4,16 +4,18 @@ import html
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import quote
+from html.parser import HTMLParser
 
 from .config import Settings
-from .storage import get_setting, safe_project_path, set_setting
+from .storage import get_setting, list_codex_presentations, safe_project_path, set_setting
 
 
 COMMENT_RE = re.compile(r"(?<!\\)%.*$")
@@ -59,6 +61,8 @@ class BuildResult:
     command: list[str]
     log: str
     errors: list[dict]
+    recovery: str = ""
+    suggestions: list[str] = field(default_factory=list)
 
 
 def strip_comments(line: str) -> str:
@@ -227,6 +231,131 @@ def slugify(value: str) -> str:
     return value or "page"
 
 
+def presentation_asset_url(settings: Settings, ref: str | None) -> str:
+    ref = str(ref or "").strip()
+    if not ref:
+        return ""
+    if ref.startswith("project:"):
+        return asset_url(settings, ref.split(":", 1)[1]) or ""
+    if ref.startswith("upload:"):
+        rel = ref.split(":", 1)[1].replace("\\", "/").lstrip("/")
+        return "/uploads/" + quote(rel, safe="/")
+    if ref.startswith("/project-asset/") or ref.startswith("/uploads/"):
+        return ref
+    # Backwards-compatible: treat a bare path as a project asset first.
+    return asset_url(settings, ref) or ""
+
+
+def _presentation_for_web(settings: Settings, raw: dict | None) -> dict:
+    raw = dict(raw or {})
+    raw["toc_image_url"] = presentation_asset_url(settings, raw.get("toc_image"))
+    raw["hero_image_url"] = presentation_asset_url(settings, raw.get("hero_image"))
+    raw["background_image_url"] = presentation_asset_url(settings, raw.get("background_image"))
+    return raw
+
+
+
+
+_GENERIC_LINK_TITLES = {
+    "profile", "biography", "history", "introduction", "overview", "setting",
+    "people", "places", "locations", "items", "factions", "religion", "deities",
+    "geography", "culture", "politics", "timeline", "appendix", "notes",
+}
+
+
+def _annotate_headings(html_body: str) -> tuple[str, list[dict]]:
+    """Give article headings stable anchors and return a compact page outline."""
+    used: dict[str, int] = {}
+    outline: list[dict] = []
+
+    def sub(m: re.Match) -> str:
+        level = int(m.group(1))
+        inner = m.group(2)
+        title = html.unescape(re.sub(r"<[^>]+>", "", inner)).strip()
+        base = slugify(title) or "section"
+        used[base] = used.get(base, 0) + 1
+        anchor = base if used[base] == 1 else f"{base}-{used[base]}"
+        outline.append({"level": level, "id": anchor, "title": title})
+        return f'<h{level} id="{html.escape(anchor, quote=True)}">{inner}<a class="heading-anchor" href="#{html.escape(anchor, quote=True)}" aria-label="Link to {html.escape(title, quote=True)}">#</a></h{level}>'
+
+    rendered = re.sub(r"<h([2-4])>(.*?)</h\1>", sub, html_body, flags=re.DOTALL)
+    return rendered, outline
+
+
+def _first_rendered_image_url(html_body: str) -> str:
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html_body, flags=re.IGNORECASE)
+    return html.unescape(match.group(1)) if match else ""
+
+
+class _CodexAutoLinker(HTMLParser):
+    """Link the first natural mention of other codex entries in prose.
+
+    Existing links, headings, code and image captions are intentionally skipped.
+    This keeps the feature useful rather than turning a long article into a wall of links.
+    """
+    SKIP_TAGS = {"a", "code", "pre", "script", "style", "h1", "h2", "h3", "h4", "button", "figcaption"}
+
+    def __init__(self, targets: dict[str, tuple[str, str]], self_slug: str):
+        super().__init__(convert_charrefs=False)
+        self.out: list[str] = []
+        self.targets = {k: v for k, v in targets.items() if v[0] != self_slug}
+        self.used: set[str] = set()
+        self.skip_depth = 0
+        terms = sorted((title for title, (slug, _) in self.targets.items() if slug != self_slug), key=len, reverse=True)
+        self.pattern = re.compile(r"(?<![\w])(" + "|".join(re.escape(x) for x in terms) + r")(?![\w])", re.IGNORECASE) if terms else None
+
+    def handle_starttag(self, tag, attrs):
+        self.out.append(self.get_starttag_text())
+        if tag.lower() in self.SKIP_TAGS:
+            self.skip_depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        self.out.append(self.get_starttag_text())
+
+    def handle_endtag(self, tag):
+        if tag.lower() in self.SKIP_TAGS and self.skip_depth:
+            self.skip_depth -= 1
+        self.out.append(f"</{tag}>")
+
+    def handle_entityref(self, name):
+        self.out.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self.out.append(f"&#{name};")
+
+    def handle_comment(self, data):
+        self.out.append(f"<!--{data}-->")
+
+    def handle_data(self, data):
+        if self.skip_depth or not self.pattern:
+            self.out.append(html.escape(data, quote=False))
+            return
+        cursor = 0
+        chunks: list[str] = []
+        for match in self.pattern.finditer(data):
+            key = match.group(1).casefold()
+            target = self.targets.get(key)
+            if not target or key in self.used:
+                continue
+            chunks.append(html.escape(data[cursor:match.start()], quote=False))
+            slug, canonical = target
+            chunks.append(f'<a class="wiki-link auto-wiki-link" href="/wiki/{html.escape(slug, quote=True)}" title="Codex: {html.escape(canonical, quote=True)}">{html.escape(match.group(1))}</a>')
+            cursor = match.end()
+            self.used.add(key)
+        chunks.append(html.escape(data[cursor:], quote=False))
+        self.out.append("".join(chunks))
+
+
+def _auto_link_html(html_body: str, targets: dict[str, tuple[str, str]], self_slug: str) -> str:
+    linker = _CodexAutoLinker(targets, self_slug)
+    try:
+        linker.feed(html_body)
+        linker.close()
+        return "".join(linker.out)
+    except Exception:
+        return html_body
+
+
 def build_wiki(settings: Settings) -> dict:
     lines = expand_project(settings)
     analysis = analyze_project(settings)
@@ -266,7 +395,7 @@ def build_wiki(settings: Settings) -> dict:
         if not raw and current_level in {"part", "chapter"}:
             buffer = []
             return
-        body_html, plain = latex_fragment_to_html(raw, settings, page_kind=current_level)
+        body_html, plain = latex_fragment_to_html(raw, settings, page_kind=current_level, analysis=analysis)
         excerpt = re.sub(r"\s+", " ", plain).strip()[:240]
         pages.append(WikiPage(
             slug=unique_slug(current_title), title=current_title, chapter=chapter,
@@ -279,7 +408,13 @@ def build_wiki(settings: Settings) -> dict:
     in_document = False
     saw_document = False
     for src in lines:
-        line = strip_comments(src.text)
+        # Preserve Loreforge's web-only image placement comment until the
+        # fragment renderer consumes it. Ordinary LaTeX comments are still
+        # stripped here so they never become player-visible prose.
+        if re.match(r"^\s*%\s*loreforge-(?:image|panel-start|panel-end)\b", src.text, flags=re.IGNORECASE):
+            line = src.text
+        else:
+            line = strip_comments(src.text)
         if "\\begin{document}" in line:
             saw_document = True
             in_document = True
@@ -346,17 +481,85 @@ def build_wiki(settings: Settings) -> dict:
     if not pages:
         # Last-resort single page, so unusual documents still render something.
         raw = "\n".join(x.text for x in lines)
-        html_body, plain = latex_fragment_to_html(raw, settings)
+        html_body, plain = latex_fragment_to_html(raw, settings, analysis=analysis)
         pages = [WikiPage("setting", analysis["title"], None, "document", html_body, plain, analysis["main_file"], 1, plain[:240], 0)]
 
-    categories: list[dict] = []
+    presentations = list_codex_presentations(settings)
+    page_dicts: list[dict] = []
     for page in pages:
-        label = page.chapter or "Setting"
+        item = asdict(page)
+        item["presentation"] = _presentation_for_web(settings, presentations.get(("page", page.slug), {}))
+        item["html"], item["outline"] = _annotate_headings(item.get("html", ""))
+        auto_image = _first_rendered_image_url(item["html"])
+        item["presentation"]["auto_image_url"] = auto_image
+        item["presentation"]["display_toc_image_url"] = item["presentation"].get("toc_image_url") or auto_image
+        page_dicts.append(item)
+
+    # Turn ordinary mentions of unique codex entry names into links. This is
+    # intentionally conservative: generic headings and ambiguous duplicate names
+    # are ignored, and only the first mention of each target is linked per article.
+    title_buckets: dict[str, list[dict]] = {}
+    for item in page_dicts:
+        title = str(item.get("title") or "").strip()
+        key = title.casefold()
+        if len(title) >= 4 and key not in _GENERIC_LINK_TITLES:
+            title_buckets.setdefault(key, []).append(item)
+    auto_targets = {
+        key: (items[0]["slug"], items[0]["title"])
+        for key, items in title_buckets.items() if len(items) == 1
+    }
+    auto_link_enabled = get_setting(settings, "auto_link_codex", "1").strip().lower() not in {"0", "false", "no", "off"}
+    if auto_link_enabled:
+        for item in page_dicts:
+            item["html"] = _auto_link_html(item["html"], auto_targets, item["slug"])
+
+    # Explicit and automatically discovered cross-links become useful navigation.
+    # Related lore also includes a few nearby entries from the same chapter.
+    by_slug = {p["slug"]: p for p in page_dicts}
+    backlinks: dict[str, list[str]] = {slug: [] for slug in by_slug}
+    for item in page_dicts:
+        outgoing = []
+        for target in re.findall(r'href=["\']/wiki/([^"\'#?]+)', item.get("html", "")):
+            if target in by_slug and target != item["slug"] and target not in outgoing:
+                outgoing.append(target)
+                backlinks.setdefault(target, []).append(item["slug"])
+        item["outgoing_links"] = outgoing
+    for item in page_dicts:
+        related_slugs = list(item.get("outgoing_links", []))
+        for candidate in page_dicts:
+            if candidate["slug"] == item["slug"]:
+                continue
+            if candidate.get("chapter") == item.get("chapter") and candidate["slug"] not in related_slugs:
+                related_slugs.append(candidate["slug"])
+            if len(related_slugs) >= 4:
+                break
+        item["related"] = [{"slug": by_slug[x]["slug"], "title": by_slug[x]["title"], "chapter": by_slug[x].get("chapter")} for x in related_slugs[:4] if x in by_slug]
+        item["backlinks"] = [{"slug": by_slug[x]["slug"], "title": by_slug[x]["title"], "chapter": by_slug[x].get("chapter")} for x in backlinks.get(item["slug"], [])[:8] if x in by_slug]
+
+    categories: list[dict] = []
+    for page in page_dicts:
+        label = page.get("chapter") or "Setting"
+        category_slug = slugify(label)
         bucket = next((x for x in categories if x["title"] == label), None)
         if not bucket:
-            bucket = {"title": label, "slug": slugify(label), "pages": []}
+            bucket = {
+                "title": label, "slug": category_slug, "pages": [],
+                "presentation": _presentation_for_web(settings, presentations.get(("category", category_slug), {})),
+            }
             categories.append(bucket)
-        bucket["pages"].append({"slug": page.slug, "title": page.title, "excerpt": page.excerpt, "level": page.level})
+        bucket["pages"].append({
+            "slug": page["slug"], "title": page["title"], "excerpt": page["excerpt"],
+            "level": page["level"], "presentation": page["presentation"],
+        })
+
+    for bucket in categories:
+        auto_cover = next((
+            p.get("presentation", {}).get("display_toc_image_url")
+            for p in bucket.get("pages", [])
+            if p.get("presentation", {}).get("display_toc_image_url")
+        ), "")
+        bucket["presentation"]["auto_image_url"] = auto_cover
+        bucket["presentation"]["display_toc_image_url"] = bucket["presentation"].get("toc_image_url") or auto_cover
 
     payload = {
         "title": get_setting(settings, "site_title", "") or analysis["title"],
@@ -365,7 +568,7 @@ def build_wiki(settings: Settings) -> dict:
         "generated_at": time.time(),
         "main_file": analysis["main_file"],
         "categories": categories,
-        "pages": [asdict(p) for p in pages],
+        "pages": page_dicts,
         "analysis": analysis,
     }
     settings.build_dir.mkdir(parents=True, exist_ok=True)
@@ -693,8 +896,119 @@ def _profile_block_to_html(content: str) -> str | None:
     return ''.join(parts)
 
 
-def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "") -> tuple[str, str]:
-    # Remove comments and document-only commands while preserving content arguments.
+def _parse_image_directive(value: str) -> dict:
+    out: dict[str, str | float | bool] = {}
+    try:
+        parts = shlex.split(value, posix=True)
+    except ValueError:
+        parts = value.split()
+    for part in parts:
+        if "=" not in part:
+            continue
+        key, raw_value = part.split("=", 1)
+        key = key.strip().lower().replace("-", "_")
+        raw_value = raw_value.strip().strip('"').strip("'")
+        if key in {"layout", "frame", "caption", "blend"}:
+            out[key] = raw_value
+        elif key in {"width", "x", "y", "opacity"}:
+            try:
+                number = float(raw_value.rstrip("%"))
+                if key == "opacity":
+                    out[key] = max(0.05, min(1.0, number))
+                else:
+                    out[key] = max(0.0, min(100.0, number))
+            except ValueError:
+                pass
+        elif key == "parallax":
+            out[key] = raw_value.lower() in {"1", "true", "yes", "on"}
+    layout = str(out.get("layout") or "auto").lower()
+    if layout not in {"auto", "center", "left", "right", "wide", "fullbleed", "portrait", "banner", "breakout", "watermark", "edge-left", "edge-right"}:
+        out["layout"] = "auto"
+    frame = str(out.get("frame") or "simple").lower()
+    if frame not in {"none", "simple", "ornate", "shadow"}:
+        out["frame"] = "simple"
+    blend = str(out.get("blend") or "normal").lower()
+    if blend not in {"normal", "multiply", "screen", "soft-light", "overlay"}:
+        out["blend"] = "normal"
+    return out
+
+
+def _parse_scene_directive(value: str) -> dict:
+    out: dict[str, str | float | bool] = {
+        "image": "", "opacity": 0.34, "x": 50.0, "y": 50.0,
+        "tone": "dark", "min_height": 260.0, "parallax": False,
+    }
+    try:
+        parts = shlex.split(value, posix=True)
+    except ValueError:
+        parts = value.split()
+    for part in parts:
+        if "=" not in part:
+            continue
+        key, raw_value = part.split("=", 1)
+        key = key.strip().lower().replace("-", "_")
+        raw_value = raw_value.strip().strip('"').strip("'")
+        if key in {"image", "tone"}:
+            out[key] = raw_value
+        elif key in {"opacity", "x", "y", "min_height"}:
+            try:
+                number = float(raw_value.rstrip("%px"))
+            except ValueError:
+                continue
+            if key == "opacity":
+                out[key] = max(0.0, min(0.85, number))
+            elif key in {"x", "y"}:
+                out[key] = max(0.0, min(100.0, number))
+            else:
+                out[key] = max(160.0, min(900.0, number))
+        elif key == "parallax":
+            out[key] = raw_value.lower() in {"1", "true", "yes", "on"}
+    if str(out.get("tone") or "dark").lower() not in {"dark", "light", "sepia", "arcane", "mist", "blood"}:
+        out["tone"] = "dark"
+    return out
+
+
+def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "", analysis: dict | None = None, _allow_panels: bool = True) -> tuple[str, str]:
+    # Loreforge image/panel directives are comments so they remain completely invisible
+    # to TeX/Overleaf while giving the responsive wiki explicit layout intent.
+    # Example: % loreforge-image: layout=right width=38 frame=ornate parallax=true
+    # Scene panels are web-only wrappers around normal LaTeX prose. They let the
+    # GM put a selected passage over atmospheric artwork without changing the PDF.
+    tokens: dict[str, str] = {}
+    if _allow_panels:
+        panel_re = re.compile(
+            r"(?ms)^[ \t]*%\s*loreforge-panel-start\s*:\s*([^\r\n]+)\r?\n(.*?)^[ \t]*%\s*loreforge-panel-end\s*$"
+        )
+        def panel_sub(m: re.Match) -> str:
+            opts = _parse_scene_directive(m.group(1))
+            inner_html, _ = latex_fragment_to_html(
+                m.group(2), settings, page_kind=page_kind, analysis=analysis, _allow_panels=False
+            )
+            image_ref = str(opts.get("image") or "")
+            url = presentation_asset_url(settings, image_ref) if image_ref.startswith(("project:", "upload:", "/project-asset/", "/uploads/")) else asset_url(settings, image_ref)
+            token = f"@@LOREFORGE_SCENE_{len(tokens)}@@"
+            tone = html.escape(str(opts.get("tone") or "dark"), quote=True)
+            classes = f"lore-scene-panel tone-{tone}" + (" lore-scene-parallax" if opts.get("parallax") else "")
+            style = (
+                f"--scene-opacity:{float(opts.get('opacity', .34)):.3f};"
+                f"--scene-x:{float(opts.get('x', 50)):.1f}%;"
+                f"--scene-y:{float(opts.get('y', 50)):.1f}%;"
+                f"--scene-min-height:{float(opts.get('min_height', 260)):.0f}px;"
+            )
+            if url:
+                style += f"--scene-image:url('{html.escape(url, quote=True)}');"
+            tokens[token] = f'<section class="{classes}" style="{style}"><div class="lore-scene-copy">{inner_html.replace(chr(10), "")}</div></section>'
+            return "\n" + token + "\n"
+        raw = panel_re.sub(panel_sub, raw)
+
+    directive_values: dict[str, dict] = {}
+    def protect_directive(m: re.Match) -> str:
+        token = f"@@LOREFORGE_IMGDIR_{len(directive_values)}@@"
+        directive_values[token] = _parse_image_directive(m.group(1))
+        return token
+    raw = re.sub(r"(?mi)^[ \t]*%\s*loreforge-image\s*:\s*([^\r\n]+)$", protect_directive, raw)
+
+    # Remove ordinary comments and document-only commands while preserving content arguments.
     raw = "\n".join(strip_comments(x) for x in raw.splitlines())
     raw = re.sub(r"\\(?:label|index|cite|pageref|ref)\s*\{[^{}]*\}", "", raw)
     raw = re.sub(r"\\(?:vspace|hspace)\*?(?:\[[^\]]*\])?\s*\{[^{}]*\}", "", raw)
@@ -702,7 +1016,6 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "")
     # Protect images with tokens before generic macro cleanup.  On Person of
     # Note pages, the first NPC/overlay image becomes responsive portrait art
     # rather than retaining PDF-specific TikZ page positioning.
-    tokens: dict[str, str] = {}
     entity_portrait_token: str | None = None
     source_before_images = raw
     def image_sub(m: re.Match) -> str:
@@ -711,31 +1024,72 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "")
         ref = m.group(2)
         url = asset_url(settings, ref)
         token = f"@@LOREFORGE_IMAGE_{len(tokens)}@@"
-        context = source_before_images[max(0, m.start() - 450):m.start()].lower()
+
+        # A protected Loreforge comment immediately before an image overrides
+        # heuristic web placement without changing the PDF source semantics.
+        prefix = source_before_images[:m.start()]
+        directive = {}
+        directive_token = ""
+        best_pos = -1
+        for candidate, value in directive_values.items():
+            pos = prefix.rfind(candidate)
+            if pos > best_pos and m.start() - pos < 1800:
+                best_pos = pos
+                directive_token = candidate
+                directive = value
+
+        context = source_before_images[max(0, m.start() - 650):m.start()].lower()
         overlay_art = "\\begin{tikzpicture" in context and "\\end{tikzpicture" not in context.rsplit("\\begin{tikzpicture", 1)[-1]
         wrap_side = None
         wrap_match = re.search(r"\\begin\{wrapfigure\}\s*\{([rlio])\}", context)
         if wrap_match and "\\end{wrapfigure" not in context.rsplit("\\begin{wrapfigure", 1)[-1]:
             wrap_side = "right" if wrap_match.group(1) in {"r", "o"} else "left"
+        layout = str(directive.get("layout") or "auto").lower()
         lower_ref = ref.replace("\\", "/").lower()
         looks_like_character = any(segment in lower_ref for segment in ("/npcs/", "/characters/", "/people/", "/portraits/"))
-        entity_portrait = page_kind == "entity" and entity_portrait_token is None and (looks_like_character or overlay_art)
+        allow_auto_portrait = layout in {"auto", "portrait"}
+        entity_portrait = page_kind == "entity" and entity_portrait_token is None and allow_auto_portrait and (looks_like_character or overlay_art or layout == "portrait")
         if entity_portrait:
             entity_portrait_token = token
         if url:
-            caption = clean_inline_text(Path(ref).stem.replace("_", " "))
+            caption = clean_inline_text(str(directive.get("caption") or Path(ref).stem.replace("_", " ")))
             classes, style = _image_classes_and_style(options, ref, entity_portrait=entity_portrait, overlay_art=overlay_art)
-            if wrap_side and not entity_portrait:
+            style_parts = [part for part in style.split(";") if part]
+            if layout != "auto":
+                classes += f" lore-image-layout-{layout}"
+            elif wrap_side and not entity_portrait:
                 classes += f" lore-image-float-{wrap_side}"
+            frame = str(directive.get("frame") or "simple").lower()
+            classes += f" lore-image-frame-{frame}"
+            if directive.get("parallax"):
+                classes += " lore-image-parallax"
+            if "opacity" in directive:
+                style_parts.append(f"--image-opacity:{float(directive['opacity']):.3f}")
+            blend = str(directive.get("blend") or "normal").lower()
+            if blend != "normal":
+                classes += f" lore-image-blend-{blend}"
+            if "width" in directive:
+                style_parts = [part for part in style_parts if not part.startswith("--image-width:")]
+                style_parts.append(f"--image-width:{float(directive['width']):.1f}%")
+                classes += " lore-image-sized"
+            if "x" in directive:
+                style_parts.append(f"--image-focus-x:{float(directive['x']):.1f}%")
+            if "y" in directive:
+                style_parts.append(f"--image-focus-y:{float(directive['y']):.1f}%")
+            style = ";".join(style_parts)
             style_attr = f' style="{html.escape(style, quote=True)}"' if style else ""
+            directive_caption = directive.get("caption")
+            figcaption = f'<figcaption>{html.escape(clean_inline_text(str(directive_caption)))}</figcaption>' if directive_caption else ""
             if Path(ref).suffix.lower() == ".pdf":
-                tokens[token] = f'<figure class="{classes} lore-pdf-figure"{style_attr}><object data="{html.escape(url, quote=True)}" type="application/pdf"><a href="{html.escape(url, quote=True)}">Open {html.escape(caption)}</a></object></figure>'
+                tokens[token] = f'<figure class="{classes} lore-pdf-figure"{style_attr}><object data="{html.escape(url, quote=True)}" type="application/pdf"><a href="{html.escape(url, quote=True)}">Open {html.escape(caption)}</a></object>{figcaption}</figure>'
             else:
-                tokens[token] = f'<figure class="{classes}"{style_attr}><button class="lore-image-zoom" type="button" aria-label="Open {html.escape(caption)}"><img loading="lazy" decoding="async" src="{html.escape(url, quote=True)}" alt="{html.escape(caption)}"></button></figure>'
+                tokens[token] = f'<figure class="{classes}"{style_attr}><button class="lore-image-zoom" type="button" aria-label="Open {html.escape(caption)}"><img loading="lazy" decoding="async" src="{html.escape(url, quote=True)}" alt="{html.escape(caption)}"></button>{figcaption}</figure>'
         else:
             tokens[token] = f'<div class="missing-asset">Missing image: {html.escape(ref)}</div>'
         return token
     raw = IMAGE_RE.sub(image_sub, raw)
+    for directive_token in directive_values:
+        raw = raw.replace(directive_token, "")
 
     # Consume table environments before generic command cleanup.  Otherwise
     # LaTeX column declarations such as >{\\raggedright}p{3.5cm} are treated as
@@ -836,7 +1190,7 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "")
     raw = re.sub(r"\\wiki\s*\{([^{}]+)\}(?:\s*\{([^{}]+)\})?", wiki_sub, raw)
 
     # Heuristic custom macros. Preserve arguments rather than dropping lore.
-    analysis_macros = {x["name"]: x for x in analyze_project(settings).get("custom_macros", [])}
+    analysis_macros = {x["name"]: x for x in (analysis or analyze_project(settings)).get("custom_macros", [])}
     for name, info in analysis_macros.items():
         if info["args"] <= 0 or info["args"] > 3:
             continue
@@ -921,7 +1275,7 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "")
                 out.append("</div>")
                 column_open = False
             continue
-        if s.startswith("<figure") or s.startswith("<aside") or s.startswith("<dl class=\"lore-profile-grid") or s.startswith("<div class=\"missing-asset") or s.startswith("<div class=\"lore-table-wrap") or s.startswith("<div class=\"lore-image-caption"):
+        if s.startswith("<figure") or s.startswith("<aside") or s.startswith("<dl class=\"lore-profile-grid") or s.startswith("<div class=\"missing-asset") or s.startswith("<div class=\"lore-table-wrap") or s.startswith("<div class=\"lore-image-caption") or s.startswith("<section class=\"lore-scene-panel"):
             flush_p(); out.append(s); continue
         paragraph.append(s)
     flush_p()
@@ -934,54 +1288,214 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "")
     return html_body, plain
 
 
-def compile_pdf(settings: Settings, main_file: str | None = None) -> BuildResult:
+def _purge_latexmk_state(main: Path) -> list[str]:
+    """Remove only generated dependency/aux state that can trap latexmk in a failed cache."""
+    removed: list[str] = []
+    candidates = [
+        main.with_suffix(".fdb_latexmk"), main.with_suffix(".fls"), main.with_suffix(".aux"),
+        main.with_suffix(".out"), main.with_suffix(".toc"), main.with_suffix(".lof"),
+        main.with_suffix(".lot"), main.with_suffix(".bcf"), main.with_name(main.stem + ".run.xml"),
+        main.with_name(main.name + ".synctex.gz"),
+    ]
+    for path in candidates:
+        try:
+            if path.exists():
+                path.unlink()
+                removed.append(path.name)
+        except OSError:
+            pass
+    return removed
+
+
+def _latex_failure_suggestions(log: str) -> list[str]:
+    suggestions: list[str] = []
+    missing = re.findall(r"(?:LaTeX Error|Package [^\n]+ Error): File [`']([^`']+)[`'] not found", log)
+    if missing:
+        names = ", ".join(dict.fromkeys(missing[:4]))
+        suggestions.append(f"Missing LaTeX file/package: {names}. If it is a project .sty/.cls, upload it with the source; otherwise add the corresponding TeX Live package to the Dockerfile.")
+    if "Undefined control sequence" in log:
+        suggestions.append("An undefined LaTeX command was encountered. Open the first file/line error below; this is often a missing package, misspelled macro, or custom command file that was not imported.")
+    if "Emergency stop" in log or "Fatal error occurred" in log:
+        suggestions.append("TeX stopped fatally. The first error above the emergency-stop line is normally the real cause; later messages are often cascading errors.")
+    if "shell escape" in log.lower() and ("disabled" in log.lower() or "restricted" in log.lower()):
+        suggestions.append("This document appears to require shell escape. Only for a trusted private project, set LATEX_ALLOW_SHELL_ESCAPE=1 in Railway.")
+    if re.search(r"File ended while scanning use of|Runaway argument", log):
+        suggestions.append("TeX detected an unfinished argument/environment. Check for a missing }, \\end{...}, or unmatched custom macro near the first reported source line.")
+    if re.search(r"fontspec.*error|font .* not found", log, re.IGNORECASE):
+        suggestions.append("A requested font is unavailable in the container. Upload the font through your project if your LaTeX setup supports it, or install the matching Debian/TeX Live font package in the Dockerfile.")
+    if ("Nothing to do" in log or "All targets" in log) and "gave an error" in log:
+        suggestions.append("latexmk had cached a previous failed run. Loreforge automatically clears its dependency state and retries in this build.")
+    if not suggestions:
+        suggestions.append("No specific TeX diagnosis was detected. Use the first file/line entry in Build Log; Loreforge has appended the underlying engine .log when available.")
+    return suggestions[:5]
+
+
+def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool = False) -> BuildResult:
+    """Compile the source PDF and self-heal the common stale-latexmk failure mode.
+
+    A failed latexmk run can leave ``.fdb_latexmk`` recording the engine as failed.
+    A later invocation may then say both "Nothing to do" and "pdflatex: gave an
+    error" without rerunning TeX. Loreforge detects that state, removes only
+    generated dependency/auxiliary files, and retries automatically. If latexmk
+    still fails without useful diagnostics, the underlying engine is invoked once
+    directly so the editor receives the real TeX error rather than a one-line
+    wrapper summary.
+    """
     main_rel = main_file or choose_main(settings)
     main = safe_project_path(settings, main_rel)
     if not main.exists():
         raise ValueError(f"Main file not found: {main_rel}")
-    engine = settings.latex_engine
-    if engine not in {"pdflatex", "xelatex", "lualatex"}:
-        engine = "pdflatex"
+    engine = settings.latex_engine if settings.latex_engine in {"pdflatex", "xelatex", "lualatex"} else "pdflatex"
     latexmk = shutil.which("latexmk")
     shell = "-shell-escape" if settings.allow_shell_escape else "-no-shell-escape"
-    if latexmk:
-        mode = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}[engine]
-        cmd = [latexmk, mode, "-interaction=nonstopmode", "-file-line-error", shell, main.name]
-    else:
-        binary = shutil.which(engine)
-        if not binary:
-            return BuildResult(False, main_rel, None, 0, [engine], "LaTeX engine is not installed.", [{"message": f"{engine} not installed"}])
-        cmd = [binary, "-interaction=nonstopmode", "-file-line-error", shell, main.name]
     env = os.environ.copy()
     env.setdefault("openin_any", "p")
     env.setdefault("openout_any", "p")
     started = time.perf_counter()
-    try:
-        proc = subprocess.run(cmd, cwd=main.parent, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=settings.latex_timeout, env=env)
-        log = proc.stdout or ""
-        ok = proc.returncode == 0
-    except subprocess.TimeoutExpired as exc:
-        log = (exc.stdout or "") + f"\nLoreforge stopped compilation after {settings.latex_timeout}s."
-        ok = False
+    recovery_steps: list[str] = []
+
+    def run(cmd: list[str], timeout: int | None = None) -> tuple[int, str]:
+        try:
+            proc = subprocess.run(
+                cmd, cwd=main.parent, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, timeout=timeout or settings.latex_timeout, env=env,
+            )
+            return proc.returncode, proc.stdout or ""
+        except subprocess.TimeoutExpired as exc:
+            output = exc.stdout or ""
+            if isinstance(output, bytes):
+                output = output.decode("utf-8", errors="replace")
+            return 124, str(output) + f"\nLoreforge stopped compilation after {settings.latex_timeout}s."
+
+    command: list[str]
+    if latexmk:
+        mode = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}[engine]
+        command = [latexmk, mode, "-g", "-interaction=nonstopmode", "-file-line-error", shell, main.name]
+        if clean:
+            clean_code, clean_log = run([latexmk, "-C", main.name], timeout=max(20, settings.latex_timeout // 2))
+            removed = _purge_latexmk_state(main)
+            recovery_steps.append("Manual clean build requested; generated LaTeX state was cleared.")
+        code, log = run(command)
+        stale_state = code != 0 and (
+            ("Nothing to do" in log and "gave an error" in log)
+            or ("All targets" in log and "gave an error" in log and "This is pdfTeX" not in log and "This is XeTeX" not in log and "This is Lua" not in log)
+        )
+        if stale_state:
+            removed = _purge_latexmk_state(main)
+            recovery_steps.append("Detected latexmk's cached failed-build state and removed: " + (", ".join(removed) if removed else "dependency cache"))
+            retry_command = [latexmk, mode, "-gg", "-interaction=nonstopmode", "-file-line-error", shell, main.name]
+            retry_code, retry_log = run(retry_command)
+            log += "\n\n[Loreforge Build Doctor]\n" + recovery_steps[-1] + "\n\n[Clean retry]\n" + retry_log
+            code = retry_code
+            command = retry_command
+
+        # latexmk sometimes emits only its wrapper summary. Ask the actual engine
+        # for one diagnostic pass so the UI can point to the source error.
+        if code != 0 and not parse_latex_errors(log, main.parent):
+            binary = shutil.which(engine)
+            if binary:
+                direct_command = [binary, "-interaction=nonstopmode", "-file-line-error", shell, main.name]
+                direct_code, direct_log = run(direct_command)
+                recovery_steps.append(f"Ran {engine} directly once to recover detailed source diagnostics from latexmk.")
+                log += "\n\n[Loreforge direct-engine diagnostic pass]\n" + direct_log
+                # If direct TeX succeeds, let latexmk finish references/bibliography.
+                if direct_code == 0:
+                    final_code, final_log = run([latexmk, mode, "-g", "-interaction=nonstopmode", "-file-line-error", shell, main.name])
+                    log += "\n\n[Loreforge final latexmk pass]\n" + final_log
+                    code = final_code
+    else:
+        binary = shutil.which(engine)
+        command = [engine]
+        if not binary:
+            return BuildResult(False, main_rel, None, 0, command, "LaTeX engine is not installed.", [{"message": f"{engine} not installed"}], suggestions=[f"Install {engine} or use the Loreforge Docker image."])
+        command = [binary, "-interaction=nonstopmode", "-file-line-error", shell, main.name]
+        code, first_log = run(command)
+        second_code, second_log = run(command) if code == 0 else (code, "")
+        code = second_code
+        log = first_log + ("\n[Second LaTeX pass]\n" + second_log if second_log else "")
+
+    # The engine .log often contains the actionable context even when latexmk's
+    # stdout is terse. Always append its tail when it adds information.
+    engine_log = main.with_suffix(".log")
+    if engine_log.exists():
+        try:
+            detailed = engine_log.read_text(encoding="utf-8", errors="replace")[-140000:]
+            if detailed and detailed not in log:
+                log += "\n\n[TeX engine log]\n" + detailed
+        except OSError:
+            pass
+
     duration = time.perf_counter() - started
     pdf = main.with_suffix(".pdf")
     pdf_out = settings.build_dir / "campaign.pdf"
-    if pdf.exists():
-        shutil.copy2(pdf, pdf_out)
-    else:
-        pdf_out.unlink(missing_ok=True)
+    build_ok = code == 0 and pdf.exists()
+    if build_ok:
+        try:
+            shutil.copy2(pdf, pdf_out)
+        except OSError:
+            build_ok = False
     errors = parse_latex_errors(log, main.parent)
-    (settings.build_dir / "latex.log").write_text(log[-200000:], encoding="utf-8", errors="replace")
-    return BuildResult(ok and pdf_out.exists(), main_rel, "/preview/pdf" if pdf_out.exists() else None, duration, cmd, log[-50000:], errors[:80])
-
+    suggestions = [] if build_ok else _latex_failure_suggestions(log)
+    settings.build_dir.mkdir(parents=True, exist_ok=True)
+    (settings.build_dir / "latex.log").write_text(log[-260000:], encoding="utf-8", errors="replace")
+    return BuildResult(
+        build_ok and pdf_out.exists(), main_rel, "/preview/pdf" if pdf_out.exists() else None,
+        duration, command, log[-90000:], errors[:80], "\n".join(recovery_steps), suggestions,
+    )
 
 def parse_latex_errors(log: str, cwd: Path) -> list[dict]:
+    """Extract concise, clickable diagnostics from latexmk/TeX output.
+
+    ``-file-line-error`` normally produces ``file.tex:line: message`` records,
+    but package/class errors and classic TeX ``! ...`` + ``l.123`` records are
+    common in imported Overleaf projects. Keep both forms and deduplicate the
+    cascade so the editor can focus on the first actionable failures.
+    """
     errors: list[dict] = []
-    # file.tex:123: message
-    for m in re.finditer(r"(?m)^(.+?\.tex):(\d+):\s*(.+)$", log):
+    seen: set[tuple] = set()
+
+    def add(file: str | None, line: int | None, message: str) -> None:
+        message = re.sub(r"\s+", " ", str(message or "")).strip()
+        if not message:
+            return
+        normalized_file = Path(file).name if file else None
+        key = (normalized_file, line, message[:240])
+        if key in seen:
+            return
+        seen.add(key)
+        errors.append({"file": normalized_file, "line": line, "message": message[:1000]})
+
+    # latexmk/engines with -file-line-error; include project .sty/.cls because
+    # custom campaign classes are often where a real failure originates.
+    for m in re.finditer(r"(?m)^(.+?\.(?:tex|sty|cls|bib)):(\d+):\s*(.+)$", log, flags=re.IGNORECASE):
         path, line, message = m.groups()
-        errors.append({"file": Path(path).name, "line": int(line), "message": message.strip()})
+        add(path, int(line), message)
+
+    # Classic TeX form: an exclamation error followed shortly by `l.123 ...`.
+    lines = log.splitlines()
+    for idx, line_text in enumerate(lines):
+        bang = re.match(r"^!\s+(.+)$", line_text)
+        if not bang:
+            continue
+        source_line = None
+        context = []
+        for following in lines[idx + 1:idx + 7]:
+            line_match = re.match(r"^l\.(\d+)\s*(.*)$", following.strip())
+            if line_match:
+                source_line = int(line_match.group(1))
+                if line_match.group(2).strip():
+                    context.append(line_match.group(2).strip())
+                break
+            if following.strip() and not following.startswith("?"):
+                context.append(following.strip())
+        message = bang.group(1).strip()
+        if context:
+            message += " — " + " ".join(context[:2])
+        add(None, source_line, message)
+
+    # Common wrapper-only failure: expose it only if no better diagnostic exists.
     if not errors:
-        for m in re.finditer(r"(?m)^!\s+(.+)$", log):
-            errors.append({"file": None, "line": None, "message": m.group(1).strip()})
+        m = re.search(r"(?mi)^\s*(pdflatex|xelatex|lualatex):\s+gave an error", log)
+        if m:
+            add(None, None, f"{m.group(1)} reported a failure; see Build Doctor and the TeX engine log below.")
     return errors

@@ -111,9 +111,164 @@ More biography.
     assert entity["level"] == "entity"
     assert '<dl class="lore-profile-grid">' in entity["html"]
     assert "lore-entity-portrait" in entity["html"]
-    assert "<h2>Biography</h2>" in entity["html"]
-    assert "<h3>Fateful Meeting</h3>" in entity["html"]
+    assert '<h2 id="biography">Biography' in entity["html"]
+    assert '<h3 id="fateful-meeting">Fateful Meeting' in entity["html"]
     assert "tikzpicture" not in entity["plain_text"]
     assert "current page.south" not in entity["plain_text"]
     assert "paperwidth" not in entity["plain_text"]
     assert not any(p["title"] == "Biography" for p in wiki["pages"])
+
+
+def test_loreforge_image_directive_controls_web_layout_without_leaking_comment(tmp_path: Path):
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "Images").mkdir()
+    (s.project_dir / "Images" / "tower.png").write_bytes(b"image")
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{article}
+\usepackage{graphicx}
+\begin{document}
+\section{Black Tower}
+% loreforge-image: layout=right width=38 frame=ornate parallax=true caption="The Black Tower"
+\includegraphics[width=.7\linewidth]{Images/tower.png}
+The tower watches the valley.
+\end{document}
+''', encoding="utf-8")
+    page = build_wiki(s)["pages"][0]
+    assert "lore-image-layout-right" in page["html"]
+    assert "lore-image-frame-ornate" in page["html"]
+    assert "lore-image-parallax" in page["html"]
+    assert "--image-width:38.0%" in page["html"]
+    assert "The Black Tower" in page["html"]
+    assert "loreforge-image" not in page["plain_text"]
+
+
+def test_codex_presentation_is_embedded_in_pages_and_categories(tmp_path: Path):
+    from app.storage import save_codex_presentation
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "Images").mkdir()
+    (s.project_dir / "Images" / "chapter.png").write_bytes(b"image")
+    (s.project_dir / "main.tex").write_text(
+        "\\documentclass{book}\n\\begin{document}\n\\chapter{People}\n\\section{Vanid}\nA gatekeeper.\n\\end{document}\n",
+        encoding="utf-8",
+    )
+    save_codex_presentation(s, "category", "people", {"toc_image": "project:Images/chapter.png"})
+    save_codex_presentation(s, "page", "vanid", {"visibility": "teaser", "featured": True, "hero_style": "split"})
+    wiki = build_wiki(s)
+    page = next(x for x in wiki["pages"] if x["slug"] == "vanid")
+    category = next(x for x in wiki["categories"] if x["slug"] == "people")
+    assert page["presentation"]["visibility"] == "teaser"
+    assert page["presentation"]["featured"] is True
+    assert page["presentation"]["hero_style"] == "split"
+    assert category["presentation"]["toc_image_url"].endswith("/project-asset/Images/chapter.png")
+
+
+def test_scene_panel_and_free_art_direction_are_web_only(tmp_path: Path):
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "Images").mkdir()
+    (s.project_dir / "Images" / "storm.jpg").write_bytes(b"image")
+    (s.project_dir / "Images" / "sigil.png").write_bytes(b"image")
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{article}
+\usepackage{graphicx}
+\begin{document}
+\section{The Storm Gate}
+% loreforge-panel-start: image="Images/storm.jpg" opacity=0.42 x=72 y=38 tone=arcane min_height=360 parallax=true
+The old gate hums whenever the moons align.
+% loreforge-panel-end
+% loreforge-image: layout=watermark width=44 opacity=0.22 blend=screen frame=none
+\includegraphics[width=.4\linewidth]{Images/sigil.png}
+Beyond it lies the drowned road.
+\end{document}
+''', encoding="utf-8")
+    page = build_wiki(s)["pages"][0]
+    assert "lore-scene-panel tone-arcane lore-scene-parallax" in page["html"]
+    assert "--scene-opacity:0.420" in page["html"]
+    assert "--scene-min-height:360px" in page["html"]
+    assert "lore-image-layout-watermark" in page["html"]
+    assert "lore-image-blend-screen" in page["html"]
+    assert "loreforge-panel" not in page["plain_text"]
+    assert "The old gate hums" in page["plain_text"]
+
+
+def test_first_page_image_becomes_automatic_toc_art(tmp_path: Path):
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "Images").mkdir()
+    (s.project_dir / "Images" / "selen.png").write_bytes(b"image")
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+\usepackage{graphicx}
+\begin{document}
+\chapter{Cities}
+\section{Selenia}
+\includegraphics[width=.8\linewidth]{Images/selen.png}
+The silver city.
+\end{document}
+''', encoding="utf-8")
+    wiki = build_wiki(s)
+    page = next(x for x in wiki["pages"] if x["title"] == "Selenia")
+    category = next(x for x in wiki["categories"] if x["title"] == "Cities")
+    assert page["presentation"]["toc_image_url"] == ""
+    assert page["presentation"]["auto_image_url"].endswith("/project-asset/Images/selen.png")
+    assert page["presentation"]["display_toc_image_url"].endswith("/project-asset/Images/selen.png")
+    assert category["presentation"]["display_toc_image_url"].endswith("/project-asset/Images/selen.png")
+
+
+def test_unique_codex_names_are_auto_linked_and_create_backlinks(tmp_path: Path):
+    from app.storage import set_setting
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+\begin{document}
+\chapter{People}
+\section{Tumerich Tumadum}
+A careful merchant.
+\section{Corvina Dampierre}
+Corvina trusts Tumerich Tumadum with the treasury.
+\end{document}
+''', encoding="utf-8")
+    wiki = build_wiki(s)
+    corvina = next(x for x in wiki["pages"] if x["title"] == "Corvina Dampierre")
+    tumerich = next(x for x in wiki["pages"] if x["title"] == "Tumerich Tumadum")
+    assert f'href="/wiki/{tumerich["slug"]}"' in corvina["html"]
+    assert any(x["slug"] == corvina["slug"] for x in tumerich["backlinks"])
+
+    set_setting(s, "auto_link_codex", "0")
+    wiki_disabled = build_wiki(s)
+    corvina_disabled = next(x for x in wiki_disabled["pages"] if x["title"] == "Corvina Dampierre")
+    assert 'class="auto-wiki-link"' not in corvina_disabled["html"]
+
+
+def test_build_doctor_recognizes_stale_latexmk_summary():
+    from app.latex import _latex_failure_suggestions
+    log = """Latexmk: Nothing to do for 'main.tex'.\nLatexmk: All targets () are up-to-date\nCollected error summary:\n  pdflatex: gave an error\n"""
+    suggestions = _latex_failure_suggestions(log)
+    assert any("cached" in x.lower() and "automatically" in x.lower() for x in suggestions)
+
+
+def test_compile_pdf_self_heals_stale_latexmk_cache(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(
+        r"\documentclass{article}\begin{document}Recovered\end{document}", encoding="utf-8"
+    )
+    # Simulate the exact wrapper-only failure reported by Railway, then a
+    # successful forced dependency rebuild after Loreforge clears cached state.
+    calls = []
+    def fake_which(name):
+        return "/usr/bin/latexmk" if name == "latexmk" else f"/usr/bin/{name}"
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        calls.append(list(cmd))
+        if len(calls) == 1:
+            return SimpleNamespace(returncode=12, stdout=(
+                "Latexmk: Nothing to do for 'main.tex'.\n"
+                "Latexmk: All targets () are up-to-date\n"
+                "Collected error summary (may duplicate other messages):\n"
+                "  pdflatex: gave an error\n"
+            ))
+        (Path(cwd) / "main.pdf").write_bytes(b"%PDF-1.4 recovered")
+        return SimpleNamespace(returncode=0, stdout="Latexmk: forced rebuild complete\n")
+    monkeypatch.setattr(latex_mod.shutil, "which", fake_which)
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+    result = compile_pdf(s)
+    assert result.ok is True
+    assert len(calls) == 2
+    assert "-gg" in calls[1]
+    assert "cached failed-build state" in result.recovery
+    assert (s.build_dir / "campaign.pdf").exists()

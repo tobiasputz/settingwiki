@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0
+
+- Added Codex Studio art direction for table-of-contents covers/thumbnails, entry heroes, full-page backgrounds, focal points, article layouts, featured entries, and public/teaser/hidden discovery states.
+- Added automatic TOC artwork fallback from the first image already present in an entry; manual art always overrides it.
+- Added the editor **Artwork** composer with center/left/right/wide/breakout/full-bleed/portrait/banner/edge/watermark layouts, opacity, focus, blend modes, frames, captions, and parallax while preserving ordinary LaTeX figures for PDF/Overleaf.
+- Added **Scene** panels: web-only atmospheric background wrappers around selected normal LaTeX prose, with tone, focus, strength, height, and parallax controls.
+- Added conservative automatic cross-linking of unique codex names, related lore, backlinks, and a player-facing pan/zoom **Lore Network** graph.
+- Added heading permalinks and an On-this-page scroll-spy navigator for long entries.
+- Fixed the player codex sidebar resetting on entry navigation by preserving open groups, scroll position, and clicked-row viewport position across page loads.
+- Added player-side bookmark/recent-reading trail and copyable page links.
+- Added quick Open player page / Copy link controls to Codex Studio.
+- Added **Build Doctor** recovery for stale `latexmk` failed-build caches, automatic auxiliary-state repair, direct-engine diagnostic fallback, and actionable compile suggestions. This specifically addresses the `Nothing to do for main.tex` + `pdflatex: gave an error` failure mode.
+- Added regression tests for scene panels, automatic TOC imagery, automatic links/backlinks, and stale-latexmk diagnosis.
+
 ## 1.1.0
 
 - Fixed responsive conversion of `longtable`, `tabular`, `tabularx`, and `tabulary`, including complex paragraph-column declarations.

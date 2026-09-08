@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import secrets
@@ -7,7 +8,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -20,8 +21,8 @@ from .latex import analyze_project, build_wiki, choose_main, compile_pdf, load_w
 from .maps import create_map, create_marker, delete_map, delete_marker, get_map, list_maps, update_map, update_marker
 from .storage import (
     export_project_zip, get_setting, init_db, list_project_files, list_revisions,
-    cleanup_legacy_import_artifacts, replace_project_from_zip, restore_revision, safe_project_path, save_text_file,
-    seed_project, set_setting, storage_report,
+    cleanup_legacy_import_artifacts, get_codex_presentation, replace_project_from_zip, restore_revision,
+    safe_project_path, save_codex_presentation, save_text_file, seed_project, set_setting, storage_report,
 )
 
 settings = load_settings()
@@ -52,6 +53,43 @@ def ensure_built() -> dict:
         return load_wiki(settings)
     except Exception:
         return {"title": "Loreforge", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time()}
+
+
+def _visible_wiki(request: Request, *, include_hidden_for_admin: bool = True) -> dict:
+    wiki = copy.deepcopy(ensure_built())
+    if include_hidden_for_admin and is_admin(request):
+        return wiki
+    visible_pages = []
+    allowed_slugs = set()
+    for page in wiki.get("pages", []):
+        visibility = page.get("presentation", {}).get("visibility", "public")
+        if visibility == "hidden":
+            continue
+        visible_pages.append(page)
+        allowed_slugs.add(page.get("slug"))
+    wiki["pages"] = visible_pages
+    clean_categories = []
+    for category in wiki.get("categories", []):
+        category["pages"] = [p for p in category.get("pages", []) if p.get("slug") in allowed_slugs]
+        if category["pages"]:
+            clean_categories.append(category)
+    wiki["categories"] = clean_categories
+    return wiki
+
+
+def _asset_rows() -> list[dict]:
+    allowed = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
+    rows: list[dict] = []
+    for path in settings.project_dir.rglob("*"):
+        if path.is_file() and path.suffix.lower() in allowed:
+            rel = path.relative_to(settings.project_dir).as_posix()
+            rows.append({"ref": f"project:{rel}", "url": "/project-asset/" + quote(rel, safe="/"), "path": rel, "source": "project", "name": path.name})
+    for path in settings.uploads_dir.rglob("*"):
+        if path.is_file() and path.suffix.lower() in allowed:
+            rel = path.relative_to(settings.uploads_dir).as_posix()
+            rows.append({"ref": f"upload:{rel}", "url": "/uploads/" + quote(rel, safe="/"), "path": rel, "source": "upload", "name": path.name})
+    rows.sort(key=lambda x: (x["source"], x["path"].lower()))
+    return rows
 
 
 @app.on_event("startup")
@@ -105,26 +143,52 @@ def logout(request: Request):
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if not player_allowed(request): return RedirectResponse("/login")
-    wiki = ensure_built(); maps = list_maps(settings, public=True)
-    return templates.TemplateResponse("home.html", {"request": request, "wiki": wiki, "maps": maps})
+    wiki = _visible_wiki(request); maps = list_maps(settings, public=True)
+    featured = [p for p in wiki.get("pages", []) if p.get("presentation", {}).get("featured")][:6]
+    return templates.TemplateResponse("home.html", {"request": request, "wiki": wiki, "maps": maps, "featured": featured})
 
 
 @app.get("/wiki/{slug}", response_class=HTMLResponse)
 def wiki_page(request: Request, slug: str):
     if not player_allowed(request): return RedirectResponse("/login")
-    wiki = ensure_built(); pages = wiki.get("pages", [])
+    wiki = _visible_wiki(request); pages = wiki.get("pages", [])
     page = next((p for p in pages if p["slug"] == slug), None)
     if not page: raise HTTPException(404, "Wiki page not found")
     idx = pages.index(page)
     prev_page = pages[idx-1] if idx > 0 else None
     next_page = pages[idx+1] if idx + 1 < len(pages) else None
-    return templates.TemplateResponse("page.html", {"request": request, "wiki": wiki, "page": page, "prev_page": prev_page, "next_page": next_page})
+    page_locked = (not is_admin(request) and page.get("presentation", {}).get("visibility") == "teaser")
+    return templates.TemplateResponse("page.html", {"request": request, "wiki": wiki, "page": page, "prev_page": prev_page, "next_page": next_page, "page_locked": page_locked})
+
+
+@app.get("/network", response_class=HTMLResponse)
+def lore_network(request: Request):
+    if not player_allowed(request): return RedirectResponse("/login")
+    wiki = _visible_wiki(request)
+    maps = list_maps(settings, public=True)
+    allowed = {p.get("slug") for p in wiki.get("pages", [])}
+    nodes = [{
+        "slug": p["slug"], "title": p["title"], "chapter": p.get("chapter") or "Setting",
+        "image": p.get("presentation", {}).get("display_toc_image_url") or "",
+    } for p in wiki.get("pages", [])]
+    edges = []
+    seen = set()
+    for p in wiki.get("pages", []):
+        for target in p.get("outgoing_links", []):
+            if target not in allowed or target == p.get("slug"):
+                continue
+            key = tuple(sorted((p["slug"], target)))
+            if key in seen:
+                continue
+            seen.add(key); edges.append({"source": p["slug"], "target": target})
+    network = {"nodes": nodes, "edges": edges}
+    return templates.TemplateResponse("network.html", {"request": request, "wiki": wiki, "maps": maps, "network": network})
 
 
 @app.get("/atlas/{slug}", response_class=HTMLResponse)
 def map_page(request: Request, slug: str):
     if not player_allowed(request): return RedirectResponse("/login")
-    wiki = ensure_built(); map_data = get_map(settings, slug, public=True)
+    wiki = _visible_wiki(request); map_data = get_map(settings, slug, public=True)
     if not map_data: raise HTTPException(404, "Map not found")
     return templates.TemplateResponse("map.html", {"request": request, "wiki": wiki, "map": map_data})
 
@@ -133,18 +197,35 @@ def map_page(request: Request, slug: str):
 def public_search(request: Request, q: str = ""):
     if not player_allowed(request): raise HTTPException(401)
     qn = q.strip().lower()
-    pages = ensure_built().get("pages", [])
     if not qn: return []
+    wiki = _visible_wiki(request)
     ranked=[]
-    for p in pages:
-        title=p["title"].lower(); text=p.get("plain_text","").lower(); score=0
+    for p in wiki.get("pages", []):
+        visibility = p.get("presentation", {}).get("visibility", "public")
+        title=p["title"].lower()
+        text=(p.get("excerpt", "") if visibility == "teaser" else p.get("plain_text", "")).lower()
+        score=0
         if qn == title: score += 100
         if qn in title: score += 30
         score += min(10, text.count(qn))
         if all(term in text or term in title for term in qn.split()): score += 5
-        if score: ranked.append((score,p))
-    ranked.sort(key=lambda x:(-x[0],x[1]["order"]))
-    return [{"slug":p["slug"],"title":p["title"],"chapter":p.get("chapter"),"excerpt":p.get("excerpt","")} for _,p in ranked[:20]]
+        if score:
+            ranked.append((score, {"type":"lore","href":f"/wiki/{p['slug']}","slug":p["slug"],"title":p["title"],"chapter":p.get("chapter"),"excerpt":p.get("excerpt","")}))
+    for map_data in list_maps(settings, public=True):
+        map_title = (map_data.get("name") or "").lower()
+        map_desc = (map_data.get("description") or "").lower()
+        score = (35 if qn in map_title else 0) + min(6, map_desc.count(qn))
+        if score:
+            ranked.append((score, {"type":"map","href":f"/atlas/{map_data['slug']}","title":map_data["name"],"chapter":"Atlas","excerpt":map_data.get("description","")}))
+        for marker in map_data.get("markers", []):
+            title = (marker.get("title") or "").lower(); body=(marker.get("body") or "").lower(); score=0
+            if qn == title: score += 90
+            if qn in title: score += 28
+            score += min(8, body.count(qn))
+            if score:
+                ranked.append((score,{"type":"location","href":f"/atlas/{map_data['slug']}?focus={marker['id']}","title":marker.get("title","Location"),"chapter":map_data["name"],"excerpt":marker.get("body","")}))
+    ranked.sort(key=lambda x:(-x[0],x[1]["title"]))
+    return [item for _,item in ranked[:24]]
 
 
 @app.get("/project-asset/{asset_path:path}")
@@ -203,6 +284,7 @@ def admin_status(request: Request):
         "site_title":get_setting(settings,"site_title","") or analysis.get("title","Campaign Atlas"),
         "tagline":get_setting(settings,"tagline","Explore the people, places, histories, and mysteries of the campaign."),
         "main_file":get_setting(settings,"main_file","") or analysis.get("main_file",""),
+        "auto_link_codex":get_setting(settings,"auto_link_codex","1").strip().lower() not in {"0","false","no","off"},
         "storage":storage_report(settings),
     }
 
@@ -262,10 +344,10 @@ def admin_delete_file(request: Request, path: str):
 
 
 @app.post("/api/admin/compile")
-def admin_compile(request: Request):
+def admin_compile(request: Request, clean: bool = False):
     require_admin(request)
     try:
-        wiki=build_wiki(settings); result=compile_pdf(settings)
+        wiki=build_wiki(settings); result=compile_pdf(settings, clean=clean)
         return {"wiki_pages":len(wiki.get("pages",[])), **result.__dict__}
     except Exception as exc:
         raise HTTPException(400,str(exc))
@@ -332,10 +414,68 @@ def admin_settings(request: Request, payload: dict = Body(...)):
     require_admin(request)
     for key in ("site_title","tagline","main_file"):
         if key in payload: set_setting(settings,key,str(payload[key]))
+    if "auto_link_codex" in payload:
+        set_setting(settings,"auto_link_codex","1" if payload.get("auto_link_codex") else "0")
     if payload.get("main_file"): choose_main(settings)
     try: build_wiki(settings)
     except Exception: pass
     return {"ok":True}
+
+
+@app.get("/api/admin/codex")
+def admin_codex(request: Request):
+    require_admin(request)
+    wiki = ensure_built()
+    return {"categories": wiki.get("categories", []), "pages": wiki.get("pages", [])}
+
+
+@app.put("/api/admin/codex/presentation")
+def admin_codex_presentation(request: Request, payload: dict = Body(...)):
+    require_admin(request)
+    target_type = str(payload.get("target_type") or "")
+    target_key = str(payload.get("target_key") or "")
+    data = save_codex_presentation(settings, target_type, target_key, payload.get("presentation") or {})
+    wiki = build_wiki(settings)
+    return {"ok": True, "presentation": data, "wiki_pages": len(wiki.get("pages", []))}
+
+
+@app.get("/api/admin/assets")
+def admin_assets(request: Request):
+    require_admin(request)
+    return _asset_rows()
+
+
+@app.post("/api/admin/assets/upload")
+async def admin_asset_upload(request: Request, image: UploadFile = File(...), destination: str = Form("uploads")):
+    require_admin(request)
+    suffix = Path(image.filename or "image.png").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}:
+        raise HTTPException(400, "Artwork must be PNG, JPG, WebP, GIF, or SVG.")
+    destination = destination.lower()
+    if destination == "project":
+        folder = settings.project_dir / "Images" / "Loreforge"
+        ref_prefix = "project:"
+        url_prefix = "/project-asset/Images/Loreforge/"
+        ref_path_prefix = "Images/Loreforge/"
+    else:
+        folder = settings.uploads_dir / "codex"
+        ref_prefix = "upload:"
+        url_prefix = "/uploads/codex/"
+        ref_path_prefix = "codex/"
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = "".join(c for c in Path(image.filename or "art").stem if c.isalnum() or c in "-_ ").strip().replace(" ", "-")[:70] or "art"
+    filename = f"{int(time.time())}-{secrets.token_hex(3)}-{stem}{suffix}"
+    target = folder / filename
+    size = 0
+    with target.open("wb") as fh:
+        while chunk := await image.read(1024 * 1024):
+            size += len(chunk)
+            if size > 40 * 1024 * 1024:
+                target.unlink(missing_ok=True)
+                raise HTTPException(413, "Artwork is larger than the 40 MB limit.")
+            fh.write(chunk)
+    rel = ref_path_prefix + filename
+    return {"ref": ref_prefix + rel, "url": url_prefix + quote(filename), "path": rel, "source": "project" if destination == "project" else "upload", "name": filename}
 
 
 @app.get("/api/admin/maps")
