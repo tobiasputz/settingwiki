@@ -15,11 +15,10 @@
   </aside>
   <main class="lore-main">
     <div class="reading-progress" id="readingProgress"></div>
-    <article class="lore-article reveal">
+    <article class="lore-article reveal {% if page.level == 'entity' %}entity-article{% endif %}">
       <header class="article-header">
         <div class="eyebrow">{{ page.chapter or 'SETTING' }}</div>
         <h1>{{ page.title }}</h1>
-        {% if page.excerpt %}<p class="article-deck">{{ page.excerpt }}</p>{% endif %}
       </header>
       <div class="ornament"><span>✦</span></div>
       <div class="lore-prose">{{ page.html|safe }}</div>

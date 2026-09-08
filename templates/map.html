@@ -4,19 +4,44 @@
 <main class="atlas-page" data-map='{{ map|tojson|forceescape }}'>
   <div class="atlas-toolbar">
     <a href="/" class="atlas-back">← Atlas</a>
-    <div><span class="eyebrow">INTERACTIVE MAP</span><h1>{{ map.name }}</h1></div>
-    <div class="atlas-controls"><button data-map-zoom="out">−</button><span id="zoomLevel">100%</span><button data-map-zoom="in">+</button><button data-map-reset title="Reset view">⌂</button></div>
+    <div class="atlas-title"><span class="eyebrow">INTERACTIVE MAP</span><h1>{{ map.name }}</h1></div>
+    <div class="atlas-controls">
+      <button data-map-locations title="Show location legend">⌖</button>
+      <button data-map-zoom="out" title="Zoom out">−</button>
+      <span id="zoomLevel">100%</span>
+      <button data-map-zoom="in" title="Zoom in">+</button>
+      <button data-map-reset title="Fit map">⌂</button>
+    </div>
   </div>
   <div class="atlas-stage" id="atlasStage">
     <div class="atlas-transform" id="atlasTransform">
-      <img id="atlasImage" src="/uploads/{{ map.image_path }}" alt="{{ map.name }}">
+      <img id="atlasImage" src="/uploads/{{ map.image_path }}" alt="{{ map.name }}" draggable="false">
+      <div class="atlas-map-grid" id="atlasMapGrid"></div>
       <div id="atlasMarkers" class="atlas-markers"></div>
     </div>
-    {% if map.cloud_enabled %}<canvas id="cloudCanvas" data-opacity="{{ map.cloud_opacity }}" data-speed="{{ map.cloud_speed }}"></canvas>{% endif %}
-    <div class="atlas-vignette"></div>
-    <div class="atlas-help">Wheel to zoom · drag to pan · select a marker for lore</div>
+    <canvas id="effectsCanvas" class="atlas-effects-canvas" aria-hidden="true"></canvas>
+    <div class="atlas-atmosphere" aria-hidden="true"></div>
+    <div class="atlas-vignette" aria-hidden="true"></div>
+    <div class="atlas-compass" data-map-compass aria-hidden="true"><span>N</span><i>✦</i></div>
+    <div class="atlas-location-panel" id="atlasLocationPanel" aria-label="Map locations">
+      <div class="atlas-location-head"><strong>Locations</strong><button id="closeLocationPanel" aria-label="Close">×</button></div>
+      <div class="atlas-location-search"><span>⌕</span><input id="atlasLocationSearch" placeholder="Find a place"></div>
+      <div id="atlasLegend" class="atlas-legend"></div>
+      <div class="atlas-location-subhead">Map markers</div><div id="atlasLocationList" class="atlas-location-list"></div>
+    </div>
+    <div class="atlas-help">Drag to explore · wheel or pinch to zoom · click a marker for lore</div>
   </div>
-  <aside class="marker-drawer" id="markerDrawer"><button id="closeMarker">×</button><span class="eyebrow" id="markerKind"></span><h2 id="markerTitle">Location</h2><p id="markerBody"></p><a id="markerLink" class="primary-button" href="#">Read codex entry →</a></aside>
+  <aside class="marker-drawer" id="markerDrawer">
+    <button id="closeMarker" aria-label="Close">×</button>
+    <div class="marker-drawer-icon" id="markerDrawerIcon">✦</div>
+    <span class="eyebrow" id="markerKind"></span>
+    <h2 id="markerTitle">Location</h2>
+    <p id="markerBody"></p>
+    <a id="markerLink" class="primary-button" href="#">Read codex entry →</a>
+  </aside>
 </main>
 {% endblock %}
-{% block scripts %}<script src="/static/map.js?v=1"></script>{% endblock %}
+{% block scripts %}
+<script src="/static/fantasy-map-effects.js?v=3"></script>
+<script src="/static/map.js?v=3"></script>
+{% endblock %}

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS maps (
     cloud_enabled INTEGER NOT NULL DEFAULT 1,
     cloud_opacity REAL NOT NULL DEFAULT 0.34,
     cloud_speed REAL NOT NULL DEFAULT 0.55,
+    effects_json TEXT NOT NULL DEFAULT '{}',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
@@ -64,6 +65,12 @@ def connect(settings: Settings) -> sqlite3.Connection:
 def init_db(settings: Settings) -> None:
     with connect(settings) as conn:
         conn.executescript(SCHEMA)
+        # Lightweight forward migrations for persistent Railway volumes created
+        # by older Loreforge versions. SQLite CREATE TABLE IF NOT EXISTS does
+        # not add newly introduced columns to an existing table.
+        map_columns = {row[1] for row in conn.execute("PRAGMA table_info(maps)").fetchall()}
+        if "effects_json" not in map_columns:
+            conn.execute("ALTER TABLE maps ADD COLUMN effects_json TEXT NOT NULL DEFAULT '{}' ")
 
 
 def get_setting(settings: Settings, key: str, default: str = "") -> str:

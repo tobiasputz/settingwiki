@@ -14,10 +14,13 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Import your existing Overleaf project.** Upload the Overleaf source ZIP from the Project tab. Loreforge backs up the existing project first.
 - **Keep your Overleaf workflow if you want it.** Export the entire current project as a ZIP at any time and upload it to Overleaf again.
 - **Understands project structure.** It detects the likely main `.tex` file, resolves `\input{}` / `\include{}`, preserves chapters/sections/subsections, inspects `\newcommand`, custom environments, packages, colors, and `\includegraphics` references.
-- **Fails gracefully on unusual LaTeX.** Unknown commands are unwrapped so their human-readable arguments are not silently discarded. Custom macros whose names look like NPC/location/lore-box commands are rendered as callouts in the wiki.
+- **Fails gracefully on unusual LaTeX.** Unknown commands are unwrapped so their human-readable arguments are not silently discarded. Custom macros whose names look like NPC/location/lore-box commands are rendered as callouts in the wiki. `\pon{...}` is treated specially as a Person-of-Note article root, so its Profile/Biography subsections stay together instead of becoming unrelated wiki pages.
+- **Understands campaign-book layouts.** `longtable`, `tabular`, `tabularx` and `tabulary` are converted to responsive HTML tables without leaking TeX column declarations such as `>{\raggedright}p{3.5cm}` into player text. `multicols` profile blocks become compact metadata grids.
+- **Smart imported images.** `\includegraphics` assets are resolved even when extensions are omitted or assets live below graphics folders. Figure/wrapfigure layouts, PDF graphics, captions and common TikZ page-overlay portraits are translated to web-friendly layouts. Players can click rendered images for a full-resolution lightbox, and portrait/landscape/panorama treatment is inferred from the actual image dimensions.
 - **Compiles the original PDF.** The Docker image includes `latexmk`, pdfLaTeX, XeLaTeX, LuaLaTeX, common LaTeX-extra packages, fonts and graphics packages. Project-local `.cls` and `.sty` files work normally.
-- **Interactive atlas.** Upload a map image, double-click to place markers, drag them into position, attach descriptions and link markers to codex pages. Markers can be player-visible or GM-only.
-- **Animated maps.** Player maps support wheel/button zoom, drag-to-pan, animated drifting clouds, map reset, marker drawers and codex links.
+- **Interactive atlas.** Upload a map image, enter explicit **＋ Location** placement mode, follow the placement crosshair, click once to place a marker, drag markers into position, attach descriptions and link them to codex pages. A searchable marker directory makes existing locations easy to find/focus. Player maps also expose a searchable location panel and category filters. Markers can be player-visible or GM-only and use distinct symbols for cities, ports, ruins, danger, secrets, temples, portals, quests, and more.
+- **Edge-locked map navigation.** Player maps use a cover-style minimum zoom by default: when you pan, the map cannot be pushed past the viewport and reveal empty space beyond its edges. Wheel, buttons, and touch pinch all zoom around the pointer/fingers.
+- **Fantasy atmosphere studio.** Per-map switches include moving clouds, cloud shadows, rolling fog, valley mist, god rays, rain, lightning, snow, blizzards, ashfall, sand/dust, heat haze, ocean shimmer, moving wave crests, embers, fireflies, pollen, leaves, petals, birds, bats, rare dragon shadows, arcane motes, spectral wisps, cursed miasma, ley lines, rune pulses, glowing spores, aurora, stars, shooting stars, vignette, fogged edges, parchment warmth, moonlight, blood-moon tint, cartographer grid, and compass rose. Presets now include Calm Fantasy, Stormbound, Frozen North, Haunted Realm, Arcane Night, Volcanic Wastes, Ancient Parchment, Coastal Breeze, Autumn Road, Feywild Glade, Scorched Desert, Underdark, Blood Moon, Ancient Ruins, Blighted Realm, and High Fantasy.
 - **Revision safety.** Loreforge keeps up to 40 saved revisions of each file edited in the browser.
 - **Separate player and GM access.** The player wiki can be public or protected with `PLAYER_PASSWORD`; the editor uses `ADMIN_PASSWORD`.
 
@@ -126,6 +129,9 @@ The converter:
 - recursively resolves included `.tex` files while preventing path traversal;
 - uses `\part`, `\chapter`, `\section`, `\subsection`, and `\subsubsection` to build the codex;
 - understands common inline formatting, lists, quotations, links and images;
+- converts `longtable`, `tabular`, `tabular*`, `tabularx`, and `tabulary` into responsive HTML tables while consuming TeX column specifications such as `>{\raggedright}p{3.5cm}` so they never leak into prose;
+- treats `\pon{Name}` as a Person-of-Note article root: following Profile/Biography sections stay in one article, label/value `multicols` profiles become structured metadata grids, and common TikZ-overlay NPC artwork becomes responsive portrait art;
+- interprets common image intent (`figure`, `wrapfigure`, TikZ overlay art, `width`, `scale`, portrait/panorama aspect ratio) and keeps full-resolution click-to-zoom;
 - detects custom `\newcommand` definitions and preserves their argument content;
 - renders macros with names resembling `npc`, `character`, `location`, `place`, `lorebox`, `note`, etc. as richer wiki callouts;
 - records unresolved images and discovered packages/macros in **Project → Formatting analysis**.
@@ -161,12 +167,31 @@ In the player wiki, this becomes a link to the matching slug.
 Open **Admin → Maps**:
 
 1. Create a map and upload PNG, JPG or WebP.
-2. Double-click the map to create a marker.
-3. Drag the marker to reposition it.
-4. Set the marker type, description, visibility and optional codex page.
-5. Enable animated clouds and tune opacity/speed.
+2. Press **＋ Location**, then click where the marker belongs. Double-click remains available as a shortcut.
+3. Drag existing markers directly on the map to reposition them.
+4. Choose a marker type, description, player visibility and optional codex page.
+5. Open **✦ Atmosphere** to configure the map.
+6. Choose a preset or independently toggle any of the fantasy layers. Intensity, animation speed, marker size/labels/pulses, viewport fit mode and edge locking are also configurable.
+7. Press **Save map** to publish those settings to the player atlas.
 
-The player map supports smooth pan/zoom and hides all GM-only markers.
+### Map movement
+
+The default player setting is **Edge-locked / cover**. Loreforge calculates the minimum zoom needed to cover the viewport and clamps X/Y movement so the user can never pan beyond the physical map boundaries. This fixes the "floating map" behavior where a player could previously shove the image into one corner and expose empty background.
+
+You can deliberately switch a map to **Show whole map / contain** from its Atmosphere panel. The map remains clamped, but letterboxing is allowed when the image and viewport aspect ratios differ.
+
+### Fantasy atmosphere layers
+
+All effects are browser-rendered overlays; the uploaded map file itself is never modified. Available switches include:
+
+- Atmosphere: moving clouds, cloud shadows, rolling fog, aurora, starfield.
+- Weather/terrain: rain, lightning, snow, ashfall, sand/dust, ocean shimmer.
+- Magic/life: embers, fireflies, arcane motes, ley lines, drifting leaves, distant birds.
+- Cartography: vignette, parchment warmth, moonlit tint, cartographer grid, compass rose.
+
+Global **Intensity** and **Motion** sliders let you tune the whole combination without micromanaging every individual effect. Players with reduced-motion preferences automatically receive greatly reduced animation speed.
+
+The player atlas also includes a type-filterable location panel, fixed-size markers that remain readable while zooming, marker focus behavior that keeps the selected location visible beside its lore drawer, and touch pinch zoom.
 
 ## Security notes
 
@@ -203,3 +228,8 @@ Loreforge v1.0.1+ stages uploaded ZIP archives, extraction, and transactional ro
 If you previously attempted an import with an older Loreforge build, open **Admin → Project → Railway persistence** and click **Clean failed-import leftovers**. The cleanup only targets legacy `project-backup-*`, `import-*`, and `upload-*.zip` artifacts; it does not delete the active `/data/project` campaign.
 
 The Project screen also reports total, used, and free persistent storage. If the final uncompressed campaign itself does not fit, increase the Railway volume mounted at `/data` (paid Railway plans support live volume resizing) or reduce unused assets in the Overleaf source ZIP.
+
+
+## v1.1 formatting and atlas fixes
+
+This build adds regression coverage for longtable column-spec leakage, `\pon` entity grouping/profile rendering, TikZ NPC portrait extraction, persistent-volume migration for map atmosphere settings, and effect-setting validation. The test suite currently contains 12 passing tests.
