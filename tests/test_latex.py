@@ -784,3 +784,90 @@ def test_terminal_fatal_after_pdf_success_is_not_accepted():
         "  xelatex: gave an error\n"
     )
     assert latex_mod._log_confirms_final_pdf(log, "main.pdf", pdf_changed=True) is False
+
+
+def test_successful_large_pdf_uses_zero_copy_preview_alias(tmp_path: Path, monkeypatch):
+    """A successful large PDF must not be duplicated on the persistent volume."""
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(
+        r"\documentclass{article}\begin{document}Large book\end{document}", encoding="utf-8"
+    )
+    monkeypatch.setattr(latex_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        pdf = Path(cwd) / "main.pdf"
+        pdf.write_bytes(b"%PDF-1.7\n" + b"x" * (1024 * 1024))
+        return SimpleNamespace(returncode=0, stdout="Latexmk: All targets (main.pdf) are up-to-date\n")
+
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+    result = compile_pdf(s)
+    source = s.project_dir / "main.pdf"
+    alias = s.build_dir / "campaign.pdf"
+    assert result.ok is True
+    assert result.pdf_path == "/preview/pdf"
+    assert source.exists() and alias.exists()
+    # Symlink on Railway/Linux, hardlink fallback on hosts where symlinks are unavailable.
+    assert alias.is_symlink() or os.path.samefile(source, alias)
+    if alias.is_symlink():
+        assert alias.lstat().st_size < source.stat().st_size
+
+
+def test_preview_alias_failure_does_not_turn_successful_tex_build_into_failure(tmp_path: Path, monkeypatch):
+    """Publishing the preview is optional; TeX success remains success even on ENOSPC-like link failures."""
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(
+        r"\documentclass{article}\begin{document}Compiled\end{document}", encoding="utf-8"
+    )
+    monkeypatch.setattr(latex_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        (Path(cwd) / "main.pdf").write_bytes(b"%PDF-1.7\ncompiled")
+        return SimpleNamespace(returncode=0, stdout="Latexmk: All targets (main.pdf) are up-to-date\n")
+
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        latex_mod,
+        "_publish_pdf_preview_alias",
+        lambda source, dest: (False, "Could not create a zero-copy preview alias: [Errno 28] No space left on device"),
+    )
+    result = compile_pdf(s)
+    assert result.ok is True
+    assert result.pdf_path == "/preview/pdf"
+    assert "served directly" in result.recovery
+    assert latex_mod.compiled_pdf_path(s) == s.project_dir / "main.pdf"
+
+
+def test_compile_reclaims_legacy_duplicate_preview_before_running_tex(tmp_path: Path, monkeypatch):
+    """The old full-copy preview is removed before a new build when main.pdf survives."""
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(
+        r"\documentclass{article}\begin{document}Book\end{document}", encoding="utf-8"
+    )
+    source = s.project_dir / "main.pdf"
+    source.write_bytes(b"%PDF-1.7\n" + b"x" * 1024)
+    legacy = s.build_dir / "campaign.pdf"
+    legacy.write_bytes(b"%PDF-1.7\n" + b"y" * 4096)
+
+    monkeypatch.setattr(latex_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    saw_legacy_during_run = []
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        saw_legacy_during_run.append(legacy.exists())
+        source.write_bytes(b"%PDF-1.7\n" + b"z" * 2048)
+        return SimpleNamespace(returncode=0, stdout="Latexmk: All targets (main.pdf) are up-to-date\n")
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+
+    result = compile_pdf(s)
+    assert result.ok is True
+    assert saw_legacy_during_run == [False]
+    assert "Reclaimed" in result.recovery
+    assert legacy.exists()  # recreated only as a zero-copy alias after success
+    assert legacy.is_symlink() or os.path.samefile(source, legacy)

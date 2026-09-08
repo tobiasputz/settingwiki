@@ -371,11 +371,15 @@ def _path_size(path: Path) -> int:
             return 0
     total = 0
     for item in path.rglob("*"):
-        if item.is_file():
-            try:
+        try:
+            if item.is_symlink():
+                # Count only the link itself. Following it would make a zero-copy
+                # preview alias look like a second 100+ MB PDF in storage reports.
+                total += item.lstat().st_size
+            elif item.is_file():
                 total += item.stat().st_size
-            except OSError:
-                pass
+        except OSError:
+            pass
     return total
 
 

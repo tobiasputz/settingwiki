@@ -2107,6 +2107,88 @@ def _log_confirms_final_pdf(log: str, pdf_name: str, *, pdf_changed: bool = Fals
 
     return final_success > last_fatal
 
+
+def _remove_legacy_duplicate_preview(source_pdf: Path, preview_pdf: Path) -> int:
+    """Remove an old byte-for-byte preview copy when the canonical PDF still exists.
+
+    Returns the logical bytes reclaimed. Symlinks and hardlinks are kept because
+    they do not duplicate the PDF allocation.
+    """
+    try:
+        if not source_pdf.exists() or not preview_pdf.exists() or preview_pdf.is_symlink():
+            return 0
+        try:
+            if os.path.samefile(source_pdf, preview_pdf):
+                return 0
+        except OSError:
+            pass
+        size = preview_pdf.stat().st_size
+        preview_pdf.unlink()
+        return size
+    except OSError:
+        return 0
+
+
+def _publish_pdf_preview_alias(source_pdf: Path, preview_pdf: Path) -> tuple[bool, str]:
+    """Expose the compiled PDF at the stable preview path without duplicating it.
+
+    Large campaign books can be hundreds of megabytes. Older Loreforge versions
+    copied ``project/main.pdf`` to ``build/campaign.pdf`` after every successful
+    build, consuming the same persistent Railway volume twice. If that copy ran
+    out of space, the TeX build was incorrectly reported as failed even though
+    latexmk/xdvipdfmx had already finished successfully.
+
+    Prefer a relative symlink (zero-copy), fall back to a hard link when symlinks
+    are unavailable (notably some Windows setups), and never duplicate the PDF
+    bytes merely for previewing. The HTTP preview route can serve ``source_pdf``
+    directly if both link mechanisms are unavailable.
+    """
+    try:
+        preview_pdf.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return False, f"Could not create the preview directory: {exc}"
+
+    # Remove an obsolete full-copy preview from older releases first. This can
+    # immediately reclaim >100 MB on small Railway volumes before creating the
+    # tiny alias. lexists-style handling matters for a broken symlink.
+    try:
+        if preview_pdf.exists() or preview_pdf.is_symlink():
+            preview_pdf.unlink()
+    except OSError as exc:
+        return False, f"Could not remove the legacy preview PDF: {exc}"
+
+    try:
+        relative_target = os.path.relpath(source_pdf.resolve(), preview_pdf.parent.resolve())
+        preview_pdf.symlink_to(relative_target)
+        return True, "symlink"
+    except OSError:
+        pass
+
+    try:
+        os.link(source_pdf, preview_pdf)
+        return True, "hardlink"
+    except OSError as exc:
+        return False, f"Could not create a zero-copy preview alias: {exc}"
+
+
+def compiled_pdf_path(settings: Settings) -> Path | None:
+    """Return the newest compiled project PDF, preferring the canonical source output.
+
+    ``/preview/pdf`` uses this helper so a successful compile remains viewable even
+    if a filesystem cannot create the optional stable alias in ``build/``.
+    """
+    try:
+        main_rel = choose_main(settings)
+        project_pdf = safe_project_path(settings, main_rel).with_suffix(".pdf")
+        if project_pdf.exists() and project_pdf.is_file():
+            return project_pdf
+    except (OSError, ValueError):
+        pass
+    legacy = settings.build_dir / "campaign.pdf"
+    if legacy.exists() and legacy.is_file():
+        return legacy
+    return None
+
 def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool = False) -> BuildResult:
     """Compile the source PDF and self-heal the common stale-latexmk failure mode.
 
@@ -2134,6 +2216,15 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
     pdf_mtime_before = pdf.stat().st_mtime_ns if pdf.exists() else None
     xdv_mtime_before = xdv.stat().st_mtime_ns if xdv.exists() else None
     recovery_steps: list[str] = []
+
+    # v1.3.9 and older stored a second full copy of the compiled PDF in /data/build.
+    # If the canonical project PDF still exists, reclaim those bytes *before* the
+    # next XeLaTeX run so a nearly-full Railway volume has room to update main.pdf.
+    reclaimed_preview_bytes = _remove_legacy_duplicate_preview(pdf, settings.build_dir / "campaign.pdf")
+    if reclaimed_preview_bytes:
+        recovery_steps.append(
+            f"Reclaimed {reclaimed_preview_bytes / (1024 * 1024):.1f} MB by removing Loreforge's obsolete duplicate PDF preview before compiling."
+        )
     if engine_recovery:
         recovery_steps.append(engine_recovery)
 
@@ -2331,23 +2422,41 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
         except OSError:
             pdf_changed = False
     partial_pdf = bool(code != 0 and pdf.exists() and pdf_changed)
+
+    # Never copy a large compiled PDF to /data/build. Both directories normally
+    # live on the same small Railway volume, so the old copy doubled storage and
+    # could turn a successful 100+ MB build into a false ENOSPC "compile error".
+    # A zero-copy alias is only a convenience; /preview/pdf can serve `pdf`
+    # directly if the host filesystem cannot create links.
     if build_ok or partial_pdf:
-        try:
-            settings.build_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(pdf, pdf_out)
-        except OSError:
-            build_ok = False
-            partial_pdf = False
+        alias_ok, alias_detail = _publish_pdf_preview_alias(pdf, pdf_out)
+        if alias_ok:
+            if alias_detail == "symlink":
+                recovery_steps.append("Published the PDF preview through a zero-copy link; no duplicate PDF is stored on the persistent volume.")
+            elif alias_detail == "hardlink":
+                recovery_steps.append("Published the PDF preview through a zero-copy hard link; no duplicate PDF bytes were written.")
+        else:
+            recovery_steps.append(
+                "The PDF compiled successfully, but Loreforge could not create the optional build/campaign.pdf alias ("
+                + alias_detail
+                + "). The preview is being served directly from the compiled project PDF instead."
+            )
     errors = _attach_source_context(parse_latex_errors(log, main.parent), settings.project_dir)
     errors = _attach_quick_fixes(errors, settings.project_dir)
     suggestions = [] if build_ok else _latex_failure_suggestions(log, engine)
     failure_excerpt = "" if build_ok else (_extract_failure_excerpt(pipeline_log) or _extract_failure_excerpt(log))
     if partial_pdf:
         suggestions.insert(0, "XeLaTeX produced a fresh PDF despite source errors. Loreforge is showing that recoverable preview, but fix the listed source errors before treating it as the final document.")
-    settings.build_dir.mkdir(parents=True, exist_ok=True)
-    (settings.build_dir / "latex.log").write_text(log[-260000:], encoding="utf-8", errors="replace")
+    try:
+        settings.build_dir.mkdir(parents=True, exist_ok=True)
+        (settings.build_dir / "latex.log").write_text(log[-260000:], encoding="utf-8", errors="replace")
+    except OSError as exc:
+        # A full volume must not retroactively turn a completed TeX build into a
+        # compile failure just because the optional persisted log could not grow.
+        recovery_steps.append(f"Could not persist the full build log: {exc}")
+    preview_ready = pdf.exists() or pdf_out.exists()
     return BuildResult(
-        build_ok and pdf_out.exists(), main_rel, "/preview/pdf" if pdf_out.exists() else None,
+        build_ok, main_rel, "/preview/pdf" if preview_ready else None,
         duration, command, log[-90000:], errors[:80], "\n".join(recovery_steps), suggestions, engine, partial_pdf, failure_excerpt,
     )
 

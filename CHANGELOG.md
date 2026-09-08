@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.10 — zero-copy PDF previews and ENOSPC false-failure fix
+
+- Fixed the remaining false `Compilation failed` state for very large successful PDFs. The TeX pipeline could finish cleanly, then Loreforge would duplicate `project/main.pdf` into `build/campaign.pdf`; if that second ~100+ MB copy filled the Railway volume, the filesystem error was swallowed and the successful TeX tail was displayed as the supposed blocker.
+- Loreforge no longer duplicates compiled PDF bytes. `/preview/pdf` serves the canonical project PDF directly and `build/campaign.pdf` is now only an optional zero-copy symlink/hardlink alias.
+- Before a new compile, an obsolete full-copy `build/campaign.pdf` from older versions is removed when the canonical project PDF still exists, immediately reclaiming the duplicate storage before XeLaTeX needs room for a new output.
+- Failure to create the optional preview alias can no longer turn a successful TeX build into a failed build; the preview falls back to the canonical PDF.
+- Persisting the optional build log is now best-effort, so a nearly full volume cannot retroactively invalidate a finished PDF.
+- Storage reporting no longer follows symlinked PDF previews and therefore does not misleadingly count the same file twice.
+- Added regression coverage for zero-copy large-PDF publishing, legacy preview reclamation, and ENOSPC-like alias failures.
+
 ## 1.3.9 — terminal-pass success detection
 
 - Fixed the remaining false-negative XeLaTeX build state where an earlier failed latexmk pass in the same combined log poisoned a later successful `xdvipdfmx`/PDF pass.

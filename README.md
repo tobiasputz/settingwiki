@@ -261,6 +261,8 @@ Loreforge verifies the final PDF rather than trusting only `latexmk`'s process e
 
 Loreforge evaluates the **terminal** build state, not merely latexmk's process return code. This matters for large XeLaTeX books where an earlier pass may fail or be retried, while a later `xdvipdfmx` stage successfully writes the final PDF. If the final successful PDF witness occurs after all fatal markers, Loreforge accepts the build and does not mislabel old diagnostics from an earlier pass as the current blocker.
 
+For large campaign books, Loreforge also avoids duplicating the finished PDF on the persistent volume. The canonical output remains beside the main `.tex` file and `/preview/pdf` serves it directly; `build/campaign.pdf` is only a zero-copy link when the host supports links. Upgrading from older versions automatically removes an obsolete full-copy preview when the canonical PDF still exists. This is important on small Railway volumes, where a 140 MB campaign PDF should consume roughly 140 MB, not roughly 280 MB merely to support the preview pane.
+
 ## Live editing behavior
 
 - Browser changes autosave after roughly 0.7 seconds of inactivity.

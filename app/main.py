@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import load_settings
-from .latex import analyze_project, build_wiki, choose_main, compile_pdf, load_wiki
+from .latex import analyze_project, build_wiki, choose_main, compile_pdf, compiled_pdf_path, load_wiki
 from .maps import create_map, create_marker, delete_map, delete_marker, get_map, list_maps, update_map, update_marker
 from .storage import (
     export_project_zip, get_setting, init_db, list_project_files, list_revisions,
@@ -260,8 +260,8 @@ def admin_wiki_preview(request: Request):
 @app.get("/preview/pdf")
 def preview_pdf(request: Request):
     if not player_allowed(request): raise HTTPException(401)
-    path=settings.build_dir / "campaign.pdf"
-    if not path.exists(): raise HTTPException(404, "No compiled PDF yet")
+    path=compiled_pdf_path(settings)
+    if path is None: raise HTTPException(404, "No compiled PDF yet")
     return FileResponse(path, media_type="application/pdf", headers={"Cache-Control":"no-store"})
 
 
@@ -279,7 +279,7 @@ def admin_status(request: Request):
         "has_project":has_tex,"analysis":analysis,"error":error,"data_dir":str(settings.data_dir),
         "persistent_storage_detected":bool(persistent),"latex_engine":settings.latex_engine,
         "shell_escape":settings.allow_shell_escape,
-        "pdf_ready":(settings.build_dir/"campaign.pdf").exists(),
+        "pdf_ready":compiled_pdf_path(settings) is not None,
         "wiki_ready":(settings.build_dir/"wiki_index.json").exists(),
         "site_title":get_setting(settings,"site_title","") or analysis.get("title","Campaign Atlas"),
         "tagline":get_setting(settings,"tagline","Explore the people, places, histories, and mysteries of the campaign."),
