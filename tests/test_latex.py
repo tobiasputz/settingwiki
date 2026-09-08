@@ -420,3 +420,47 @@ def test_engine_switch_clears_old_latexmk_dependency_state(tmp_path: Path, monke
     assert not stale.exists()
     assert "previous LaTeX engine" in result.recovery
     assert any("-xelatex" in call for call in calls)
+
+def test_build_doctor_offers_safe_fixes_for_common_imported_source_errors(tmp_path: Path):
+    from app.latex import _attach_quick_fixes
+    s = make_settings(tmp_path); init_db(s)
+    src = s.project_dir / "broken.tex"
+    src.write_text(
+        "\\subsubsection{Devotee Benefits} \\\\\n"
+        "\\textbf{Edicts:} Endure.\n"
+        "\\begin{multicols}\n"
+        "\\action{Detonating Rune}{Focus Spell}{Arcane}{Rules}\n"
+        "\\subsubection{Primary Shards}\n"
+        "The council meets.\\The event is public.\n",
+        encoding="utf-8",
+    )
+    errors = [
+        {"path":"broken.tex","file":"broken.tex","line":2,"message":"LaTeX Error: There's no line here to end."},
+        {"path":"broken.tex","file":"broken.tex","line":4,"message":"Missing number, treated as zero."},
+        {"path":"broken.tex","file":"broken.tex","line":5,"message":"Undefined control sequence."},
+        {"path":"broken.tex","file":"broken.tex","line":6,"message":"Undefined control sequence."},
+    ]
+    fixed = _attach_quick_fixes(errors, s.project_dir)
+    assert fixed[0]["quick_fix"]["replacement"] == r"\subsubsection{Devotee Benefits}"
+    assert fixed[1]["quick_fix"]["replacement"] == r"\begin{multicols}{2}"
+    assert r"\subsubsection" in fixed[2]["quick_fix"]["replacement"]
+    assert r"\The" not in fixed[3]["quick_fix"]["replacement"]
+
+def test_compile_keeps_fresh_pdf_preview_when_xelatex_returns_errors(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+\usepackage{fontspec}
+\begin{document}Broken but renderable\end{document}
+''', encoding="utf-8")
+    monkeypatch.setattr(latex_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        (Path(cwd) / "main.pdf").write_bytes(b"%PDF-1.4 partial")
+        return SimpleNamespace(returncode=12, stdout="main.tex:3: Undefined control sequence.\n")
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+    result = compile_pdf(s)
+    assert result.ok is False
+    assert result.partial_pdf is True
+    assert result.pdf_path == "/preview/pdf"
+    assert (s.build_dir / "campaign.pdf").exists()

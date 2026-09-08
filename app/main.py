@@ -343,6 +343,40 @@ def admin_delete_file(request: Request, path: str):
     return {"ok":True}
 
 
+@app.post("/api/admin/source-fix")
+def admin_source_fix(request: Request, payload: dict = Body(...)):
+    """Apply one Build Doctor one-line repair after verifying the source is unchanged."""
+    require_admin(request)
+    path = str(payload.get("path") or "")
+    expected = str(payload.get("expected") or "")
+    replacement = str(payload.get("replacement") or "")
+    try:
+        line_no = int(payload.get("line") or 0)
+    except (TypeError, ValueError):
+        line_no = 0
+    if not path or line_no < 1:
+        raise HTTPException(400, "Missing source-fix path/line")
+    p = safe_project_path(settings, path)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, "Source file not found")
+    raw = p.read_text(encoding="utf-8", errors="replace")
+    lines = raw.splitlines(keepends=True)
+    if line_no > len(lines):
+        raise HTTPException(409, "The source moved since this diagnostic was created. Compile again.")
+    entry = lines[line_no - 1]
+    current = entry.rstrip("\r\n")
+    ending = entry[len(current):]
+    if current != expected:
+        raise HTTPException(409, "That line changed since Build Doctor inspected it. Compile again before applying the fix.")
+    lines[line_no - 1] = replacement + ending
+    result = save_text_file(settings, path, "".join(lines))
+    try:
+        build_wiki(settings)
+    except Exception as exc:
+        result["wiki_warning"] = str(exc)
+    return {"ok": True, "path": path, "line": line_no, **result}
+
+
 @app.post("/api/admin/compile")
 def admin_compile(request: Request, clean: bool = False):
     require_admin(request)

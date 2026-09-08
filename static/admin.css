@@ -32,3 +32,6 @@
 .error-item strong{display:block;font-weight:500}
 .error-item code{display:block;margin-top:7px;padding:7px 8px;white-space:pre-wrap;overflow-wrap:anywhere;background:#0e1011;border:1px solid #2c3034;color:#9fa5aa;font:9px/1.5 var(--mono,monospace)}
 #useFirstEntryImageBtn:disabled{opacity:.38;cursor:not-allowed}
+
+/* v1.3.2 Build Doctor quick repairs + recoverable PDF preview */
+.error-entry{position:relative;margin:4px 0}.error-entry .error-item{margin:0}.doctor-fix-btn{margin:5px 0 9px;border:1px solid #5e5135;background:#272216;color:#d7bc7d;border-radius:4px;padding:6px 9px;font-size:9px;cursor:pointer}.doctor-fix-btn:hover{background:#342c1c;color:#f1d895}.doctor-fix-btn span{margin-right:4px}.partial-pdf-note{margin:8px 0 10px;padding:8px 10px;border:1px solid #61532f;background:#2b2618;color:#dcc887;border-radius:4px;font-size:10px;line-height:1.45}.build-summary-error.partial{border-color:#66552d;background:#30291c;color:#e0c784}

@@ -64,6 +64,7 @@ class BuildResult:
     recovery: str = ""
     suggestions: list[str] = field(default_factory=list)
     effective_engine: str = ""
+    partial_pdf: bool = False
 
 
 def strip_comments(line: str) -> str:
@@ -1716,6 +1717,92 @@ def _attach_source_context(errors: list[dict], project_root: Path, radius: int =
     return errors
 
 
+
+def _attach_quick_fixes(errors: list[dict], project_root: Path) -> list[dict]:
+    """Attach conservative, revision-safe one-line repairs to common TeX errors.
+
+    These fixes are intentionally narrow: Loreforge only proposes a replacement
+    when the offending source pattern is unambiguous. The UI still requires an
+    explicit GM click, and the backend verifies the line has not changed before
+    applying it.
+    """
+    cache: dict[str, list[str]] = {}
+    for error in errors:
+        rel = error.get("path") or error.get("file")
+        line_no = error.get("line")
+        if not rel or not line_no:
+            continue
+        path = (project_root / rel).resolve()
+        try:
+            path.relative_to(project_root.resolve())
+        except ValueError:
+            continue
+        if not path.exists() or not path.is_file():
+            continue
+        key = str(path)
+        if key not in cache:
+            try:
+                cache[key] = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+        lines = cache[key]
+        idx = max(0, min(len(lines)-1, int(line_no)-1)) if lines else 0
+        message = str(error.get("message") or "")
+
+        def offer(i: int, replacement: str, label: str, reason: str) -> None:
+            if i < 0 or i >= len(lines):
+                return
+            error["quick_fix"] = {
+                "path": rel, "line": i + 1, "expected": lines[i],
+                "replacement": replacement, "label": label, "reason": reason,
+            }
+
+        # TeX frequently reports the following line, so inspect both the reported
+        # line and its predecessor for an impossible forced line break.
+        if "There's no line here to end" in message:
+            for i in (idx, idx-1):
+                if i < 0 or i >= len(lines):
+                    continue
+                old = lines[i]
+                stripped = old.strip()
+                heading_or_boundary = (
+                    re.match(r"^\\(?:section|subsection|subsubsection|chapter|part)\*?\{.*\}\s*\\\\\s*(?:%.*)?$", stripped)
+                    or re.match(r"^\\begin\{multicols\}\{[1-4]\}\s*\\\\\s*(?:%.*)?$", stripped)
+                    or re.match(r"^\\\\\s*(?:%.*)?$", stripped)
+                )
+                if heading_or_boundary:
+                    replacement = re.sub(r"\s*\\\\\s*(?=(?:%.*)?$)", " ", old).rstrip()
+                    offer(i, replacement, "Remove invalid line break", "A heading/environment boundary cannot be followed by \\ before a paragraph exists.")
+                    break
+
+        if "Missing number, treated as zero" in message:
+            for i in (idx-1, idx):
+                if i < 0 or i >= len(lines):
+                    continue
+                old = lines[i]
+                if re.match(r"^\s*\\begin\{multicols\}\s*(?:%.*)?$", old):
+                    suffix = ""
+                    if "%" in old:
+                        prefix, comment = old.split("%", 1)
+                        replacement = prefix.rstrip() + "{2} %" + comment
+                    else:
+                        replacement = old.rstrip() + "{2}"
+                    offer(i, replacement, "Set multicols to 2 columns", "The multicols environment requires a mandatory column count such as {2}.")
+                    break
+
+        if "Undefined control sequence" in message:
+            for i in (idx, idx-1):
+                if i < 0 or i >= len(lines):
+                    continue
+                old = lines[i]
+                if "\\subsubection" in old:
+                    offer(i, old.replace("\\subsubection", "\\subsubsection"), "Fix \\subsubsection typo", "\\subsubection is not a LaTeX command; this is a high-confidence spelling correction.")
+                    break
+                if re.search(r"\\The\b", old):
+                    offer(i, re.sub(r"\\The\b", "The", old, count=1), "Replace accidental \\The", "The line starts an ordinary sentence with \\The, which TeX interprets as an undefined command.")
+                    break
+    return errors
+
 def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool = False) -> BuildResult:
     """Compile the source PDF and self-heal the common stale-latexmk failure mode.
 
@@ -1738,6 +1825,8 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
     env.setdefault("openin_any", "p")
     env.setdefault("openout_any", "p")
     started = time.perf_counter()
+    pdf = main.with_suffix(".pdf")
+    pdf_mtime_before = pdf.stat().st_mtime_ns if pdf.exists() else None
     recovery_steps: list[str] = []
     if engine_recovery:
         recovery_steps.append(engine_recovery)
@@ -1824,21 +1913,33 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
             pass
 
     duration = time.perf_counter() - started
-    pdf = main.with_suffix(".pdf")
     pdf_out = settings.build_dir / "campaign.pdf"
     build_ok = code == 0 and pdf.exists()
-    if build_ok:
+    pdf_changed = False
+    if pdf.exists():
         try:
+            current_mtime = pdf.stat().st_mtime_ns
+            pdf_changed = pdf_mtime_before is None or current_mtime != pdf_mtime_before
+        except OSError:
+            pdf_changed = False
+    partial_pdf = bool(code != 0 and pdf.exists() and pdf_changed)
+    if build_ok or partial_pdf:
+        try:
+            settings.build_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(pdf, pdf_out)
         except OSError:
             build_ok = False
+            partial_pdf = False
     errors = _attach_source_context(parse_latex_errors(log, main.parent), settings.project_dir)
+    errors = _attach_quick_fixes(errors, settings.project_dir)
     suggestions = [] if build_ok else _latex_failure_suggestions(log)
+    if partial_pdf:
+        suggestions.insert(0, "XeLaTeX produced a fresh PDF despite source errors. Loreforge is showing that recoverable preview, but fix the listed source errors before treating it as the final document.")
     settings.build_dir.mkdir(parents=True, exist_ok=True)
     (settings.build_dir / "latex.log").write_text(log[-260000:], encoding="utf-8", errors="replace")
     return BuildResult(
         build_ok and pdf_out.exists(), main_rel, "/preview/pdf" if pdf_out.exists() else None,
-        duration, command, log[-90000:], errors[:80], "\n".join(recovery_steps), suggestions, engine,
+        duration, command, log[-90000:], errors[:80], "\n".join(recovery_steps), suggestions, engine, partial_pdf,
     )
 
 def parse_latex_errors(log: str, cwd: Path) -> list[dict]:

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.2
+
+- Added conservative one-click **Build Doctor quick fixes** for high-confidence imported-source mistakes. The current set repairs stray `\\` after headings / `multicols` boundaries, missing `{2}` on bare `\begin{multicols}`, `\subsubection` typos, and accidental sentence-start `\The`. Every fix verifies the exact original line, uses Loreforge revision history, and recompiles immediately.
+- Build Doctor no longer treats every `Missing number` as a dimension problem: bare `multicols` environments are diagnosed specifically as missing the required column count.
+- Loreforge now keeps and previews a **fresh PDF generated despite LaTeX errors**, similar to Overleaf's recoverable-error workflow. The build remains visibly marked as having source errors so a partial PDF is never mistaken for a clean final build.
+- Improved the build panel with explicit `PDF produced with source errors` state and quick-repair controls attached directly to the relevant diagnostics.
+
 ## 1.3.1
 
 - Removed automatic first-image thumbnails from compact Codex navigation. Sidebar navigation is now clean, text-first, and never shows arbitrary action-symbol or decorative-image crops.
