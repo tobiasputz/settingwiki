@@ -1,4 +1,13 @@
 # Changelog
+## v1.3.6 — large-book XeLaTeX pipeline recovery
+
+- Fixed a major large-project bug where `LATEX_ENGINE=auto` resolving to XeLaTeX was treated as a fresh engine switch on **every compile**. Loreforge now remembers the effective engine, so `.aux`, `.toc`, `.fdb_latexmk`, and related incremental state are only cleared when the engine actually changes (or when the GM explicitly requests a clean build).
+- Added adaptive build windows for large XeLaTeX/LuaLaTeX campaign books. Projects with many source files or image assets receive a longer per-stage allowance while `LATEX_TIMEOUT` remains the minimum configured timeout.
+- Added first-class XeLaTeX **XDV → PDF recovery**. When XeLaTeX has successfully produced a fresh `.xdv` but the outer `latexmk` stage fails or times out before PDF conversion, Loreforge invokes `xdvipdfmx` separately and can recover the build without re-typesetting hundreds of pages.
+- If `xdvipdfmx` itself fails, Build Doctor now surfaces the converter's actual fatal message instead of showing the harmless end of the XeLaTeX transcript (`Output written on main.xdv ...`) as the blocking error.
+- FIRST BLOCKING ERROR now prioritizes the pipeline/controller log before appending the potentially huge TeX engine log, so timeout/conversion failures can no longer be pushed out of view by a 300+ page transcript.
+- Added regression coverage for XDV recovery, adaptive pipeline diagnostics, and preserving incremental auxiliary state across repeated AUTO → XeLaTeX builds.
+
 ## v1.3.4 — visible blocking diagnostics
 
 - Failed builds now always expose a **First blocking error** excerpt even when TeX does not emit a parseable `file.tex:line` diagnostic.
@@ -75,3 +84,11 @@
 - Font warnings now require an explicit "font not found" diagnostic; generic `fontspec` errors are no longer mislabeled as missing fonts.
 - Build Doctor now compares the engine Loreforge selected with the TeX engine banner actually observed in the log and reports project-local `latexmkrc` overrides when they disagree.
 - Bumped static asset cache keys so Railway/browser caches cannot keep an older admin UI that lacks the **FIRST BLOCKING ERROR** panel after an application update.
+
+## 1.3.7 — Atmospheric navigation backgrounds
+- Restored first-image navigation artwork as the default, but as a full darkened row background rather than the old small thumbnail icons.
+- Explicit Table-of-Contents artwork still overrides the automatically discovered first image.
+- Added **Project → Use the first image as navigation background by default**, enabled by default and persisted per campaign.
+- The setting affects both Codex overview entry rows and the desktop in-article Codex sidebar; disabling it returns navigation to text-only unless deliberate TOC art was assigned.
+- Automatic navigation backgrounds use a dedicated presentation field, so they do not unexpectedly turn first-entry images into Lore Network thumbnails or deliberate chapter-cover artwork.
+- PF2e action/reaction glyphs from `Images/Symbols` are skipped when choosing the automatic background, avoiding giant one-action icons when an entry begins with a rules block.

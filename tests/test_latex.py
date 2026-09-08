@@ -188,7 +188,8 @@ Beyond it lies the drowned road.
     assert "The old gate hums" in page["plain_text"]
 
 
-def test_first_page_image_is_suggestion_not_automatic_nav_art(tmp_path: Path):
+def test_first_page_image_is_automatic_navigation_background_by_default(tmp_path: Path):
+    from app.storage import set_setting
     s = make_settings(tmp_path); init_db(s)
     (s.project_dir / "Images").mkdir()
     (s.project_dir / "Images" / "selen.png").write_bytes(b"image")
@@ -206,14 +207,25 @@ The silver city.
     category = next(x for x in wiki["categories"] if x["title"] == "Cities")
     assert page["presentation"]["toc_image_url"] == ""
     assert page["presentation"]["auto_image_url"].endswith("/project-asset/Images/selen.png")
-    assert page["presentation"]["suggested_toc_image_url"].endswith("/project-asset/Images/selen.png")
     assert page["presentation"]["display_toc_image_url"] == ""
+    assert page["presentation"]["navigation_background_url"].endswith("/project-asset/Images/selen.png")
+    assert page["presentation"]["navigation_art_is_auto"] is True
     assert category["presentation"]["display_toc_image_url"] == ""
+    assert category["presentation"]["navigation_background_url"].endswith("/project-asset/Images/selen.png")
+
+    set_setting(s, "auto_navigation_art", "0")
+    wiki = build_wiki(s)
+    page = next(x for x in wiki["pages"] if x["title"] == "Selenia")
+    assert page["presentation"]["display_toc_image_url"] == ""
+    assert page["presentation"]["navigation_background_url"] == ""
+    assert page["presentation"]["navigation_art_is_auto"] is False
 
     save_codex_presentation(s, "page", page["slug"], {"toc_image": "project:Images/selen.png"})
     wiki = build_wiki(s)
     page = next(x for x in wiki["pages"] if x["title"] == "Selenia")
     assert page["presentation"]["display_toc_image_url"].endswith("/project-asset/Images/selen.png")
+    assert page["presentation"]["navigation_background_url"].endswith("/project-asset/Images/selen.png")
+    assert page["presentation"]["navigation_art_is_auto"] is False
 
 
 def test_unique_codex_names_are_auto_linked_and_create_backlinks(tmp_path: Path):
@@ -560,3 +572,116 @@ Package fontspec Error: The font \"Imaginary Rune Font\" cannot be found.
 """
     suggestions = _latex_failure_suggestions(log, "xelatex")
     assert any("Imaginary Rune Font" in x for x in suggestions)
+
+
+def test_xelatex_xdv_stage_is_converted_separately_after_outer_failure(tmp_path: Path, monkeypatch):
+    """A large XeLaTeX book may finish XDV generation before latexmk times out.
+
+    Loreforge should finish xdvipdfmx as a separate stage instead of reporting
+    the successful 300+ page XeLaTeX transcript as an unknown compile failure.
+    """
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+    from dataclasses import replace
+
+    s = make_settings(tmp_path); init_db(s)
+    s = replace(s, latex_engine="auto", latex_timeout=20)
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+\usepackage{fontspec}
+\setmainfont{TeX Gyre Adventor}
+\begin{document}A very long book.\end{document}
+''', encoding="utf-8")
+
+    calls = []
+    def fake_which(name):
+        if name in {"latexmk", "xelatex", "xdvipdfmx"}:
+            return f"/usr/bin/{name}"
+        return None
+
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        calls.append((list(cmd), timeout))
+        cwd = Path(cwd)
+        if "latexmk" in Path(cmd[0]).name:
+            (cwd / "main.xdv").write_bytes(b"fresh xdv")
+            return SimpleNamespace(returncode=12, stdout=(
+                "Latexmk: applying rule 'xelatex'...\n"
+                "Output written on main.xdv (347 pages, 5929080 bytes).\n"
+                "Loreforge stopped this build stage after 20s.\n"
+            ))
+        if "xdvipdfmx" in Path(cmd[0]).name:
+            (cwd / "main.pdf").write_bytes(b"%PDF-1.4 recovered from xdv")
+            return SimpleNamespace(returncode=0, stdout="main.xdv -> main.pdf\n347 pages written\n")
+        return SimpleNamespace(returncode=1, stdout="unexpected")
+
+    monkeypatch.setattr(latex_mod.shutil, "which", fake_which)
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+    result = compile_pdf(s)
+    assert result.ok is True
+    assert result.effective_engine == "xelatex"
+    assert any("xdvipdfmx" in Path(call[0][0]).name for call in calls)
+    assert "XDV-to-PDF conversion" in result.recovery
+    assert (s.build_dir / "campaign.pdf").exists()
+
+
+def test_auto_xelatex_does_not_purge_aux_state_on_every_compile(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+    from dataclasses import replace
+
+    s = make_settings(tmp_path); init_db(s)
+    s = replace(s, latex_engine="auto")
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{article}
+\usepackage{fontspec}
+\begin{document}Hello\end{document}
+''', encoding="utf-8")
+
+    def fake_which(name):
+        return f"/usr/bin/{name}"
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        (Path(cwd) / "main.pdf").write_bytes(b"%PDF-1.4 ok")
+        return SimpleNamespace(returncode=0, stdout="Latexmk: All targets are up-to-date\n")
+
+    monkeypatch.setattr(latex_mod.shutil, "which", fake_which)
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+
+    first = compile_pdf(s)
+    # Put an aux file back after the first build. The second AUTO -> xelatex
+    # compile must preserve it rather than treating auto-selection as a switch.
+    aux = s.project_dir / "main.aux"
+    aux.write_text("keep me", encoding="utf-8")
+    second = compile_pdf(s)
+    assert first.ok and second.ok
+    assert aux.exists()
+    assert "previous LaTeX engine" not in second.recovery
+
+
+def test_failure_excerpt_prefers_pipeline_timeout_over_clean_engine_tail():
+    from app.latex import _extract_failure_excerpt
+    log = (
+        "Output written on main.xdv (347 pages, 5929080 bytes).\n"
+        "Loreforge stopped this build stage after 60s.\n"
+        "[TeX engine log]\n"
+        "Package rerunfilecheck Info: File `main.out' has not changed.\n"
+        "Output written on main.xdv (347 pages, 5929080 bytes).\n"
+    )
+    excerpt = _extract_failure_excerpt(log)
+    assert "stopped this build stage after 60s" in excerpt
+
+
+def test_automatic_navigation_background_skips_pf2e_action_symbol_images(tmp_path: Path):
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "Images" / "Symbols").mkdir(parents=True)
+    (s.project_dir / "Images" / "NPCs").mkdir(parents=True)
+    (s.project_dir / "Images" / "Symbols" / "oneaction.png").write_bytes(b"icon")
+    (s.project_dir / "Images" / "NPCs" / "hero.png").write_bytes(b"portrait")
+    (s.project_dir / "main.tex").write_text(r"""\documentclass{book}
+\usepackage{graphicx}
+\begin{document}
+\chapter{People}
+\section{Hero}
+\actionOne Attack quickly.
+\includegraphics[width=.6\linewidth]{Images/NPCs/hero.png}
+\end{document}
+""", encoding="utf-8")
+    page = next(x for x in build_wiki(s)["pages"] if x["title"] == "Hero")
+    assert page["presentation"]["navigation_background_url"].endswith("/project-asset/Images/NPCs/hero.png")

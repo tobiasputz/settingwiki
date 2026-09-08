@@ -18,7 +18,7 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Understands campaign-book layouts.** `longtable`, `tabular`, `tabularx` and `tabulary` are converted to responsive HTML tables without leaking TeX column declarations such as `>{\raggedright}p{3.5cm}` into player text. `multicols` profile blocks become compact metadata grids.
 - **Smart imported images.** `\includegraphics` assets are resolved even when extensions are omitted or assets live below graphics folders. Figure/wrapfigure layouts, PDF graphics, captions and common TikZ page-overlay portraits are translated to web-friendly layouts. Players can click rendered images for a full-resolution lightbox, and portrait/landscape/panorama treatment is inferred from the actual image dimensions.
 - **Compiles the original PDF.** The Docker image includes `latexmk`, pdfLaTeX, XeLaTeX, LuaLaTeX, common LaTeX-extra packages, fonts and graphics packages. Project-local `.cls` and `.sty` files work normally.
-- **Codex Studio / art direction.** Every chapter and entry can have its own table-of-contents artwork. Entries can additionally have a cinematic hero, full-page background, focal point, background strength, article width, feature status, and public/teaser/hidden discovery state. TOC artwork is deliberate: choose it manually in Codex Studio, or explicitly press **Use first entry image** when that image is actually suitable. Compact sidebar navigation remains text-only.
+- **Codex Studio / art direction.** Every chapter and entry can have its own table-of-contents artwork. Entries can additionally have a cinematic hero, full-page background, focal point, background strength, article width, feature status, and public/teaser/hidden discovery state. By default, the first image in an entry becomes a darkened atmospheric **navigation-row background**; deliberate TOC artwork overrides it. The old small thumbnail icons remain disabled. Automatic navigation backgrounds can be switched off globally in Project settings.
 - **Free-form web artwork without giving up LaTeX.** The **Artwork** tool inserts an ordinary `\includegraphics` figure for the PDF plus a harmless `% loreforge-image:` comment for the wiki. Layouts include centered, floating left/right, wide, breakout, full-bleed, portrait, banner, decorative edge art, and watermark, with independent width, opacity, crop focus, blend mode, frame, caption, and parallax controls. Existing automatic image handling still works when you do not add a directive.
 - **Atmospheric scene panels.** Select any normal LaTeX prose and press **Scene** to place that passage over an image in the player wiki. The source remains valid ordinary LaTeX because Loreforge stores the web presentation as comments around the selected text. Scene tones include dark, light, sepia, arcane, mist, and blood, with focus, image strength, height, and optional parallax.
 - **Living lore connections.** Unique codex names mentioned naturally in prose can be cross-linked automatically (optional in Project settings), explicit `\wiki{}` links remain supported, and pages show related lore/backlinks. The **Lore Network** player view turns these relationships into a pan/zoom interactive graph with artwork-backed nodes.
@@ -249,6 +249,10 @@ This means the wiki becomes progressively more interconnected as the LaTeX sourc
 
 Every failed build shows a prominent **First blocking error** excerpt. This fallback is intentionally independent of the clickable file/line parser, so unfamiliar TeX/package failures cannot leave the editor at a generic “Compilation failed” state. **Copy diagnostic bundle** copies that excerpt, up to 20 structured errors, and the recent engine-log tail for troubleshooting.
 
+### Automatic navigation backgrounds
+
+Navigation is image-backed by default without bringing back the old tiny thumbnail icons. Loreforge uses the first rendered image in an entry as a darkened full-row background in the Codex overview and desktop article sidebar. A manually chosen **Table-of-contents artwork** image overrides the automatic image for that entry. Disable **Project → Use the first image as navigation background by default** to return automatic rows to text-only while keeping manually assigned TOC art.
+
 ## Live editing behavior
 
 - Browser changes autosave after roughly 0.7 seconds of inactivity.
@@ -354,3 +358,11 @@ This build adds regression coverage for longtable column-spec leakage, `\pon` en
 ### Build Doctor engine sanity check (v1.3.5)
 
 If the workspace says `Compilation failed · xelatex`, Build Doctor no longer infers a pdfLaTeX/fontspec problem merely because the words `fontspec` and `fatal` occur somewhere in the same long log. It reports that incompatibility only when TeX explicitly says fontspec was run under pdfTeX. Loreforge also compares the selected engine with the engine banner actually seen in the log; a mismatch usually points to a project-local `latexmkrc`/`.latexmkrc` override.
+
+### Large XeLaTeX books and `.xdv` output (v1.3.6)
+
+When `latexmk -xelatex` runs, XeLaTeX deliberately typesets to an intermediate `.xdv` file and `latexmk` then calls `xdvipdfmx` to create the final PDF. Seeing a line such as `Output written on main.xdv (347 pages, ...)` therefore means the **TeX typesetting stage completed**; it is not itself an error.
+
+Loreforge now handles that pipeline explicitly. Large projects receive an adaptive build allowance, AUTO-selected XeLaTeX no longer clears auxiliary files on every compile, and a fresh `.xdv` can be converted to PDF in a separate recovery stage if the outer `latexmk` process stops before conversion. If `xdvipdfmx` fails, its own diagnostic is promoted to **FIRST BLOCKING ERROR**.
+
+`LATEX_TIMEOUT` is now treated as the minimum per-stage allowance. Large XeLaTeX/LuaLaTeX projects may automatically receive 180–300 seconds so a long illustrated campaign book is not killed by the historical 60-second default.

@@ -285,6 +285,7 @@ def admin_status(request: Request):
         "tagline":get_setting(settings,"tagline","Explore the people, places, histories, and mysteries of the campaign."),
         "main_file":get_setting(settings,"main_file","") or analysis.get("main_file",""),
         "auto_link_codex":get_setting(settings,"auto_link_codex","1").strip().lower() not in {"0","false","no","off"},
+        "auto_navigation_art":get_setting(settings,"auto_navigation_art","1").strip().lower() not in {"0","false","no","off"},
         "storage":storage_report(settings),
     }
 
@@ -516,6 +517,8 @@ def admin_settings(request: Request, payload: dict = Body(...)):
         if key in payload: set_setting(settings,key,str(payload[key]))
     if "auto_link_codex" in payload:
         set_setting(settings,"auto_link_codex","1" if payload.get("auto_link_codex") else "0")
+    if "auto_navigation_art" in payload:
+        set_setting(settings,"auto_navigation_art","1" if payload.get("auto_navigation_art") else "0")
     if payload.get("main_file"): choose_main(settings)
     try: build_wiki(settings)
     except Exception: pass

@@ -359,7 +359,14 @@ def _project_engine_signals(settings: Settings) -> dict:
 
 
 def _effective_latex_engine(settings: Settings) -> tuple[str, str]:
-    """Return the safe engine and an optional Build Doctor explanation."""
+    """Return the safe engine and an optional Build Doctor explanation.
+
+    ``auto`` resolving to XeLaTeX is not an engine *change* on every build.  It is
+    simply the project's effective engine.  The previous wording caused the
+    compiler to purge auxiliary state on every compile for fontspec projects,
+    which made large books unnecessarily slow and prevented latexmk from
+    converging incrementally.
+    """
     requested = (settings.latex_engine or "auto").strip().lower()
     if requested not in {"auto", "pdflatex", "xelatex", "lualatex"}:
         requested = "auto"
@@ -370,9 +377,11 @@ def _effective_latex_engine(settings: Settings) -> tuple[str, str]:
         # should not be downgraded to XeLaTeX.
         if signals["fontspec"] and requested == "lualatex" and not signals["lua"]:
             return "lualatex", ""
+        reason = "LuaLaTeX-only commands" if required == "lualatex" else "fontspec / \\setmainfont"
+        if requested == "auto":
+            return required, f"Detected {reason} in the project and auto-selected {required}."
         if requested != required:
-            reason = "LuaLaTeX-only commands" if required == "lualatex" else "fontspec / \\setmainfont"
-            return required, f"Detected {reason} in the project and automatically switched the build engine from {requested or 'auto'} to {required}."
+            return required, f"Detected {reason} in the project and safely switched from configured {requested} to {required}."
         return required, ""
     if requested == "auto":
         return "pdflatex", ""
@@ -431,8 +440,20 @@ def _annotate_headings(html_body: str) -> tuple[str, list[dict]]:
 
 
 def _first_rendered_image_url(html_body: str) -> str:
-    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html_body, flags=re.IGNORECASE)
-    return html.unescape(match.group(1)) if match else ""
+    """Return the first *content* image suitable for atmospheric navigation art.
+
+    PF2e action glyphs are real image tags too, but using a one-action/reaction
+    symbol as a full navigation background is almost never useful.  Skip the
+    project's Symbols folder and action-symbol markup, then use the next image.
+    """
+    for match in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html_body, flags=re.IGNORECASE):
+        src = html.unescape(match.group(1))
+        src_lower = src.lower().replace("%20", " ")
+        nearby = html_body[max(0, match.start() - 220):match.end()].lower()
+        if "/images/symbols/" in src_lower or "pf2-action-symbol" in nearby:
+            continue
+        return src
+    return ""
 
 
 class _CodexAutoLinker(HTMLParser):
@@ -633,18 +654,23 @@ def build_wiki(settings: Settings) -> dict:
         pages = [WikiPage("setting", analysis["title"], None, "document", html_body, plain, analysis["main_file"], 1, plain[:240], 0)]
 
     presentations = list_codex_presentations(settings)
+    auto_navigation_art = get_setting(settings, "auto_navigation_art", "1").strip().lower() not in {"0", "false", "no", "off"}
     page_dicts: list[dict] = []
     for page in pages:
         item = asdict(page)
         item["presentation"] = _presentation_for_web(settings, presentations.get(("page", page.slug), {}))
         item["html"], item["outline"] = _annotate_headings(item.get("html", ""))
         auto_image = _first_rendered_image_url(item["html"])
-        # First-entry artwork is only a suggestion. Automatically promoting it to
-        # navigation art produced odd crops (action icons, decorative separators,
-        # tiny symbols, etc.). Compact navigation therefore uses deliberate art only.
+        # Navigation artwork can follow the first image in an entry.  Explicit TOC
+        # artwork always wins.  The automatic mode is intentionally a project-level
+        # preference so campaigns can turn it off without clearing per-entry art.
+        # The player UI uses this as a broad, darkened row background -- never as the
+        # small thumbnail treatment removed in v1.3.1.
         item["presentation"]["auto_image_url"] = auto_image
         item["presentation"]["suggested_toc_image_url"] = auto_image if not item["presentation"].get("toc_image_url") else ""
         item["presentation"]["display_toc_image_url"] = item["presentation"].get("toc_image_url") or ""
+        item["presentation"]["navigation_background_url"] = item["presentation"].get("toc_image_url") or (auto_image if auto_navigation_art else "")
+        item["presentation"]["navigation_art_is_auto"] = bool(auto_navigation_art and auto_image and not item["presentation"].get("toc_image_url"))
         page_dicts.append(item)
 
     # Turn ordinary mentions of unique codex entry names into links. This is
@@ -705,8 +731,9 @@ def build_wiki(settings: Settings) -> dict:
         })
 
     for bucket in categories:
-        # Chapter covers are deliberate too. Keep a first-page image only as a
-        # possible future/admin suggestion; never silently promote it to cover art.
+        # Chapter navigation art follows the same preference: explicit chapter art
+        # wins, otherwise the first illustrated entry can provide an atmospheric
+        # background when automatic navigation artwork is enabled.
         auto_cover = next((
             p.get("presentation", {}).get("auto_image_url")
             for p in bucket.get("pages", [])
@@ -715,6 +742,8 @@ def build_wiki(settings: Settings) -> dict:
         bucket["presentation"]["auto_image_url"] = auto_cover
         bucket["presentation"]["suggested_toc_image_url"] = auto_cover if not bucket["presentation"].get("toc_image_url") else ""
         bucket["presentation"]["display_toc_image_url"] = bucket["presentation"].get("toc_image_url") or ""
+        bucket["presentation"]["navigation_background_url"] = bucket["presentation"].get("toc_image_url") or (auto_cover if auto_navigation_art else "")
+        bucket["presentation"]["navigation_art_is_auto"] = bool(auto_navigation_art and auto_cover and not bucket["presentation"].get("toc_image_url"))
 
     payload = {
         "title": get_setting(settings, "site_title", "") or analysis["title"],
@@ -1699,6 +1728,11 @@ def _latex_failure_suggestions(log: str, effective_engine: str = "") -> list[str
     if re.search(r"File ended while scanning use of|Runaway argument", log):
         suggestions.append("TeX detected an unfinished argument/environment. Check for a missing }, \\end{...}, or unmatched custom macro near the first reported source line.")
 
+    if re.search(r"Loreforge stopped this build stage after \d+s", log):
+        suggestions.append("The LaTeX pipeline hit its time allowance, not a TeX syntax error. Loreforge now gives large XeLaTeX projects a longer adaptive build window and can finish a fresh XDV with xdvipdfmx as a separate stage.")
+    if re.search(r"xdvipdfmx(?::fatal:|[^\n]*(?:error|failed))|No output PDF file written|XDV -> PDF stage", log, re.IGNORECASE):
+        suggestions.append("XeLaTeX finished typesetting but PDF conversion failed. The blocking excerpt now shows xdvipdfmx's own message; this is usually an image/font embedding problem rather than a .tex syntax problem.")
+
     observed = _observed_latex_engine(log)
     effective = (effective_engine or "").lower()
     if effective in {"xelatex", "lualatex"} and observed == "pdflatex":
@@ -1969,7 +2003,7 @@ def _extract_failure_excerpt(log: str, *, before: int = 3, after: int = 10) -> s
     strong = [
         re.compile(r"^.+\.(?:tex|sty|cls|bib):\d+:\s*(?:LaTeX|Package|Class|Font|Undefined|Missing|Extra|Runaway|Emergency|Fatal|Incomplete|File ended|Paragraph ended|Illegal|Misplaced|Use of).*", re.I),
         re.compile(r"^!\s+.+"),
-        re.compile(r"(?:Emergency stop|Fatal error occurred|Runaway argument|File ended while scanning use of|Incomplete \\if|Undefined control sequence|Missing number, treated as zero|There's no line here to end|Option clash for package|LaTeX Error: File .* not found)", re.I),
+        re.compile(r"(?:Emergency stop|Fatal error occurred|Runaway argument|File ended while scanning use of|Incomplete \\if|Undefined control sequence|Missing number, treated as zero|There's no line here to end|Option clash for package|LaTeX Error: File .* not found|Loreforge stopped this build stage after \d+s|xdvipdfmx:fatal:|No output PDF file written|Image inclusion failed)", re.I),
     ]
     # Search each diagnostic/engine section in chronological order, skipping
     # latexmk's generic collected-error summary where possible.
@@ -2032,33 +2066,65 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
     env.setdefault("openout_any", "p")
     started = time.perf_counter()
     pdf = main.with_suffix(".pdf")
+    xdv = main.with_suffix(".xdv")
     pdf_mtime_before = pdf.stat().st_mtime_ns if pdf.exists() else None
+    xdv_mtime_before = xdv.stat().st_mtime_ns if xdv.exists() else None
     recovery_steps: list[str] = []
     if engine_recovery:
         recovery_steps.append(engine_recovery)
-        # A persistent Railway project may still contain latexmk dependency state
-        # written by the previously selected engine (most commonly pdfLaTeX).
-        # Clear only generated state when changing engines so the very first build
-        # after an upgrade cannot be trapped by that old rule database.
+
+    # Remember the effective engine instead of treating AUTO -> XeLaTeX as a
+    # fresh engine switch on every compile.  Repeatedly deleting .aux/.toc/.fdb
+    # files made large imported books start from scratch every single time and
+    # was a major cause of apparent compile failures/timeouts.
+    last_engine = get_setting(settings, "last_effective_latex_engine", "").strip().lower()
+    if last_engine != engine:
         removed = _purge_latexmk_state(main)
-        if removed:
+        if last_engine:
             recovery_steps.append(
-                "Cleared generated dependency state from the previous LaTeX engine: "
+                f"Build engine changed from {last_engine} to {engine}; cleared generated dependency state once: "
+                + (", ".join(removed) if removed else "no stale state was present")
+            )
+        elif removed:
+            recovery_steps.append(
+                f"Initialized the {engine} build state and cleared pre-existing generated dependency files from the previous LaTeX engine state once: "
                 + ", ".join(removed)
             )
+        set_setting(settings, "last_effective_latex_engine", engine)
+
+    # A 300+ page illustrated XeLaTeX book can legitimately need longer than
+    # the historical 60 s default.  Scale the latexmk allowance for large
+    # projects while keeping LATEX_TIMEOUT as the minimum user-configured value.
+    try:
+        tex_count = sum(1 for _ in settings.project_dir.rglob("*.tex"))
+        image_count = sum(1 for pattern in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.pdf") for _ in settings.project_dir.rglob(pattern))
+    except OSError:
+        tex_count = image_count = 0
+    large_project_timeout = 0
+    if engine in {"xelatex", "lualatex"}:
+        if tex_count >= 40 or image_count >= 80:
+            large_project_timeout = 300
+        elif tex_count >= 20 or image_count >= 30:
+            large_project_timeout = 180
+    compile_timeout = max(settings.latex_timeout, large_project_timeout)
+    if compile_timeout > settings.latex_timeout:
+        recovery_steps.append(
+            f"Large XeLaTeX project detected ({tex_count} TeX files, {image_count} image/PDF assets); extended the per-stage build allowance from {settings.latex_timeout}s to {compile_timeout}s."
+        )
 
     def run(cmd: list[str], timeout: int | None = None) -> tuple[int, str]:
+        actual_timeout = timeout or compile_timeout
         try:
             proc = subprocess.run(
                 cmd, cwd=main.parent, text=True, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, timeout=timeout or settings.latex_timeout, env=env,
+                stderr=subprocess.STDOUT, timeout=actual_timeout, env=env,
             )
             return proc.returncode, proc.stdout or ""
         except subprocess.TimeoutExpired as exc:
             output = exc.stdout or ""
             if isinstance(output, bytes):
                 output = output.decode("utf-8", errors="replace")
-            return 124, str(output) + f"\nLoreforge stopped compilation after {settings.latex_timeout}s."
+            return 124, str(output) + f"\nLoreforge stopped this build stage after {actual_timeout}s."
 
     command: list[str]
     if latexmk:
@@ -2081,6 +2147,38 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
             log += "\n\n[Loreforge Build Doctor]\n" + recovery_steps[-1] + "\n\n[Clean retry]\n" + retry_log
             code = retry_code
             command = retry_command
+
+        # XeLaTeX under latexmk intentionally writes an .xdv first and then
+        # converts it with xdvipdfmx.  For very large illustrated books the old
+        # outer timeout could fire after TeX had successfully produced hundreds
+        # of pages but before that final conversion happened.  If we have a fresh
+        # XDV, finish (or diagnostically repeat) the conversion as its own stage.
+        if code != 0 and engine == "xelatex" and xdv.exists() and not parse_latex_errors(log, main.parent):
+            try:
+                current_xdv_mtime = xdv.stat().st_mtime_ns
+                fresh_xdv = xdv_mtime_before is None or current_xdv_mtime != xdv_mtime_before
+            except OSError:
+                fresh_xdv = False
+            if fresh_xdv:
+                converter = shutil.which("xdvipdfmx")
+                if converter:
+                    converter_command = [converter, "-E", "-o", pdf.name, xdv.name]
+                    converter_code, converter_log = run(
+                        converter_command,
+                        timeout=max(settings.latex_timeout, 180),
+                    )
+                    log += "\n\n[Loreforge XDV -> PDF stage]\n" + converter_log
+                    if converter_code == 0 and pdf.exists():
+                        code = 0
+                        recovery_steps.append(
+                            "XeLaTeX completed the document as XDV; Loreforge finished the XDV-to-PDF conversion in a separate stage."
+                        )
+                    else:
+                        recovery_steps.append(
+                            "XeLaTeX produced a complete XDV, but the XDV-to-PDF conversion failed; the converter diagnostic is shown as the blocking error."
+                        )
+                else:
+                    log += "\n\n[Loreforge XDV -> PDF stage]\nxdvipdfmx is not installed; cannot convert the generated XDV to PDF."
 
         # latexmk sometimes emits only its wrapper summary. Ask the actual engine
         # for one diagnostic pass so the UI can point to the source error.
@@ -2106,6 +2204,11 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
         second_code, second_log = run(command) if code == 0 else (code, "")
         code = second_code
         log = first_log + ("\n[Second LaTeX pass]\n" + second_log if second_log else "")
+
+    # Keep the pipeline/controller output separate.  If a timeout or xdvipdfmx
+    # failure happened, appending a huge 300-page TeX .log must not push the real
+    # cause out of the FIRST BLOCKING ERROR extractor.
+    pipeline_log = log
 
     # The engine .log often contains the actionable context even when latexmk's
     # stdout is terse. Always append its tail when it adds information.
@@ -2139,7 +2242,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
     errors = _attach_source_context(parse_latex_errors(log, main.parent), settings.project_dir)
     errors = _attach_quick_fixes(errors, settings.project_dir)
     suggestions = [] if build_ok else _latex_failure_suggestions(log, engine)
-    failure_excerpt = "" if build_ok else _extract_failure_excerpt(log)
+    failure_excerpt = "" if build_ok else (_extract_failure_excerpt(pipeline_log) or _extract_failure_excerpt(log))
     if partial_pdf:
         suggestions.insert(0, "XeLaTeX produced a fresh PDF despite source errors. Loreforge is showing that recoverable preview, but fix the listed source errors before treating it as the final document.")
     settings.build_dir.mkdir(parents=True, exist_ok=True)
