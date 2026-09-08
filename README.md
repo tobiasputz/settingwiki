@@ -253,6 +253,10 @@ Every failed build shows a prominent **First blocking error** excerpt. This fall
 
 Navigation is image-backed by default without bringing back the old tiny thumbnail icons. Loreforge uses the first rendered image in an entry as a darkened full-row background in the Codex overview and desktop article sidebar. A manually chosen **Table-of-contents artwork** image overrides the automatic image for that entry. Disable **Project → Use the first image as navigation background by default** to return automatic rows to text-only while keeping manually assigned TOC art.
 
+## Compile result verification
+
+Loreforge verifies the final PDF rather than trusting only `latexmk`'s process exit code. Some large XeLaTeX projects can finish `xdvipdfmx`, write a valid PDF, and still leave a non-zero wrapper status from an earlier rule. If the PDF is valid, no real TeX source error is present, and the build log explicitly confirms the final target (for example `All targets (main.pdf) are up-to-date`), Loreforge treats the build as successful instead of showing a false `Compilation failed`.
+
 ## Live editing behavior
 
 - Browser changes autosave after roughly 0.7 seconds of inactivity.

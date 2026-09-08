@@ -685,3 +685,46 @@ def test_automatic_navigation_background_skips_pf2e_action_symbol_images(tmp_pat
 """, encoding="utf-8")
     page = next(x for x in build_wiki(s)["pages"] if x["title"] == "Hero")
     assert page["presentation"]["navigation_background_url"].endswith("/project-asset/Images/NPCs/hero.png")
+
+
+def test_nonzero_latexmk_wrapper_is_success_when_final_pdf_is_explicitly_confirmed(tmp_path: Path, monkeypatch):
+    """Regression for a real 347-page XeLaTeX build reported as failed.
+
+    latexmk can retain a non-zero wrapper status even after xdvipdfmx writes the
+    PDF and the wrapper ends with `All targets (main.pdf) are up-to-date`.
+    That is a successful build, not a blocking TeX error.
+    """
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+    from dataclasses import replace
+
+    s = make_settings(tmp_path); init_db(s)
+    s = replace(s, latex_engine="auto")
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+\usepackage{fontspec}
+\begin{document}Long campaign book\end{document}
+''', encoding="utf-8")
+
+    calls = []
+    monkeypatch.setattr(latex_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        calls.append(list(cmd))
+        pdf = Path(cwd) / "main.pdf"
+        pdf.write_bytes(b"%PDF-1.7\n" + b"x" * 256)
+        return SimpleNamespace(returncode=12, stdout=(
+            "pdf_color>> Color Space:\tRGB\n"
+            "[338][339][340][341][342][343][344][345][346][347]\n"
+            "144035681 bytes written\n"
+            "Latexmk: All targets (main.pdf) are up-to-date\n"
+        ))
+
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+    result = compile_pdf(s)
+    assert result.ok is True
+    assert result.partial_pdf is False
+    assert result.failure_excerpt == ""
+    assert "confirmed PDF" in result.recovery
+    # The successful wrapper witness should prevent an unnecessary direct
+    # xelatex diagnostic pass.
+    assert len(calls) == 1
+    assert (s.build_dir / "campaign.pdf").exists()

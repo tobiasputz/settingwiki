@@ -1,5 +1,13 @@
 # Changelog
-## v1.3.6 — large-book XeLaTeX pipeline recovery
+
+## 1.3.8 — Successful-PDF reconciliation
+
+- Fixed a false compile failure where XeLaTeX/xdvipdfmx successfully wrote `main.pdf` but `latexmk` retained a non-zero wrapper status.
+- Loreforge now verifies the final PDF and accepts strong success witnesses such as `All targets (main.pdf) are up-to-date` or a fresh `N bytes written` converter result when no real TeX errors are present.
+- Prevents the successful end of a 300+ page build from being displayed as `FIRST BLOCKING ERROR`.
+- Avoids launching an unnecessary direct XeLaTeX diagnostic pass after a final PDF has already been proven good.
+
+# v1.3.6 — large-book XeLaTeX pipeline recovery
 
 - Fixed a major large-project bug where `LATEX_ENGINE=auto` resolving to XeLaTeX was treated as a fresh engine switch on **every compile**. Loreforge now remembers the effective engine, so `.aux`, `.toc`, `.fdb_latexmk`, and related incremental state are only cleared when the engine actually changes (or when the GM explicitly requests a clean build).
 - Added adaptive build windows for large XeLaTeX/LuaLaTeX campaign books. Projects with many source files or image assets receive a longer per-stage allowance while `LATEX_TIMEOUT` remains the minimum configured timeout.

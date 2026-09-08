@@ -2043,6 +2043,54 @@ def _extract_failure_excerpt(log: str, *, before: int = 3, after: int = 10) -> s
     return "\n".join(out).strip()
 
 
+
+def _pdf_file_looks_valid(path: Path) -> bool:
+    """Cheap sanity check for a finished PDF without parsing the whole file."""
+    try:
+        if not path.exists() or path.stat().st_size < 128:
+            return False
+        with path.open("rb") as handle:
+            return handle.read(5) == b"%PDF-"
+    except OSError:
+        return False
+
+
+def _log_confirms_final_pdf(log: str, pdf_name: str, *, pdf_changed: bool = False) -> bool:
+    """Return True only for strong evidence that the final PDF stage succeeded.
+
+    Some latexmk versions/configurations can exit non-zero because an earlier
+    rule in the dependency graph was marked failed even though XeLaTeX and
+    xdvipdfmx subsequently produced the requested PDF.  In that case the tail
+    can literally say both ``N bytes written`` and ``All targets (main.pdf) are
+    up-to-date``.  Treat that wrapper status as success, but only when there is
+    explicit final-PDF evidence and no fatal marker.
+    """
+    if not log:
+        return False
+    low = log.lower()
+    fatal_markers = (
+        "collected error summary",
+        "gave an error",
+        "emergency stop",
+        "fatal error occurred",
+        "xdvipdfmx:fatal:",
+        "no output pdf file written",
+        "loreforge stopped this build stage after",
+    )
+    if any(marker in low for marker in fatal_markers):
+        return False
+
+    escaped = re.escape(pdf_name)
+    if re.search(rf"Latexmk:\s*All targets \({escaped}\) are up-to-date", log, re.IGNORECASE):
+        return True
+    if re.search(rf"Output written on\s+{escaped}\b", log, re.IGNORECASE):
+        return True
+    # xdvipdfmx commonly ends with only ``123456 bytes written``.  Require a
+    # fresh PDF for this weaker witness so an old stale PDF cannot mask a failure.
+    if pdf_changed and re.search(r"(?m)^\s*\d{4,} bytes written\s*$", log):
+        return True
+    return False
+
 def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool = False) -> BuildResult:
     """Compile the source PDF and self-heal the common stale-latexmk failure mode.
 
@@ -2126,6 +2174,28 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
                 output = output.decode("utf-8", errors="replace")
             return 124, str(output) + f"\nLoreforge stopped this build stage after {actual_timeout}s."
 
+    def reconcile_successful_pdf(return_code: int, current_log: str) -> int:
+        """Normalize a false-negative latexmk exit when the final PDF is proven good."""
+        if return_code == 0 or not _pdf_file_looks_valid(pdf):
+            return return_code
+        # A real source diagnostic always wins over wrapper success chatter.
+        if parse_latex_errors(current_log, main.parent):
+            return return_code
+        try:
+            current_mtime = pdf.stat().st_mtime_ns
+            changed_now = pdf_mtime_before is None or current_mtime != pdf_mtime_before
+        except OSError:
+            changed_now = False
+        if _log_confirms_final_pdf(current_log, pdf.name, pdf_changed=changed_now):
+            message = (
+                "latexmk returned a non-zero wrapper status even though the final PDF was successfully produced/verified; "
+                "Loreforge accepted the confirmed PDF instead of reporting a false compile failure."
+            )
+            if message not in recovery_steps:
+                recovery_steps.append(message)
+            return 0
+        return return_code
+
     command: list[str]
     if latexmk:
         mode = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}[engine]
@@ -2180,6 +2250,12 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
                 else:
                     log += "\n\n[Loreforge XDV -> PDF stage]\nxdvipdfmx is not installed; cannot convert the generated XDV to PDF."
 
+        # latexmk can occasionally retain a non-zero wrapper status even after
+        # xdvipdfmx has written the final PDF and latexmk itself says the target
+        # is up-to-date. Reconcile that proven-success case before launching an
+        # unnecessary direct diagnostic pass.
+        code = reconcile_successful_pdf(code, log)
+
         # latexmk sometimes emits only its wrapper summary. Ask the actual engine
         # for one diagnostic pass so the UI can point to the source error.
         if code != 0 and not parse_latex_errors(log, main.parent):
@@ -2193,7 +2269,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
                 if direct_code == 0:
                     final_code, final_log = run([latexmk, mode, "-g", "-interaction=nonstopmode", "-file-line-error", shell, main.name])
                     log += "\n\n[Loreforge final latexmk pass]\n" + final_log
-                    code = final_code
+                    code = reconcile_successful_pdf(final_code, log)
     else:
         binary = shutil.which(engine)
         command = [engine]
