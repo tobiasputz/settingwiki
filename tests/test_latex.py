@@ -510,3 +510,53 @@ def test_batch_source_fixes_verify_then_apply_with_one_revision_per_file(tmp_pat
     assert r"\subsubsection{Devotee Benefits}" in text
     assert r"\begin{multicols}{2}" in text
     assert len(list(s.history_dir.iterdir())) == 1
+
+def test_extract_failure_excerpt_surfaces_classic_tex_error():
+    from app.latex import _extract_failure_excerpt
+    log = """Latexmk wrapper\nRunning xelatex\n(./main.tex\n! LaTeX Error: File `mystery.sty' not found.\n\nType X to quit.\nl.42 \\usepackage{mystery}\nEmergency stop.\n"""
+    excerpt = _extract_failure_excerpt(log)
+    assert "mystery.sty" in excerpt
+    assert "l.42" in excerpt
+    assert "Latexmk wrapper" not in excerpt
+
+
+def test_extract_failure_excerpt_falls_back_to_log_tail():
+    from app.latex import _extract_failure_excerpt
+    log = "\n".join(f"opaque engine line {i}" for i in range(50))
+    excerpt = _extract_failure_excerpt(log)
+    assert "opaque engine line 49" in excerpt
+    assert "opaque engine line 0" not in excerpt
+
+
+def test_build_doctor_does_not_call_unrelated_xelatex_fatal_error_pdftex_fontspec():
+    from app.latex import _latex_failure_suggestions
+    log = """This is XeTeX, Version 3.141592653
+(/usr/share/texlive/texmf-dist/tex/latex/fontspec/fontspec.sty)
+Some package output
+! LaTeX Error: Something entirely unrelated broke.
+Fatal error occurred, no output PDF file produced.
+"""
+    suggestions = _latex_failure_suggestions(log, "xelatex")
+    joined = "\n".join(suggestions).lower()
+    assert "cannot run under pdflatex" not in joined
+    assert "font is unavailable" not in joined
+    assert "requested font" not in joined
+
+
+def test_build_doctor_reports_observed_engine_mismatch():
+    from app.latex import _latex_failure_suggestions
+    log = """Running 'pdflatex main.tex'
+This is pdfTeX, Version 3.141592653
+! Fatal Package fontspec Error: The fontspec package requires either XeTeX or LuaTeX.
+"""
+    suggestions = _latex_failure_suggestions(log, "xelatex")
+    assert any("selected xelatex" in x.lower() and "pdftex actually ran" in x.lower() for x in suggestions)
+
+
+def test_build_doctor_only_reports_missing_font_when_log_names_one():
+    from app.latex import _latex_failure_suggestions
+    log = """This is XeTeX, Version 3.141592653
+Package fontspec Error: The font \"Imaginary Rune Font\" cannot be found.
+"""
+    suggestions = _latex_failure_suggestions(log, "xelatex")
+    assert any("Imaginary Rune Font" in x for x in suggestions)

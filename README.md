@@ -245,6 +245,10 @@ Automatic and explicit links feed three systems:
 
 This means the wiki becomes progressively more interconnected as the LaTeX source grows, without requiring a second manual relationship database.
 
+## Build Doctor diagnostics
+
+Every failed build shows a prominent **First blocking error** excerpt. This fallback is intentionally independent of the clickable file/line parser, so unfamiliar TeX/package failures cannot leave the editor at a generic “Compilation failed” state. **Copy diagnostic bundle** copies that excerpt, up to 20 structured errors, and the recent engine-log tail for troubleshooting.
+
 ## Live editing behavior
 
 - Browser changes autosave after roughly 0.7 seconds of inactivity.
@@ -346,3 +350,7 @@ The Project screen also reports total, used, and free persistent storage. If the
 ## v1.1 formatting and atlas fixes
 
 This build adds regression coverage for longtable column-spec leakage, `\pon` entity grouping/profile rendering, TikZ NPC portrait extraction, persistent-volume migration for map atmosphere settings, and effect-setting validation. The test suite now includes regression coverage for Build Doctor recovery, automatic XeLaTeX selection for fontspec projects, PF2e semantic feat/action/item/monster rendering, scene art, deliberate TOC art, lore linking, batch Build Doctor repairs, and duplicate-geometry consolidation.
+
+### Build Doctor engine sanity check (v1.3.5)
+
+If the workspace says `Compilation failed · xelatex`, Build Doctor no longer infers a pdfLaTeX/fontspec problem merely because the words `fontspec` and `fatal` occur somewhere in the same long log. It reports that incompatibility only when TeX explicitly says fontspec was run under pdfTeX. Loreforge also compares the selected engine with the engine banner actually seen in the log; a mismatch usually points to a project-local `latexmkrc`/`.latexmkrc` override.

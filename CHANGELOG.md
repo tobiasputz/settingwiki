@@ -1,4 +1,11 @@
 # Changelog
+## v1.3.4 — visible blocking diagnostics
+
+- Failed builds now always expose a **First blocking error** excerpt even when TeX does not emit a parseable `file.tex:line` diagnostic.
+- Build Doctor uses a `-halt-on-error` direct-engine probe when latexmk only reports wrapper-level failure, producing a concise first-failure trace.
+- Added **Copy diagnostic bundle** with the blocker, structured errors, and recent log tail for easy bug reports.
+- The full raw engine log remains available below the summary.
+
 
 ## 1.3.3
 
@@ -61,3 +68,10 @@
 - Added a searchable player location list alongside marker-category filters.
 - Expanded the fantasy atmosphere system to 38 toggleable options and 16 presets, including god rays, valley mist, blizzards, heat haze, wave crests, shooting stars, petals, bats, dragon shadows, spectral wisps, cursed miasma, rune pulses, spores, blood moon, and fogged edges.
 - Retains the v1.0.1 low-disk-space ZIP import fix.
+
+## 1.3.5 — truthful engine diagnostics
+
+- Fixed a Build Doctor false positive where any later fatal TeX error could be incorrectly attributed to `fontspec`/pdfLaTeX even while XeLaTeX was actually active.
+- Font warnings now require an explicit "font not found" diagnostic; generic `fontspec` errors are no longer mislabeled as missing fonts.
+- Build Doctor now compares the engine Loreforge selected with the TeX engine banner actually observed in the log and reports project-local `latexmkrc` overrides when they disagree.
+- Bumped static asset cache keys so Railway/browser caches cannot keep an older admin UI that lacks the **FIRST BLOCKING ERROR** panel after an application update.

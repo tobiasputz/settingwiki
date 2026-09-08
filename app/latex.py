@@ -65,6 +65,7 @@ class BuildResult:
     suggestions: list[str] = field(default_factory=list)
     effective_engine: str = ""
     partial_pdf: bool = False
+    failure_excerpt: str = ""
 
 
 def strip_comments(line: str) -> str:
@@ -1639,7 +1640,43 @@ def _purge_latexmk_state(main: Path) -> list[str]:
     return removed
 
 
-def _latex_failure_suggestions(log: str) -> list[str]:
+def _observed_latex_engine(log: str) -> str:
+    """Best-effort engine actually seen in TeX/latexmk output.
+
+    This is intentionally based on engine banners rather than latexmk's selected
+    mode. It lets Build Doctor distinguish "Loreforge chose XeLaTeX" from a
+    project-local latexmk configuration that somehow launched pdfTeX anyway.
+    """
+    observations: list[tuple[int, str]] = []
+    for pattern, engine in (
+        (r"This is pdfTeX\b", "pdflatex"),
+        (r"This is XeTeX\b", "xelatex"),
+        (r"This is (?:LuaHBTeX|LuaTeX)\b", "lualatex"),
+    ):
+        for match in re.finditer(pattern, log or "", re.IGNORECASE):
+            observations.append((match.start(), engine))
+    return max(observations, default=(-1, ""))[1]
+
+
+def _fontspec_pdftex_failure(log: str) -> bool:
+    """Return True only for an explicit fontspec/pdfTeX incompatibility.
+
+    The old detector used ``fontspec.*fatal`` with DOTALL, which could connect a
+    harmless mention of fontspec near the top of a huge XeLaTeX log to an
+    unrelated fatal error thousands of lines later. That produced the confusing
+    "fontspec cannot run under pdfLaTeX" warning even while XeLaTeX was active.
+    Keep this deliberately narrow.
+    """
+    text = log or ""
+    explicit = (
+        r"The fontspec package requires either XeTeX or LuaTeX",
+        r"fontspec[^\n]{0,240}(?:cannot|can't|does not|doesn't)[^\n]{0,120}(?:pdfTeX|pdfLaTeX)",
+        r"(?:pdfTeX|pdfLaTeX)[^\n]{0,180}(?:cannot|can't|incompatible)[^\n]{0,180}fontspec",
+    )
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in explicit)
+
+
+def _latex_failure_suggestions(log: str, effective_engine: str = "") -> list[str]:
     suggestions: list[str] = []
     missing = re.findall(r"(?:LaTeX Error|Package [^\n]+ Error): File [`']([^`']+)[`'] not found", log)
     if missing:
@@ -1661,16 +1698,33 @@ def _latex_failure_suggestions(log: str) -> list[str]:
         suggestions.append("This document appears to require shell escape. Only for a trusted private project, set LATEX_ALLOW_SHELL_ESCAPE=1 in Railway.")
     if re.search(r"File ended while scanning use of|Runaway argument", log):
         suggestions.append("TeX detected an unfinished argument/environment. Check for a missing }, \\end{...}, or unmatched custom macro near the first reported source line.")
-    if re.search(r"fontspec.*(?:pdftex|cannot.*pdftex|fatal)|The fontspec package requires either XeTeX or LuaTeX", log, re.IGNORECASE | re.DOTALL):
-        suggestions.append("This project uses fontspec, which cannot run under pdfLaTeX. Loreforge normally auto-switches such projects to XeLaTeX; set LATEX_ENGINE=auto (recommended) or xelatex if you have explicitly overridden the engine.")
-    elif re.search(r"fontspec.*error|font .* not found|The font [\"`'].*(?:cannot be found|not found)", log, re.IGNORECASE):
-        font_match = re.search(r"The font [\"`']([^\"`']+)[\"`'].*(?:cannot be found|not found)", log, re.IGNORECASE)
-        font_name = f" ({font_match.group(1)})" if font_match else ""
-        suggestions.append(f"A requested font{font_name} is unavailable. Loreforge includes TeX Gyre and EB Garamond in the Docker image; other project fonts can be supplied as .otf/.ttf files and referenced by file/path in fontspec.")
+
+    observed = _observed_latex_engine(log)
+    effective = (effective_engine or "").lower()
+    if effective in {"xelatex", "lualatex"} and observed == "pdflatex":
+        suggestions.append(
+            f"Loreforge selected {effective}, but the TeX log shows pdfTeX actually ran. A project-local latexmkrc/.latexmkrc or custom build rule may be overriding the engine; remove that override or make it use {effective}."
+        )
+    elif _fontspec_pdftex_failure(log):
+        if effective in {"xelatex", "lualatex"}:
+            suggestions.append(
+                f"The log contains an explicit fontspec/pdfTeX incompatibility even though Loreforge selected {effective}. This usually means a nested/custom build rule is invoking pdfLaTeX; inspect any latexmkrc/.latexmkrc or custom build command in the project."
+            )
+        else:
+            suggestions.append("This project uses fontspec, which cannot run under pdfLaTeX. Loreforge normally auto-switches such projects to XeLaTeX; set LATEX_ENGINE=auto (recommended) or xelatex if you have explicitly overridden the engine.")
+    else:
+        # Only call this a missing-font problem when the log actually says the
+        # requested font cannot be found. A generic fontspec package error is not
+        # sufficient evidence.
+        font_match = re.search(r"The font [\"`']([^\"`']+)[\"`'][^\n]{0,260}(?:cannot be found|not found)", log, re.IGNORECASE)
+        if not font_match:
+            font_match = re.search(r"font(?:spec)?[^\n]{0,120}[\"`']([^\"`']+)[\"`'][^\n]{0,180}(?:cannot be found|not found)", log, re.IGNORECASE)
+        if font_match:
+            suggestions.append(f"A requested font ({font_match.group(1)}) is unavailable. Loreforge includes TeX Gyre and EB Garamond in the Docker image; other project fonts can be supplied as .otf/.ttf files and referenced by file/path in fontspec.")
     if ("Nothing to do" in log or "All targets" in log) and "gave an error" in log:
         suggestions.append("latexmk had cached a previous failed run. Loreforge automatically clears its dependency state and retries in this build.")
     if not suggestions:
-        suggestions.append("No specific TeX diagnosis was detected. Use the first file/line entry in Build Log; Loreforge has appended the underlying engine .log when available.")
+        suggestions.append("No specific TeX diagnosis was detected. Use FIRST BLOCKING ERROR above; Loreforge has appended the underlying engine .log when available.")
     return suggestions[:5]
 
 
@@ -1900,6 +1954,61 @@ def _attach_quick_fixes(errors: list[dict], project_root: Path) -> list[dict]:
                     break
     return errors
 
+def _extract_failure_excerpt(log: str, *, before: int = 3, after: int = 10) -> str:
+    """Return a compact excerpt around the first genuinely blocking TeX error.
+
+    TeX/latexmk output is not consistent enough for every failure to become a
+    clickable ``file.tex:line`` diagnostic.  This fallback deliberately favors
+    engine/package errors, runaway arguments, emergency stops, and classic
+    ``! ...`` diagnostics over latexmk wrapper chatter so the GM always sees an
+    actionable reason for a red build.
+    """
+    if not log:
+        return ""
+    lines = log.splitlines()
+    strong = [
+        re.compile(r"^.+\.(?:tex|sty|cls|bib):\d+:\s*(?:LaTeX|Package|Class|Font|Undefined|Missing|Extra|Runaway|Emergency|Fatal|Incomplete|File ended|Paragraph ended|Illegal|Misplaced|Use of).*", re.I),
+        re.compile(r"^!\s+.+"),
+        re.compile(r"(?:Emergency stop|Fatal error occurred|Runaway argument|File ended while scanning use of|Incomplete \\if|Undefined control sequence|Missing number, treated as zero|There's no line here to end|Option clash for package|LaTeX Error: File .* not found)", re.I),
+    ]
+    # Search each diagnostic/engine section in chronological order, skipping
+    # latexmk's generic collected-error summary where possible.
+    candidates: list[int] = []
+    for i, line in enumerate(lines):
+        text = line.strip()
+        if not text or "gave an error" in text.lower():
+            continue
+        if any(rx.search(text) for rx in strong):
+            candidates.append(i)
+    if not candidates:
+        # Last-resort tail: enough context to reveal the command/package that
+        # terminated even for an unfamiliar TeX error format.
+        tail = [x for x in lines[-30:] if x.strip()]
+        return "\n".join(tail[-18:]).strip()
+    i = candidates[0]
+    start = max(0, i - before)
+    # Classic TeX logs often print the active input file immediately before the
+    # `! Error`. Prefer that boundary over unrelated latexmk wrapper chatter.
+    for j in range(i - 1, start - 1, -1):
+        if re.search(r"\((?:\./)?[^()\s]+\.(?:tex|sty|cls)\b", lines[j], re.IGNORECASE):
+            start = j
+            break
+    end = min(len(lines), i + after + 1)
+    excerpt = lines[start:end]
+    # Trim giant blank runs without altering the diagnostic text itself.
+    out: list[str] = []
+    blank = False
+    for line in excerpt:
+        if not line.strip():
+            if not blank:
+                out.append("")
+            blank = True
+        else:
+            out.append(line.rstrip())
+            blank = False
+    return "\n".join(out).strip()
+
+
 def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool = False) -> BuildResult:
     """Compile the source PDF and self-heal the common stale-latexmk failure mode.
 
@@ -1978,7 +2087,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
         if code != 0 and not parse_latex_errors(log, main.parent):
             binary = shutil.which(engine)
             if binary:
-                direct_command = [binary, "-interaction=nonstopmode", "-file-line-error", shell, main.name]
+                direct_command = [binary, "-halt-on-error", "-interaction=nonstopmode", "-file-line-error", shell, main.name]
                 direct_code, direct_log = run(direct_command)
                 recovery_steps.append(f"Ran {engine} directly once to recover detailed source diagnostics from latexmk.")
                 log += "\n\n[Loreforge direct-engine diagnostic pass]\n" + direct_log
@@ -2029,14 +2138,15 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
             partial_pdf = False
     errors = _attach_source_context(parse_latex_errors(log, main.parent), settings.project_dir)
     errors = _attach_quick_fixes(errors, settings.project_dir)
-    suggestions = [] if build_ok else _latex_failure_suggestions(log)
+    suggestions = [] if build_ok else _latex_failure_suggestions(log, engine)
+    failure_excerpt = "" if build_ok else _extract_failure_excerpt(log)
     if partial_pdf:
         suggestions.insert(0, "XeLaTeX produced a fresh PDF despite source errors. Loreforge is showing that recoverable preview, but fix the listed source errors before treating it as the final document.")
     settings.build_dir.mkdir(parents=True, exist_ok=True)
     (settings.build_dir / "latex.log").write_text(log[-260000:], encoding="utf-8", errors="replace")
     return BuildResult(
         build_ok and pdf_out.exists(), main_rel, "/preview/pdf" if pdf_out.exists() else None,
-        duration, command, log[-90000:], errors[:80], "\n".join(recovery_steps), suggestions, engine, partial_pdf,
+        duration, command, log[-90000:], errors[:80], "\n".join(recovery_steps), suggestions, engine, partial_pdf, failure_excerpt,
     )
 
 def parse_latex_errors(log: str, cwd: Path) -> list[dict]:
