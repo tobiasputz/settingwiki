@@ -1,0 +1,38 @@
+\documentclass[11pt]{book}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{geometry}
+\geometry{margin=30mm}
+\usepackage{xcolor}
+\definecolor{LoreGold}{HTML}{A98959}
+\newcommand{\lorebox}[2]{\par\medskip\noindent\textbf{#1}\par #2\par\medskip}
+\newcommand{\npc}[2]{\par\noindent\textbf{#1} --- #2\par}
+\newcommand{\wiki}[2]{#2}
+\title{The Ashen Meridian}
+\author{Your Table}
+\begin{document}
+\maketitle
+\tableofcontents
+
+\chapter{The Known World}
+\section{Welcome to the Meridian}
+The Ashen Meridian is a sample campaign source included so Loreforge has something to render on first boot. Replace it by importing your current Overleaf project from the \textbf{Project} tab.
+
+\lorebox{How the wiki works}{Every chapter and section in this LaTeX project becomes structured player-facing lore. Unknown custom commands are preserved as readable text whenever possible.}
+
+\subsection{A living atlas}
+The setting guide and PDF are generated from the same source. Saving this file updates the wiki preview; compiling updates the PDF.
+
+\section{Glassharbor}
+Glassharbor is a rain-blackened port built around the ribs of an ancient sea beast. Lanterns burn behind blue glass while guild bells mark the changing tide.
+
+\npc{Archivist Sera Venn}{A meticulous historian who insists every rumor has a provenance.}
+
+\chapter{Factions}
+\section{The Lantern Compact}
+The Compact maintains the old roads and the beacon towers. Its members claim neutrality, but every road is also a line of influence.
+
+\section{The Choir Below}
+Most people insist the Choir is only a sailor's superstition. The people who have heard it beneath the docks rarely agree.
+
+\end{document}

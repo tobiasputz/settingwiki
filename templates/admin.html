@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Loreforge Editor</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+<link rel="stylesheet" href="/static/admin.css?v=1"></head>
+<body class="admin-body">
+<div class="admin-app">
+  <header class="admin-topbar">
+    <div class="admin-brand"><span class="brand-rune">✦</span><div><strong>Loreforge</strong><small>Campaign Studio</small></div></div>
+    <div class="workspace-tabs"><button class="workspace-tab active" data-workspace="editor">Editor</button><button class="workspace-tab" data-workspace="maps">Maps</button><button class="workspace-tab" data-workspace="project">Project</button></div>
+    <div class="top-actions"><span id="saveState" class="save-state">Ready</span><button id="openPlayer" class="quiet-btn">↗ Player site</button><button id="compileBtn" class="compile-btn">▶ Compile</button><button id="menuBtn" class="icon-btn">⋯</button></div>
+  </header>
+
+  <section class="workspace active" id="workspace-editor">
+    <aside class="file-pane">
+      <div class="pane-title"><span>PROJECT</span><div><button id="newFileBtn" title="New file">＋</button><button id="refreshFilesBtn" title="Refresh">↻</button></div></div>
+      <div class="file-filter"><span>⌕</span><input id="fileFilter" placeholder="Filter files"></div>
+      <div id="fileTree" class="file-tree"></div>
+      <div class="project-health" id="projectHealth"></div>
+    </aside>
+    <div class="gutter" data-gutter="left"></div>
+    <main class="editor-pane">
+      <div class="editor-tabs"><div id="activeFileTab" class="file-tab"><span class="tex-icon">TₑX</span><span id="activeFileName">No file open</span><i id="dirtyDot"></i></div><div class="editor-tools"><button id="historyBtn">History</button><button id="toggleWrapBtn">Wrap</button></div></div>
+      <div class="editor-wrap"><textarea id="sourceEditor" spellcheck="false" aria-label="LaTeX source"></textarea></div>
+      <div class="editor-statusbar"><span id="cursorState">Ln 1, Col 1</span><span>UTF-8</span><span>LaTeX</span><span id="autosaveLabel">Autosave on</span></div>
+    </main>
+    <div class="gutter" data-gutter="right"></div>
+    <aside class="preview-pane">
+      <div class="preview-tabs"><button class="preview-tab active" data-preview="pdf">PDF</button><button class="preview-tab" data-preview="wiki">Player page</button><button class="preview-tab" data-preview="log">Build log <span id="errorBadge"></span></button><button id="popPreview" class="pop-preview">↗</button></div>
+      <div class="preview-surface active" id="preview-pdf"><iframe id="pdfFrame" title="PDF preview"></iframe><div class="preview-placeholder" id="pdfPlaceholder"><span>◫</span><strong>No PDF yet</strong><p>Compile the project to see the live document.</p></div></div>
+      <div class="preview-surface" id="preview-wiki"><iframe id="wikiFrame" src="/admin/preview/wiki" title="Player wiki preview"></iframe></div>
+      <div class="preview-surface build-log" id="preview-log"><div id="buildSummary"></div><pre id="buildLog">Compile output will appear here.</pre></div>
+    </aside>
+  </section>
+
+  <section class="workspace" id="workspace-maps">
+    <aside class="map-list-pane"><div class="pane-title"><span>INTERACTIVE ATLAS</span><button id="newMapBtn">＋ New map</button></div><div id="mapList" class="map-list"></div></aside>
+    <main class="map-editor-main"><div id="mapEmpty" class="big-empty"><div>⌖</div><h2>No map selected</h2><p>Create or select a map to place player-visible and GM-only locations.</p></div><div id="mapEditor" class="map-editor hidden"><div class="map-editor-toolbar"><div><input id="mapName" class="title-input"><textarea id="mapDescription" placeholder="Map description"></textarea></div><div class="cloud-controls"><label><input id="cloudEnabled" type="checkbox"> Animated clouds</label><label>Opacity <input id="cloudOpacity" type="range" min="0" max="0.8" step="0.01"></label><label>Speed <input id="cloudSpeed" type="range" min="0.1" max="2" step="0.05"></label><button id="saveMapBtn">Save map</button></div></div><div class="map-author-stage" id="mapAuthorStage"><div class="map-author-transform" id="mapAuthorTransform"><img id="mapAuthorImage"><div id="mapAuthorMarkers"></div></div><canvas id="adminCloudCanvas"></canvas><div class="map-author-hint">Drag to pan · wheel to zoom · double-click to add a marker</div></div></div></main>
+    <aside class="marker-inspector"><div class="pane-title"><span>LOCATION</span></div><div id="markerInspectorEmpty" class="inspector-empty">Select a marker, or double-click the map to add one.</div><form id="markerForm" class="marker-form hidden"><input type="hidden" id="markerId"><label>Name<input id="markerTitle"></label><label>Type<select id="markerKind"><option value="place">Place</option><option value="settlement">Settlement</option><option value="ruin">Ruin</option><option value="landmark">Landmark</option><option value="danger">Danger</option><option value="secret">Secret</option></select></label><label>Description<textarea id="markerBody"></textarea></label><label>Codex page<select id="markerPage"><option value="">None</option></select></label><label class="check-row"><input id="markerVisible" type="checkbox" checked> Visible to players</label><button type="submit" class="compile-btn">Save location</button><button type="button" id="deleteMarkerBtn" class="danger-btn">Delete location</button></form></aside>
+  </section>
+
+  <section class="workspace" id="workspace-project">
+    <main class="project-settings-page">
+      <div class="project-hero"><span class="eyebrow">CAMPAIGN PROJECT</span><h1>Source, import & deployment</h1><p>Keep the Overleaf workflow when you want it, or author entirely inside Loreforge.</p></div>
+      <div class="settings-grid">
+        <section class="settings-card"><h2>Campaign identity</h2><label>Site title<input id="siteTitle"></label><label>Tagline<textarea id="siteTagline"></textarea></label><label>Main LaTeX file<select id="mainFileSelect"></select></label><button id="saveSettingsBtn" class="compile-btn">Save settings</button></section>
+        <section class="settings-card"><h2>Overleaf compatibility</h2><p>Import a full Overleaf source ZIP. Loreforge will inspect it, find the main file, resolve included files, detect custom macros, rebuild the player wiki, and compile the PDF.</p><label class="upload-box"><input id="importZip" type="file" accept=".zip"><span>⇧</span><strong>Import project ZIP</strong><small>Your current project is backed up before replacement.</small></label><a class="quiet-link" href="/api/admin/export">↓ Export current project as ZIP</a></section>
+        <section class="settings-card"><h2>Formatting analysis</h2><div id="analysisSummary" class="analysis-summary"></div><details><summary>Detected custom macros</summary><div id="macroList" class="chip-list"></div></details><details><summary>LaTeX packages</summary><div id="packageList" class="chip-list"></div></details><details><summary>Missing images</summary><div id="missingList" class="diagnostic-list"></div></details></section>
+        <section class="settings-card"><h2>Railway persistence</h2><div id="persistenceState"></div><p>For Railway, attach a volume at <code>/data</code>. Application code can remain connected to GitHub and auto-deploy on pushes while campaign edits stay persistent.</p><div class="env-table"><div><code>ADMIN_PASSWORD</code><span>GM editor password</span></div><div><code>PLAYER_PASSWORD</code><span>Optional player-site password</span></div><div><code>LATEX_ENGINE</code><span>pdflatex / xelatex / lualatex</span></div></div></section>
+      </div>
+    </main>
+  </section>
+</div>
+
+<div class="modal-backdrop hidden" id="genericModal"><div class="modal"><button class="modal-close" data-close-modal>×</button><div id="modalContent"></div></div></div>
+<div class="toast-stack" id="toastStack"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/stex/stex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="/static/admin.js?v=1"></script>
+</body></html>

@@ -1,0 +1,16 @@
+services:
+  loreforge:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-loreforge}
+      PLAYER_PASSWORD: ${PLAYER_PASSWORD:-}
+      LATEX_ENGINE: ${LATEX_ENGINE:-pdflatex}
+      LATEX_TIMEOUT: ${LATEX_TIMEOUT:-60}
+    volumes:
+      - loreforge-data:/data
+    restart: unless-stopped
+
+volumes:
+  loreforge-data:

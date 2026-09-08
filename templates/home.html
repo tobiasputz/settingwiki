@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{{ wiki.title }} · Campaign Atlas{% endblock %}
+{% block body %}
+<main>
+  <section class="hero">
+    <div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div>
+    <div class="hero-inner reveal">
+      <div class="eyebrow">PLAYER SETTING GUIDE</div>
+      <h1>{{ wiki.title }}</h1>
+      <p class="hero-tagline">{{ wiki.tagline }}</p>
+      <div class="hero-actions">
+        {% if wiki.pages %}<a class="primary-button" href="/wiki/{{ wiki.pages[0].slug }}">Begin exploring <span>→</span></a>{% endif %}
+        <button class="ghost-button" data-open-search>Search the codex <kbd>/</kbd></button>
+      </div>
+      <div class="hero-meta">
+        <span><strong>{{ wiki.pages|length }}</strong> lore entries</span>
+        <span><strong>{{ wiki.categories|length }}</strong> chapters</span>
+        <span><strong>{{ maps|length }}</strong> maps</span>
+      </div>
+    </div>
+    <div class="scroll-cue"><span></span>SCROLL TO EXPLORE</div>
+  </section>
+
+  <section class="home-section reveal" id="codex">
+    <div class="section-heading"><div><span class="eyebrow">THE CODEX</span><h2>World knowledge</h2></div><p>Everything here is generated from the campaign's LaTeX source.</p></div>
+    <div class="chapter-grid">
+      {% for category in wiki.categories %}
+      <article class="chapter-card">
+        <div class="chapter-number">{{ '%02d'|format(loop.index) }}</div>
+        <div class="chapter-card-content">
+          <h3>{{ category.title }}</h3>
+          <div class="chapter-links">
+          {% for p in category.pages[:7] %}
+            <a href="/wiki/{{ p.slug }}"><span>{{ p.title }}</span><small>→</small></a>
+          {% endfor %}
+          {% if category.pages|length > 7 %}<span class="more-count">+ {{ category.pages|length - 7 }} more entries</span>{% endif %}
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+      {% if not wiki.categories %}
+      <article class="chapter-card empty-state"><div><h3>No lore yet</h3><p>The GM can import an Overleaf ZIP or create the first LaTeX file in the editor.</p></div></article>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if maps %}
+  <section class="home-section atlas-section reveal" id="atlas">
+    <div class="section-heading"><div><span class="eyebrow">INTERACTIVE ATLAS</span><h2>Maps of the setting</h2></div><p>Pan, zoom, inspect locations, and watch the world breathe.</p></div>
+    <div class="map-card-grid">
+      {% for map in maps %}
+      <a class="map-card" href="/atlas/{{ map.slug }}">
+        <div class="map-card-image" style="background-image:url('/uploads/{{ map.image_path }}')"><div class="map-card-clouds"></div></div>
+        <div class="map-card-copy"><span class="eyebrow">{{ map.markers|length }} DISCOVERED LOCATIONS</span><h3>{{ map.name }}</h3><p>{{ map.description or 'Open the interactive atlas.' }}</p></div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="home-section reveal">
+    <div class="quote-panel">
+      <div class="quote-rune">✧</div>
+      <div><span class="eyebrow">A LIVING SETTING</span><h2>When the chronicle changes, the atlas changes with it.</h2><p>This guide is compiled from the same source the GM writes in. No separate PDF upload, no stale handout, no duplicated lore.</p></div>
+    </div>
+  </section>
+</main>
+<footer class="site-footer"><span>{{ wiki.title }}</span><span>Last rebuilt <time data-epoch="{{ wiki.generated_at }}"></time></span></footer>
+{% endblock %}
