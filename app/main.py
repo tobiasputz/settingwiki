@@ -20,8 +20,8 @@ from .latex import analyze_project, build_wiki, choose_main, compile_pdf, load_w
 from .maps import create_map, create_marker, delete_map, delete_marker, get_map, list_maps, update_map, update_marker
 from .storage import (
     export_project_zip, get_setting, init_db, list_project_files, list_revisions,
-    replace_project_from_zip, restore_revision, safe_project_path, save_text_file,
-    seed_project, set_setting,
+    cleanup_legacy_import_artifacts, replace_project_from_zip, restore_revision, safe_project_path, save_text_file,
+    seed_project, set_setting, storage_report,
 )
 
 settings = load_settings()
@@ -203,7 +203,14 @@ def admin_status(request: Request):
         "site_title":get_setting(settings,"site_title","") or analysis.get("title","Campaign Atlas"),
         "tagline":get_setting(settings,"tagline","Explore the people, places, histories, and mysteries of the campaign."),
         "main_file":get_setting(settings,"main_file","") or analysis.get("main_file",""),
+        "storage":storage_report(settings),
     }
+
+
+@app.post("/api/admin/storage/cleanup")
+def admin_storage_cleanup(request: Request):
+    require_admin(request)
+    return cleanup_legacy_import_artifacts(settings)
 
 
 @app.get("/api/admin/files")
@@ -276,16 +283,33 @@ def admin_rebuild(request: Request):
 async def admin_import(request: Request, archive: UploadFile = File(...)):
     require_admin(request)
     if not archive.filename or not archive.filename.lower().endswith(".zip"): raise HTTPException(400,"Upload an Overleaf/project .zip archive")
-    tmp=settings.data_dir / f"upload-{int(time.time())}.zip"
-    with tmp.open("wb") as f:
-        while chunk := await archive.read(1024*1024): f.write(chunk)
+    # Keep the uploaded archive off the persistent /data volume. Railway Free/Trial
+    # volumes are small, while the service temp filesystem is intended for scratch I/O.
+    tmp_path = None
     try:
-        replace_project_from_zip(settings,tmp)
+        with tempfile.NamedTemporaryFile(prefix="loreforge-upload-", suffix=".zip", delete=False) as f:
+            tmp_path = Path(f.name)
+            uploaded = 0
+            while chunk := await archive.read(1024 * 1024):
+                uploaded += len(chunk)
+                if uploaded > 1_000_000_000:
+                    raise HTTPException(413, "Project ZIP is larger than the 1 GB upload safety limit.")
+                f.write(chunk)
+        import_info = replace_project_from_zip(settings, tmp_path)
         set_setting(settings,"main_file","")
         analysis=analyze_project(settings); wiki=build_wiki(settings); result=compile_pdf(settings)
-        return {"ok":True,"analysis":analysis,"wiki_pages":len(wiki.get("pages",[])),"compile":result.__dict__}
-    except Exception as exc: raise HTTPException(400,str(exc))
-    finally: tmp.unlink(missing_ok=True)
+        return {"ok":True,"analysis":analysis,"wiki_pages":len(wiki.get("pages",[])),"compile":result.__dict__,"import":import_info}
+    except HTTPException:
+        raise
+    except OSError as exc:
+        if getattr(exc, "errno", None) == 28:
+            raise HTTPException(507, "Persistent storage is full. Loreforge now stages imports outside /data, but your volume itself needs more room. Increase the Railway volume or use Storage cleanup in Project settings.")
+        raise HTTPException(400,str(exc))
+    except Exception as exc:
+        raise HTTPException(400,str(exc))
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
 
 @app.get("/api/admin/export")

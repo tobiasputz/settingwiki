@@ -195,3 +195,11 @@ pytest -q
 ## Why the campaign is not committed back to GitHub on every keystroke
 
 Doing that would create a flood of commits and, with Railway GitHub auto-deploys enabled, could repeatedly redeploy the whole application while you type. Loreforge therefore treats the persistent project volume as the authoring store and provides project ZIP export for backups/Overleaf interchange. GitHub remains the clean application/deployment repository.
+
+## Troubleshooting: `No space left on device` while importing
+
+Loreforge v1.0.1+ stages uploaded ZIP archives, extraction, and transactional rollback data in the service's ephemeral temporary filesystem rather than the persistent `/data` volume. This avoids requiring several copies of the same Overleaf project on the Railway volume during import.
+
+If you previously attempted an import with an older Loreforge build, open **Admin → Project → Railway persistence** and click **Clean failed-import leftovers**. The cleanup only targets legacy `project-backup-*`, `import-*`, and `upload-*.zip` artifacts; it does not delete the active `/data/project` campaign.
+
+The Project screen also reports total, used, and free persistent storage. If the final uncompressed campaign itself does not fit, increase the Railway volume mounted at `/data` (paid Railway plans support live volume resizing) or reduce unused assets in the Overleaf source ZIP.
