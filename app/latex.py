@@ -1718,15 +1718,106 @@ def _attach_source_context(errors: list[dict], project_root: Path, radius: int =
 
 
 
-def _attach_quick_fixes(errors: list[dict], project_root: Path) -> list[dict]:
-    """Attach conservative, revision-safe one-line repairs to common TeX errors.
+def _split_latex_options(raw: str) -> list[str]:
+    """Split a LaTeX option list on top-level commas.
 
-    These fixes are intentionally narrow: Loreforge only proposes a replacement
-    when the offending source pattern is unambiguous. The UI still requires an
-    explicit GM click, and the backend verifies the line has not changed before
-    applying it.
+    Geometry options occasionally contain braces, so a plain ``str.split(',')``
+    can corrupt otherwise valid settings. This intentionally handles just the
+    brace/bracket nesting needed by package option lists.
+    """
+    out: list[str] = []
+    start = 0
+    brace = bracket = paren = 0
+    for i, ch in enumerate(raw):
+        if ch == "{" : brace += 1
+        elif ch == "}" and brace: brace -= 1
+        elif ch == "[" : bracket += 1
+        elif ch == "]" and bracket: bracket -= 1
+        elif ch == "(" : paren += 1
+        elif ch == ")" and paren: paren -= 1
+        elif ch == "," and brace == bracket == paren == 0:
+            item = raw[start:i].strip()
+            if item: out.append(item)
+            start = i + 1
+    item = raw[start:].strip()
+    if item: out.append(item)
+    return out
+
+
+def _merged_geometry_options(declarations: list[dict]) -> str:
+    """Merge repeated geometry option lists with later keyed values winning."""
+    order: list[str] = []
+    values: dict[str, str] = {}
+    for decl in declarations:
+        for option in _split_latex_options(str(decl.get("options") or "")):
+            key = option.split("=", 1)[0].strip().lower() if "=" in option else option.strip().lower()
+            if not key:
+                continue
+            if key not in values:
+                order.append(key)
+            values[key] = option
+    return ",".join(values[k] for k in order if k in values)
+
+
+def _geometry_declarations(lines: list[str]) -> list[dict]:
+    r"""Return active dedicated ``\usepackage{geometry}`` declarations."""
+    found: list[dict] = []
+    rx = re.compile(r"^(\s*)\\usepackage(?:\[([^\]]*)\])?\{geometry\}(\s*(?:%.*)?)$")
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("%"):
+            continue
+        m = rx.match(line)
+        if m:
+            found.append({"line": i + 1, "indent": m.group(1), "options": m.group(2) or "", "expected": line})
+    return found
+
+
+def _geometry_consolidation_fix(rel: str, lines: list[str]) -> dict | None:
+    r"""Build a reversible multi-line fix for duplicate geometry package loads.
+
+    Repeated ``\usepackage[...]{geometry}`` declarations are a common Overleaf
+    import problem.  The safe general form is to load the package without options
+    once and then apply the merged layout with ``\geometry{...}``.  This also
+    works when a class/package has already loaded geometry.  Later keyed values
+    win, matching the author's apparent intent when declarations were repeated.
+    """
+    declarations = _geometry_declarations(lines)
+    if len(declarations) < 2:
+        return None
+    merged = _merged_geometry_options(declarations)
+    edits: list[dict] = []
+    first = declarations[0]
+    first_repl = f"{first['indent']}\\usepackage{{geometry}}"
+    if merged:
+        first_repl += f"\\geometry{{{merged}}}"
+    edits.append({"path": rel, "line": first["line"], "expected": first["expected"], "replacement": first_repl})
+    for decl in declarations[1:]:
+        indent = decl["indent"]
+        original = decl["expected"].strip()
+        edits.append({
+            "path": rel, "line": decl["line"], "expected": decl["expected"],
+            "replacement": f"{indent}% Loreforge consolidated duplicate geometry declaration: {original}",
+        })
+    label = "Consolidate geometry settings"
+    if merged:
+        label += f" ({merged})"
+    return {
+        "path": rel, "line": first["line"], "label": label,
+        "reason": "geometry was loaded repeatedly with options; Loreforge keeps one package load and applies merged options with later values winning.",
+        "edits": edits,
+    }
+
+
+def _attach_quick_fixes(errors: list[dict], project_root: Path) -> list[dict]:
+    """Attach conservative, revision-safe repairs to common TeX errors.
+
+    Most fixes are one-line edits.  A few well-defined project repairs (such as
+    duplicate geometry declarations) contain several verified edits.  The UI
+    still requires an explicit GM click, and the backend verifies every source
+    line before changing anything.
     """
     cache: dict[str, list[str]] = {}
+    geometry_offered: set[str] = set()
     for error in errors:
         rel = error.get("path") or error.get("file")
         line_no = error.get("line")
@@ -1748,6 +1839,12 @@ def _attach_quick_fixes(errors: list[dict], project_root: Path) -> list[dict]:
         lines = cache[key]
         idx = max(0, min(len(lines)-1, int(line_no)-1)) if lines else 0
         message = str(error.get("message") or "")
+
+        if "Option clash for package geometry" in message and rel not in geometry_offered:
+            geo_fix = _geometry_consolidation_fix(rel, lines)
+            if geo_fix:
+                error["quick_fix"] = geo_fix
+                geometry_offered.add(rel)
 
         def offer(i: int, replacement: str, label: str, reason: str) -> None:
             if i < 0 or i >= len(lines):

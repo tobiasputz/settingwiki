@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.3
+
+- Added **Apply all safe fixes** to Build Doctor. All high-confidence repairs from the current compile can now be verified as one batch, revision-backed, applied without partial writes, and recompiled only once.
+- Added a revision-safe **geometry consolidation** repair. Repeated dedicated `\usepackage[...]{geometry}` declarations are collapsed into one package load plus `\geometry{...}`; options are merged and later keyed values win (for example `margin=0in` followed by `margin=1in` becomes `margin=1in`).
+- Build Doctor quick fixes can now contain several verified line edits, which allows project-level repairs while retaining stale-diagnostic protection.
+- Added an atomic batch source-fix API: every target line is checked before any file is changed; if one line has changed since the compile, the entire batch is rejected. Each affected file is archived once in revision history before writing.
+- Added regression tests for duplicate-geometry consolidation and multi-file/batch-safe repair behavior.
+
 ## 1.3.2
 
 - Added conservative one-click **Build Doctor quick fixes** for high-confidence imported-source mistakes. The current set repairs stray `\\` after headings / `multicols` boundaries, missing `{2}` on bare `\begin{multicols}`, `\subsubection` typos, and accidental sentence-start `\The`. Every fix verifies the exact original line, uses Loreforge revision history, and recompiles immediately.

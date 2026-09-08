@@ -464,3 +464,49 @@ def test_compile_keeps_fresh_pdf_preview_when_xelatex_returns_errors(tmp_path: P
     assert result.partial_pdf is True
     assert result.pdf_path == "/preview/pdf"
     assert (s.build_dir / "campaign.pdf").exists()
+
+def test_build_doctor_can_consolidate_duplicate_geometry_declarations(tmp_path: Path):
+    from app.latex import _attach_quick_fixes
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(
+        "\\documentclass{book}\n"
+        "\\usepackage[a4paper,margin=0in]{geometry}\n"
+        "\\usepackage{tcolorbox}\n"
+        "\\usepackage[margin=1in]{geometry}\n"
+        "\\begin{document}Hello\\end{document}\n",
+        encoding="utf-8",
+    )
+    errors = [
+        {"path":"main.tex","file":"main.tex","line":3,"message":"LaTeX Error: Option clash for package geometry."},
+        {"path":"main.tex","file":"main.tex","line":5,"message":"LaTeX Error: Option clash for package geometry."},
+    ]
+    fixed = _attach_quick_fixes(errors, s.project_dir)
+    fix = fixed[0].get("quick_fix")
+    assert fix is not None
+    assert len(fix["edits"]) == 2
+    assert fix["edits"][0]["replacement"] == r"\usepackage{geometry}\geometry{a4paper,margin=1in}"
+    assert fix["edits"][1]["replacement"].startswith("% Loreforge consolidated duplicate geometry declaration:")
+    assert "quick_fix" not in fixed[1]
+
+def test_batch_source_fixes_verify_then_apply_with_one_revision_per_file(tmp_path: Path, monkeypatch):
+    import app.main as main_mod
+    s = make_settings(tmp_path); init_db(s)
+    monkeypatch.setattr(main_mod, "settings", s)
+    src = s.project_dir / "broken.tex"
+    src.write_text(
+        "\\subsubsection{Devotee Benefits} \\\\\n"
+        "\\begin{multicols}\n"
+        "Text\n",
+        encoding="utf-8",
+    )
+    fixes = [
+        {"path":"broken.tex","line":1,"expected":r"\subsubsection{Devotee Benefits} \\","replacement":r"\subsubsection{Devotee Benefits}","label":"remove break"},
+        {"path":"broken.tex","line":2,"expected":r"\begin{multicols}","replacement":r"\begin{multicols}{2}","label":"columns"},
+    ]
+    result = main_mod._apply_verified_source_fixes(fixes)
+    assert result["edits"] == 2
+    assert result["files"] == ["broken.tex"]
+    text = src.read_text(encoding="utf-8")
+    assert r"\subsubsection{Devotee Benefits}" in text
+    assert r"\begin{multicols}{2}" in text
+    assert len(list(s.history_dir.iterdir())) == 1

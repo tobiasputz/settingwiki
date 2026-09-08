@@ -343,38 +343,104 @@ def admin_delete_file(request: Request, path: str):
     return {"ok":True}
 
 
-@app.post("/api/admin/source-fix")
-def admin_source_fix(request: Request, payload: dict = Body(...)):
-    """Apply one Build Doctor one-line repair after verifying the source is unchanged."""
-    require_admin(request)
-    path = str(payload.get("path") or "")
-    expected = str(payload.get("expected") or "")
-    replacement = str(payload.get("replacement") or "")
-    try:
-        line_no = int(payload.get("line") or 0)
-    except (TypeError, ValueError):
-        line_no = 0
-    if not path or line_no < 1:
-        raise HTTPException(400, "Missing source-fix path/line")
-    p = safe_project_path(settings, path)
-    if not p.exists() or not p.is_file():
-        raise HTTPException(404, "Source file not found")
-    raw = p.read_text(encoding="utf-8", errors="replace")
-    lines = raw.splitlines(keepends=True)
-    if line_no > len(lines):
-        raise HTTPException(409, "The source moved since this diagnostic was created. Compile again.")
-    entry = lines[line_no - 1]
-    current = entry.rstrip("\r\n")
-    ending = entry[len(current):]
-    if current != expected:
-        raise HTTPException(409, "That line changed since Build Doctor inspected it. Compile again before applying the fix.")
-    lines[line_no - 1] = replacement + ending
-    result = save_text_file(settings, path, "".join(lines))
+def _source_fix_edits(fix: dict) -> list[dict]:
+    edits = fix.get("edits")
+    if isinstance(edits, list) and edits:
+        return [x for x in edits if isinstance(x, dict)]
+    return [fix]
+
+
+def _apply_verified_source_fixes(fixes: list[dict]) -> dict:
+    """Apply one or more Build Doctor repairs atomically per source snapshot.
+
+    Every proposed line is verified before *any* file is written. This allows the
+    UI to offer an "apply all safe fixes" action without risking half-applied
+    repairs when the GM edited one of the files after the diagnostic was created.
+    """
+    edits: list[dict] = []
+    for fix in fixes:
+        edits.extend(_source_fix_edits(fix))
+    if not edits or len(edits) > 80:
+        raise HTTPException(400, "No source fixes were supplied, or too many fixes were requested at once.")
+
+    grouped: dict[str, list[dict]] = {}
+    seen: dict[tuple[str, int], tuple[str, str]] = {}
+    for edit in edits:
+        path = str(edit.get("path") or "")
+        expected = str(edit.get("expected") or "")
+        replacement = str(edit.get("replacement") or "")
+        try:
+            line_no = int(edit.get("line") or 0)
+        except (TypeError, ValueError):
+            line_no = 0
+        if not path or line_no < 1:
+            raise HTTPException(400, "A source fix is missing its path or line number.")
+        if "\n" in replacement or "\r" in replacement:
+            raise HTTPException(400, "Build Doctor quick fixes may only replace one source line at a time.")
+        key = (path, line_no)
+        value = (expected, replacement)
+        if key in seen:
+            if seen[key] != value:
+                raise HTTPException(409, f"Conflicting Build Doctor fixes target {path}:{line_no}.")
+            continue
+        seen[key] = value
+        grouped.setdefault(path, []).append({
+            "path": path, "line": line_no, "expected": expected, "replacement": replacement,
+        })
+
+    snapshots: dict[str, tuple[list[str], Path]] = {}
+    # Verify the complete batch before mutating any source file.
+    for path, path_edits in grouped.items():
+        p = safe_project_path(settings, path)
+        if not p.exists() or not p.is_file():
+            raise HTTPException(404, f"Source file not found: {path}")
+        raw = p.read_text(encoding="utf-8", errors="replace")
+        lines = raw.splitlines(keepends=True)
+        for edit in path_edits:
+            line_no = edit["line"]
+            if line_no > len(lines):
+                raise HTTPException(409, f"{path} moved since this diagnostic was created. Compile again.")
+            entry = lines[line_no - 1]
+            current = entry.rstrip("\r\n")
+            if current != edit["expected"]:
+                raise HTTPException(409, f"{path}:{line_no} changed since Build Doctor inspected it. Compile again before applying fixes.")
+        snapshots[path] = (lines, p)
+
+    changed_files: list[str] = []
+    for path, path_edits in grouped.items():
+        lines, _ = snapshots[path]
+        for edit in path_edits:
+            idx = edit["line"] - 1
+            entry = lines[idx]
+            current = entry.rstrip("\r\n")
+            ending = entry[len(current):]
+            lines[idx] = edit["replacement"] + ending
+        result = save_text_file(settings, path, "".join(lines))
+        if result.get("changed"):
+            changed_files.append(path)
+
     try:
         build_wiki(settings)
     except Exception as exc:
-        result["wiki_warning"] = str(exc)
-    return {"ok": True, "path": path, "line": line_no, **result}
+        return {"ok": True, "files": changed_files, "edits": len(seen), "wiki_warning": str(exc)}
+    return {"ok": True, "files": changed_files, "edits": len(seen)}
+
+
+@app.post("/api/admin/source-fix")
+def admin_source_fix(request: Request, payload: dict = Body(...)):
+    """Apply one revision-safe Build Doctor repair."""
+    require_admin(request)
+    return _apply_verified_source_fixes([payload])
+
+
+@app.post("/api/admin/source-fixes")
+def admin_source_fixes(request: Request, payload: dict = Body(...)):
+    """Apply all explicitly approved high-confidence Build Doctor repairs once."""
+    require_admin(request)
+    fixes = payload.get("fixes")
+    if not isinstance(fixes, list):
+        raise HTTPException(400, "Expected a fixes array.")
+    return _apply_verified_source_fixes([x for x in fixes if isinstance(x, dict)])
 
 
 @app.post("/api/admin/compile")
