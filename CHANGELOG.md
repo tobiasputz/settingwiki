@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.0
+
+- Fixed `fontspec` projects being sent to pdfLaTeX. Loreforge now detects `fontspec`, `\setmainfont`, `\setsansfont`, `\setmonofont`, `unicode-math`, and Lua-only source across `.tex`, `.sty`, and `.cls` files and automatically selects XeLaTeX/LuaLaTeX even when an older Railway environment still says `LATEX_ENGINE=pdflatex`.
+- When the effective engine changes, Loreforge clears only generated dependency/auxiliary state before compiling so stale pdfLaTeX `.fdb_latexmk` data cannot poison the first XeLaTeX build.
+- Added OpenType TeX Gyre and EB Garamond system fonts plus fontconfig to the Docker image. The Docker build now validates that **TeX Gyre Adventor** and **EB Garamond** are actually discoverable before the image succeeds.
+- Improved Build Doctor so the `fontspec + pdfTeX` failure is identified as an engine mismatch rather than incorrectly reported as a missing font. The build panel now shows the effective engine on both successful and failed builds.
+- Added first-class player-Codex rendering for the supplied PF2e campaign macros: `\feat`, `\action`, `\itemtemplate`, `monster`, `\monstersection`, `\monsterline`, `\monsterabilityscores`, `\monsterdefenses`, `\monsterspeed`, `\monsterattack`, `\monsterspellcasting`, and `\monsterability`.
+- Added native inline rendering for `\actionOne`, `\actionTwo`, `\actionThree`, `\reaction`, and `\freeAction`, using the project's `Images/Symbols/` art where available and a readable fallback otherwise.
+- Added native handling for the legacy `\image{width}{path}` helper and retained `\pon` / `\chaptergroup` semantics for entity pages and navigation grouping.
+- Replaced fragile regex-only custom-macro argument parsing with balanced-brace parsing for up to eight arguments, so nested formatting in long feat/action/item/stat-block descriptions is preserved.
+- Added a **PF2e** insert menu to the GM editor with ready-to-fill feat, action, item, monster, stat-line, and action-symbol snippets.
+- Added regression tests for automatic XeLaTeX switching, persistent stale-engine cleanup, PF2e semantic cards/stat blocks, action symbols, legacy image helpers, and chapter-group navigation.
+
 ## 1.2.0
 
 - Added Codex Studio art direction for table-of-contents covers/thumbnails, entry heroes, full-page backgrounds, focal points, article layouts, featured entries, and public/teaser/hidden discovery states.

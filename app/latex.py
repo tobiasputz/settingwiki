@@ -24,7 +24,7 @@ HEADING_RE = re.compile(r"\\(part|chapter|section|subsection|subsubsection)\*?\s
 TITLE_RE = re.compile(r"\\title\s*\{([^{}]+)\}")
 AUTHOR_RE = re.compile(r"\\author\s*\{([^{}]+)\}")
 NEWCOMMAND_RE = re.compile(r"\\(?:newcommand|renewcommand)\s*\{?\\([A-Za-z@]+)\}?\s*(?:\[(\d+)\])?")
-ENV_RE = re.compile(r"\\newenvironment\s*\{([^{}]+)\}")
+ENV_RE = re.compile(r"\\(?:newenvironment|NewDocumentEnvironment)\s*\{([^{}]+)\}")
 DEFINECOLOR_RE = re.compile(r"\\definecolor\s*\{([^{}]+)\}\s*\{([^{}]+)\}\s*\{([^{}]+)\}")
 IMAGE_RE = re.compile(r"\\includegraphics(?:\[([^\]]*)\])?\s*\{([^{}]+)\}")
 ENTITY_ROOT_MACROS = {"pon"}
@@ -63,6 +63,7 @@ class BuildResult:
     errors: list[dict]
     recovery: str = ""
     suggestions: list[str] = field(default_factory=list)
+    effective_engine: str = ""
 
 
 def strip_comments(line: str) -> str:
@@ -191,6 +192,7 @@ def analyze_project(settings: Settings) -> dict:
         "packages": sorted(set(x.strip() for group in packages for x in group.split(",") if x.strip())),
         "image_references": image_refs,
         "missing_images": missing_images,
+        "recommended_engine": _effective_latex_engine(settings)[0],
     }
 
 
@@ -203,6 +205,14 @@ def _infer_macro_kind(name: str) -> str:
     # inferred reliably from their spelling alone.
     if n in ENTITY_ROOT_MACROS:
         return "entity-heading"
+    if n in {"feat", "action", "itemtemplate"}:
+        return "pf2e-rule"
+    if n in {"actionone", "actiontwo", "actionthree", "reaction", "freeaction"}:
+        return "pf2e-symbol"
+    if n.startswith("monster"):
+        return "pf2e-stat"
+    if n == "image":
+        return "image"
     if any(k in n for k in ("chapter", "section", "title", "heading")):
         return "heading"
     if any(k in n for k in ("npc", "character", "person")):
@@ -229,6 +239,142 @@ def slugify(value: str) -> str:
     value = clean_inline_text(value).lower()
     value = re.sub(r"[^a-z0-9]+", "-", value).strip("-")
     return value or "page"
+
+
+def _read_braced(text: str, pos: int) -> tuple[str, int] | None:
+    """Read one balanced `{...}` argument starting at/after *pos*.
+
+    Regex-only parsing breaks immediately for useful campaign macros because feat,
+    item and monster descriptions routinely contain nested formatting commands.
+    This small balanced reader is intentionally conservative but understands the
+    nesting that normal LaTeX command arguments use.
+    """
+    n = len(text)
+    while pos < n and text[pos].isspace():
+        pos += 1
+    if pos >= n or text[pos] != "{":
+        return None
+    depth = 0
+    start = pos + 1
+    i = pos
+    while i < n:
+        ch = text[i]
+        escaped = i > 0 and text[i - 1] == "\\"
+        if not escaped:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i], i + 1
+        i += 1
+    return None
+
+
+def _replace_balanced_command(raw: str, name: str, nargs: int, replacer) -> str:
+    """Replace `\\name{...}` calls while preserving nested braces in arguments."""
+    pattern = re.compile(r"\\" + re.escape(name) + r"\b")
+    out: list[str] = []
+    cursor = 0
+    while True:
+        match = pattern.search(raw, cursor)
+        if not match:
+            out.append(raw[cursor:])
+            break
+        out.append(raw[cursor:match.start()])
+        pos = match.end()
+        args: list[str] = []
+        valid = True
+        for _ in range(nargs):
+            parsed = _read_braced(raw, pos)
+            if not parsed:
+                valid = False
+                break
+            value, pos = parsed
+            args.append(value)
+        if not valid:
+            out.append(raw[match.start():match.end()])
+            cursor = match.end()
+            continue
+        out.append(replacer(args))
+        cursor = pos
+    return "".join(out)
+
+
+def _replace_balanced_environment(raw: str, name: str, nargs: int, replacer) -> str:
+    """Replace a non-nested custom environment with balanced begin arguments."""
+    begin_re = re.compile(r"\\begin\{" + re.escape(name) + r"\}")
+    end_marker = r"\end{" + name + "}"
+    out: list[str] = []
+    cursor = 0
+    while True:
+        match = begin_re.search(raw, cursor)
+        if not match:
+            out.append(raw[cursor:])
+            break
+        out.append(raw[cursor:match.start()])
+        pos = match.end()
+        args: list[str] = []
+        valid = True
+        for _ in range(nargs):
+            parsed = _read_braced(raw, pos)
+            if not parsed:
+                valid = False
+                break
+            value, pos = parsed
+            args.append(value)
+        if not valid:
+            out.append(raw[match.start():match.end()])
+            cursor = match.end()
+            continue
+        end = raw.find(end_marker, pos)
+        if end < 0:
+            out.append(raw[match.start():])
+            break
+        body = raw[pos:end]
+        out.append(replacer(args, body))
+        cursor = end + len(end_marker)
+    return "".join(out)
+
+
+def _project_engine_signals(settings: Settings) -> dict:
+    """Detect source features that require XeLaTeX/LuaLaTeX.
+
+    This deliberately scans .tex/.sty/.cls files because Overleaf projects often
+    put fontspec in a local style/class rather than main.tex.
+    """
+    chunks: list[str] = []
+    for suffix in ("*.tex", "*.sty", "*.cls"):
+        for path in settings.project_dir.rglob(suffix):
+            try:
+                chunks.append("\n".join(strip_comments(x) for x in path.read_text(encoding="utf-8", errors="replace").splitlines()))
+            except OSError:
+                pass
+    source = "\n".join(chunks)
+    fontspec = bool(re.search(r"\\(?:usepackage(?:\[[^\]]*\])?\{[^}]*fontspec[^}]*\}|setmainfont\b|setsansfont\b|setmonofont\b|newfontfamily\b|fontspec\b|usepackage(?:\[[^\]]*\])?\{[^}]*unicode-math[^}]*\}|usepackage(?:\[[^\]]*\])?\{[^}]*polyglossia[^}]*\})", source, re.IGNORECASE))
+    lua = bool(re.search(r"\\(?:directlua|begin\{luacode\}|usepackage(?:\[[^\]]*\])?\{[^}]*luacode[^}]*\})", source, re.IGNORECASE))
+    return {"fontspec": fontspec, "lua": lua}
+
+
+def _effective_latex_engine(settings: Settings) -> tuple[str, str]:
+    """Return the safe engine and an optional Build Doctor explanation."""
+    requested = (settings.latex_engine or "auto").strip().lower()
+    if requested not in {"auto", "pdflatex", "xelatex", "lualatex"}:
+        requested = "auto"
+    signals = _project_engine_signals(settings)
+    required = "lualatex" if signals["lua"] else ("xelatex" if signals["fontspec"] else "")
+    if required:
+        # LuaLaTeX also supports fontspec; a user who deliberately selected it
+        # should not be downgraded to XeLaTeX.
+        if signals["fontspec"] and requested == "lualatex" and not signals["lua"]:
+            return "lualatex", ""
+        if requested != required:
+            reason = "LuaLaTeX-only commands" if required == "lualatex" else "fontspec / \\setmainfont"
+            return required, f"Detected {reason} in the project and automatically switched the build engine from {requested or 'auto'} to {required}."
+        return required, ""
+    if requested == "auto":
+        return "pdflatex", ""
+    return requested, ""
 
 
 def presentation_asset_url(settings: Settings, ref: str | None) -> str:
@@ -1013,6 +1159,178 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
     raw = re.sub(r"\\(?:label|index|cite|pageref|ref)\s*\{[^{}]*\}", "", raw)
     raw = re.sub(r"\\(?:vspace|hspace)\*?(?:\[[^\]]*\])?\s*\{[^{}]*\}", "", raw)
 
+    # ------------------------------------------------------------------
+    # Pathfinder 2e campaign semantics
+    # ------------------------------------------------------------------
+    # These are deliberately implemented as *renderers*, not hard-coded source
+    # rewrites. The user's LaTeX definitions remain authoritative for the PDF,
+    # while the wiki gets native, responsive PF2e cards/stat blocks.
+    def stash(prefix: str, value: str) -> str:
+        token = f"@@LOREFORGE_{prefix}_{len(tokens)}@@"
+        tokens[token] = value
+        return token
+
+    def inner_html(value: str) -> str:
+        rendered, _ = latex_fragment_to_html(
+            value, settings, page_kind=page_kind, analysis=analysis, _allow_panels=False
+        )
+        rendered = rendered.strip()
+        single = re.fullmatch(r"<p>(.*)</p>", rendered, flags=re.DOTALL)
+        return single.group(1) if single else rendered
+
+    action_symbol_specs = {
+        "actionOne": ("Images/Symbols/oneaction.png", "One action", "1"),
+        "actionTwo": ("Images/Symbols/twoaction.png", "Two actions", "2"),
+        "actionThree": ("Images/Symbols/threeaction.png", "Three actions", "3"),
+        "reaction": ("Images/Symbols/reaction.png", "Reaction", "R"),
+        "freeAction": ("Images/Symbols/freeaction.png", "Free action", "F"),
+    }
+
+    def action_symbol_html(command: str) -> str:
+        path, label, fallback = action_symbol_specs[command]
+        url = asset_url(settings, path)
+        if url:
+            return (
+                f'<span class="pf2-action-symbol pf2-action-{html.escape(command.lower(), quote=True)}" '
+                f'title="{html.escape(label, quote=True)}"><img src="{html.escape(url, quote=True)}" '
+                f'alt="{html.escape(label, quote=True)}"></span>'
+            )
+        return (
+            f'<span class="pf2-action-symbol pf2-action-fallback" title="{html.escape(label, quote=True)}" '
+            f'aria-label="{html.escape(label, quote=True)}">{html.escape(fallback)}</span>'
+        )
+
+    def render_rule_card(args: list[str], kind: str) -> str:
+        title = inner_html(args[0])
+        meta = inner_html(args[1])
+        traits = inner_html(args[2])
+        body = inner_html(args[3])
+        if kind == "feat":
+            right = f"Feat {meta}" if meta else "Feat"
+            kicker = "FEAT"
+        elif kind == "item":
+            right = meta
+            kicker = "ITEM"
+        else:
+            right = meta
+            kicker = "ACTION"
+        return (
+            f'<section class="pf2-rule-card pf2-{kind}">'
+            f'<div class="pf2-rule-kicker">{kicker}</div>'
+            f'<header class="pf2-rule-header"><h3>{title}</h3><strong>{right}</strong></header>'
+            f'{f"<div class=\"pf2-traits\">{traits}</div>" if traits else ""}'
+            f'<div class="pf2-rule-divider"></div><div class="pf2-rule-body">{body}</div>'
+            f'</section>'
+        )
+
+    for command, kind in (("feat", "feat"), ("action", "action"), ("itemtemplate", "item")):
+        raw = _replace_balanced_command(
+            raw, command, 4,
+            lambda args, kind=kind: "\n" + stash("PF2RULE", render_rule_card(args, kind)) + "\n",
+        )
+
+    def render_monster(args: list[str], body: str) -> str:
+        name, level, traits, source = [inner_html(x) for x in args]
+        body_html, _ = latex_fragment_to_html(
+            body, settings, page_kind=page_kind, analysis=analysis, _allow_panels=False
+        )
+        source_line = f'<div class="pf2-monster-source">{source}</div>' if clean_inline_text(args[3]) else ""
+        return (
+            '<section class="pf2-statblock pf2-monster">'
+            '<div class="pf2-stat-ornament" aria-hidden="true"></div>'
+            f'<header class="pf2-monster-header"><h3>{name}</h3><strong>Creature {level}</strong></header>'
+            f'{f"<div class=\"pf2-traits\">{traits}</div>" if traits else ""}'
+            f'{source_line}<div class="pf2-stat-rule"></div>'
+            f'<div class="pf2-stat-body">{body_html}</div>'
+            '</section>'
+        )
+
+    raw = _replace_balanced_environment(
+        raw, "monster", 4,
+        lambda args, body: "\n" + stash("PF2MONSTER", render_monster(args, body)) + "\n",
+    )
+
+    def stat_line(label: str, value: str, extra_class: str = "") -> str:
+        return (
+            f'<div class="pf2-stat-line {extra_class}"><strong>{inner_html(label)}</strong>'
+            f'<span>{inner_html(value)}</span></div>'
+        )
+
+    raw = _replace_balanced_command(raw, "monstersection", 1, lambda a: "\n" + stash("PF2STAT", f'<div class="pf2-stat-section"><span>{inner_html(a[0])}</span></div>') + "\n")
+    raw = _replace_balanced_command(raw, "monsterline", 2, lambda a: "\n" + stash("PF2STAT", stat_line(a[0], a[1])) + "\n")
+    raw = _replace_balanced_command(
+        raw, "monsterabilityscores", 6,
+        lambda a: "\n" + stash("PF2STAT", '<div class="pf2-ability-grid">' + ''.join(
+            f'<div><strong>{name}</strong><span>{inner_html(value)}</span></div>'
+            for name, value in zip(("Str", "Dex", "Con", "Int", "Wis", "Cha"), a)
+        ) + '</div>') + "\n",
+    )
+    raw = _replace_balanced_command(
+        raw, "monsterdefenses", 4,
+        lambda a: "\n" + stash("PF2STAT", (
+            '<div class="pf2-defense-block">'
+            f'<div><strong>AC</strong> {inner_html(a[0])}; <strong>Saves</strong> {inner_html(a[1])}</div>'
+            f'<div>{inner_html(a[2])}</div><div>{inner_html(a[3])}</div>'
+            '</div>'
+        )) + "\n",
+    )
+    raw = _replace_balanced_command(raw, "monsterspeed", 1, lambda a: "\n" + stash("PF2STAT", stat_line("Speed", a[0])) + "\n")
+
+    def render_attack(a: list[str]) -> str:
+        bonus_text = clean_inline_text(a[1]).strip()
+        bonus = bonus_text if bonus_text.startswith(("+", "-")) else ("+" + bonus_text if bonus_text else "")
+        traits = inner_html(a[2])
+        return (
+            '<div class="pf2-stat-line pf2-attack-line">'
+            f'<strong>{inner_html(a[0])}</strong><span>{html.escape(bonus)}'
+            f'{f" <em>{traits}</em>" if traits else ""}, <b>Damage</b> {inner_html(a[3])}</span></div>'
+        )
+    raw = _replace_balanced_command(raw, "monsterattack", 4, lambda a: "\n" + stash("PF2STAT", render_attack(a)) + "\n")
+    raw = _replace_balanced_command(
+        raw, "monsterspellcasting", 4,
+        lambda a: "\n" + stash("PF2STAT", (
+            '<div class="pf2-spellcasting">'
+            f'<div><strong>{inner_html(a[0])}</strong> {inner_html(a[1])}</div>'
+            f'<div>{inner_html(a[2])}</div>'
+            f'{f"<div class=\"pf2-stat-note\">{inner_html(a[3])}</div>" if clean_inline_text(a[3]) else ""}'
+            '</div>'
+        )) + "\n",
+    )
+    raw = _replace_balanced_command(
+        raw, "monsterability", 2,
+        lambda a: "\n" + stash("PF2STAT", f'<div class="pf2-monster-ability"><strong>{inner_html(a[0])}</strong><span>{inner_html(a[1])}</span></div>') + "\n",
+    )
+
+    # The user's legacy \image{width}{path} helper now behaves like a native
+    # Loreforge image on the wiki while remaining untouched for TeX itself.
+    def render_custom_image(a: list[str]) -> str:
+        width_raw, ref = a[0].strip(), a[1].strip()
+        url = asset_url(settings, ref)
+        if not url:
+            return f'<div class="missing-asset">Missing image: {html.escape(ref)}</div>'
+        width_pct = 78.0
+        wm = re.search(r"([0-9]*\.?[0-9]+)\s*\\(?:textwidth|linewidth|columnwidth|paperwidth)", width_raw)
+        if wm:
+            width_pct = max(15.0, min(100.0, float(wm.group(1)) * 100.0))
+        alt = Path(ref).stem.replace("_", " ").replace("-", " ")
+        return (
+            f'<figure class="lore-image lore-image-custom lore-image-sized" style="--image-width:{width_pct:.1f}%">'
+            f'<button class="lore-image-zoom" type="button" aria-label="Open {html.escape(alt, quote=True)}">'
+            f'<img loading="lazy" decoding="async" src="{html.escape(url, quote=True)}" alt="{html.escape(alt, quote=True)}"></button>'
+            '</figure>'
+        )
+    raw = _replace_balanced_command(raw, "image", 2, lambda a: "\n" + stash("CUSTOMIMAGE", render_custom_image(a)) + "\n")
+
+    # Zero-argument PF2e action symbols are rendered last so they also work in
+    # ordinary prose. Calls inside feat/action/monster arguments are handled by
+    # the recursive renderers above.
+    for command in action_symbol_specs:
+        raw = re.sub(
+            r"\\" + re.escape(command) + r"\b",
+            lambda _m, command=command: stash("ACTIONICON", action_symbol_html(command)),
+            raw,
+        )
+
     # Protect images with tokens before generic macro cleanup.  On Person of
     # Note pages, the first NPC/overlay image becomes responsive portrait art
     # rather than retaining PDF-specific TikZ page positioning.
@@ -1189,14 +1507,16 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
         return token
     raw = re.sub(r"\\wiki\s*\{([^{}]+)\}(?:\s*\{([^{}]+)\})?", wiki_sub, raw)
 
-    # Heuristic custom macros. Preserve arguments rather than dropping lore.
+    # Heuristic custom macros. Preserve up to eight balanced arguments instead
+    # of relying on `[^{}]*`, so nested formatting in campaign-specific commands
+    # survives even when Loreforge does not know that command's exact semantics.
     analysis_macros = {x["name"]: x for x in (analysis or analyze_project(settings)).get("custom_macros", [])}
     for name, info in analysis_macros.items():
-        if info["args"] <= 0 or info["args"] > 3:
+        argc = int(info.get("args", 0) or 0)
+        if argc <= 0 or argc > 8:
             continue
-        pattern = r"\\" + re.escape(name) + r"\s*" + "".join(r"\{([^{}]*)\}\s*" for _ in range(info["args"]))
-        def custom_sub(m: re.Match, name=name, info=info) -> str:
-            args = [clean_inline_text(x) for x in m.groups()]
+        def custom_balanced(args_raw: list[str], name=name, info=info) -> str:
+            args = [clean_inline_text(x) for x in args_raw]
             token = f"@@LOREFORGE_CUSTOM_{len(tokens)}@@"
             kind = info["kind"]
             if kind in {"npc-card", "location-card", "callout"}:
@@ -1206,7 +1526,7 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
             else:
                 tokens[token] = html.escape(" ".join(args))
             return token
-        raw = re.sub(pattern, custom_sub, raw)
+        raw = _replace_balanced_command(raw, name, argc, custom_balanced)
 
     # Common two/three-argument visual wrappers: keep the human-readable content, not the color name.
     raw = re.sub(r"\\textcolor\s*\{[^{}]*\}\s*\{([^{}]*)\}", r"\1", raw)
@@ -1275,7 +1595,11 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
                 out.append("</div>")
                 column_open = False
             continue
-        if s.startswith("<figure") or s.startswith("<aside") or s.startswith("<dl class=\"lore-profile-grid") or s.startswith("<div class=\"missing-asset") or s.startswith("<div class=\"lore-table-wrap") or s.startswith("<div class=\"lore-image-caption") or s.startswith("<section class=\"lore-scene-panel"):
+        if (s.startswith("<figure") or s.startswith("<aside") or s.startswith("<dl class=\"lore-profile-grid")
+                or s.startswith("<div class=\"missing-asset") or s.startswith("<div class=\"lore-table-wrap")
+                or s.startswith("<div class=\"lore-image-caption") or s.startswith("<section class=\"lore-scene-panel")
+                or s.startswith("<section class=\"pf2-") or s.startswith("<div class=\"pf2-")
+                or s.startswith("</section>")):
             flush_p(); out.append(s); continue
         paragraph.append(s)
     flush_p()
@@ -1321,8 +1645,12 @@ def _latex_failure_suggestions(log: str) -> list[str]:
         suggestions.append("This document appears to require shell escape. Only for a trusted private project, set LATEX_ALLOW_SHELL_ESCAPE=1 in Railway.")
     if re.search(r"File ended while scanning use of|Runaway argument", log):
         suggestions.append("TeX detected an unfinished argument/environment. Check for a missing }, \\end{...}, or unmatched custom macro near the first reported source line.")
-    if re.search(r"fontspec.*error|font .* not found", log, re.IGNORECASE):
-        suggestions.append("A requested font is unavailable in the container. Upload the font through your project if your LaTeX setup supports it, or install the matching Debian/TeX Live font package in the Dockerfile.")
+    if re.search(r"fontspec.*(?:pdftex|cannot.*pdftex|fatal)|The fontspec package requires either XeTeX or LuaTeX", log, re.IGNORECASE | re.DOTALL):
+        suggestions.append("This project uses fontspec, which cannot run under pdfLaTeX. Loreforge normally auto-switches such projects to XeLaTeX; set LATEX_ENGINE=auto (recommended) or xelatex if you have explicitly overridden the engine.")
+    elif re.search(r"fontspec.*error|font .* not found|The font [\"`'].*(?:cannot be found|not found)", log, re.IGNORECASE):
+        font_match = re.search(r"The font [\"`']([^\"`']+)[\"`'].*(?:cannot be found|not found)", log, re.IGNORECASE)
+        font_name = f" ({font_match.group(1)})" if font_match else ""
+        suggestions.append(f"A requested font{font_name} is unavailable. Loreforge includes TeX Gyre and EB Garamond in the Docker image; other project fonts can be supplied as .otf/.ttf files and referenced by file/path in fontspec.")
     if ("Nothing to do" in log or "All targets" in log) and "gave an error" in log:
         suggestions.append("latexmk had cached a previous failed run. Loreforge automatically clears its dependency state and retries in this build.")
     if not suggestions:
@@ -1345,7 +1673,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
     main = safe_project_path(settings, main_rel)
     if not main.exists():
         raise ValueError(f"Main file not found: {main_rel}")
-    engine = settings.latex_engine if settings.latex_engine in {"pdflatex", "xelatex", "lualatex"} else "pdflatex"
+    engine, engine_recovery = _effective_latex_engine(settings)
     latexmk = shutil.which("latexmk")
     shell = "-shell-escape" if settings.allow_shell_escape else "-no-shell-escape"
     env = os.environ.copy()
@@ -1353,6 +1681,18 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
     env.setdefault("openout_any", "p")
     started = time.perf_counter()
     recovery_steps: list[str] = []
+    if engine_recovery:
+        recovery_steps.append(engine_recovery)
+        # A persistent Railway project may still contain latexmk dependency state
+        # written by the previously selected engine (most commonly pdfLaTeX).
+        # Clear only generated state when changing engines so the very first build
+        # after an upgrade cannot be trapped by that old rule database.
+        removed = _purge_latexmk_state(main)
+        if removed:
+            recovery_steps.append(
+                "Cleared generated dependency state from the previous LaTeX engine: "
+                + ", ".join(removed)
+            )
 
     def run(cmd: list[str], timeout: int | None = None) -> tuple[int, str]:
         try:
@@ -1407,7 +1747,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
         binary = shutil.which(engine)
         command = [engine]
         if not binary:
-            return BuildResult(False, main_rel, None, 0, command, "LaTeX engine is not installed.", [{"message": f"{engine} not installed"}], suggestions=[f"Install {engine} or use the Loreforge Docker image."])
+            return BuildResult(False, main_rel, None, 0, command, "LaTeX engine is not installed.", [{"message": f"{engine} not installed"}], suggestions=[f"Install {engine} or use the Loreforge Docker image."], effective_engine=engine)
         command = [binary, "-interaction=nonstopmode", "-file-line-error", shell, main.name]
         code, first_log = run(command)
         second_code, second_log = run(command) if code == 0 else (code, "")
@@ -1440,7 +1780,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
     (settings.build_dir / "latex.log").write_text(log[-260000:], encoding="utf-8", errors="replace")
     return BuildResult(
         build_ok and pdf_out.exists(), main_rel, "/preview/pdf" if pdf_out.exists() else None,
-        duration, command, log[-90000:], errors[:80], "\n".join(recovery_steps), suggestions,
+        duration, command, log[-90000:], errors[:80], "\n".join(recovery_steps), suggestions, engine,
     )
 
 def parse_latex_errors(log: str, cwd: Path) -> list[dict]:

@@ -14,11 +14,17 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     texlive-latex-recommended \
     texlive-latex-extra \
     texlive-fonts-recommended \
+    fonts-texgyre \
+    fonts-ebgaramond \
+    fontconfig \
     texlive-pictures \
     texlive-xetex \
     texlive-luatex \
     ghostscript \
     ca-certificates \
+    && fc-cache -f \
+    && fc-match "TeX Gyre Adventor" | grep -qi "adventor" \
+    && fc-match "EB Garamond" | grep -qi "garamond" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

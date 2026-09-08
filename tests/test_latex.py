@@ -272,3 +272,145 @@ def test_compile_pdf_self_heals_stale_latexmk_cache(tmp_path: Path, monkeypatch)
     assert "-gg" in calls[1]
     assert "cached failed-build state" in result.recovery
     assert (s.build_dir / "campaign.pdf").exists()
+
+
+def test_fontspec_project_auto_switches_from_pdflatex_to_xelatex(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+\usepackage{fontspec}
+\setmainfont{TeX Gyre Adventor}
+\begin{document}Hello\end{document}
+''', encoding="utf-8")
+    calls = []
+    def fake_which(name):
+        return f"/usr/bin/{name}"
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        calls.append(list(cmd))
+        (Path(cwd) / "main.pdf").write_bytes(b"%PDF-1.4 xelatex")
+        return SimpleNamespace(returncode=0, stdout="XeLaTeX build complete\n")
+    monkeypatch.setattr(latex_mod.shutil, "which", fake_which)
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+    result = compile_pdf(s)
+    assert result.ok is True
+    assert result.effective_engine == "xelatex"
+    assert any("-xelatex" in call for call in calls)
+    assert "fontspec" in result.recovery
+    assert "switched" in result.recovery
+
+
+def test_pf2e_custom_rule_macros_render_as_native_codex_cards(tmp_path: Path):
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+\newcommand{\actionOne}{ONE}
+\newcommand{\actionTwo}{TWO}
+\newcommand{\actionThree}{THREE}
+\newcommand{\reaction}{REACTION}
+\newcommand{\freeAction}{FREE}
+\newcommand{\feat}[4]{#1 #2 #3 #4}
+\newcommand{\action}[4]{#1 #2 #3 #4}
+\newcommand{\itemtemplate}[4]{#1 #2 #3 #4}
+\NewDocumentEnvironment{monster}{m m m m}{}{}
+\newcommand{\monstersection}[1]{#1}
+\newcommand{\monsterline}[2]{#1 #2}
+\newcommand{\monsterabilityscores}[6]{#1 #2 #3 #4 #5 #6}
+\newcommand{\monsterdefenses}[4]{#1 #2 #3 #4}
+\newcommand{\monsterspeed}[1]{#1}
+\newcommand{\monsterattack}[4]{#1 #2 #3 #4}
+\newcommand{\monsterspellcasting}[4]{#1 #2 #3 #4}
+\newcommand{\monsterability}[2]{#1 #2}
+\begin{document}
+\section{Rules}
+\feat{Impossible Accountant}{7}{Rare, Skill}{You can \textbf{balance} a ledger while threatened. Use \actionOne to audit a foe.}
+\action{Emergency Audit}{\reaction}{Concentrate}{When a creature lies, expose the discrepancy.}
+\itemtemplate{Sunstone Ledger}{Item 9}{Magical, Invested}{The pages remember every debt.}
+\begin{monster}{Ledger Wyrm}{6}{Rare, Large, Dragon}{Bestiary of Bad Accounting}
+\monsterline{Perception}{+14; darkvision}
+\monsterabilityscores{+5}{+2}{+4}{+1}{+3}{+0}
+\monsterdefenses{23}{Fort +16, Ref +12, Will +15}{HP 105}{Resistance 5 fire}
+\monsterspeed{30 feet, fly 50 feet}
+\monstersection{Offense}
+\monsterattack{Melee \actionOne jaws}{17}{reach 10 feet}{2d10+8 piercing}
+\monsterspellcasting{Arcane Innate Spells}{DC 24}{3rd fear}{The wyrm cannot cast while balancing books.}
+\monsterability{Compound Interest}{A target that owes the wyrm takes \textbf{extra damage}.}
+\end{monster}
+\end{document}
+''', encoding="utf-8")
+    page = build_wiki(s)["pages"][0]
+    html = page["html"]
+    assert 'class="pf2-rule-card pf2-feat"' in html
+    assert 'class="pf2-rule-card pf2-action"' in html
+    assert 'class="pf2-rule-card pf2-item"' in html
+    assert 'class="pf2-statblock pf2-monster"' in html
+    assert "Impossible Accountant" in html
+    assert "balance" in html
+    assert "Emergency Audit" in html
+    assert "Ledger Wyrm" in html
+    assert "Creature 6" in html
+    assert "Compound Interest" in html
+    assert "pf2-action-symbol" in html
+    assert "monsterattack" not in page["plain_text"]
+    assert "feat" not in page["plain_text"].lower() or "Feat 7" in page["plain_text"]
+
+
+def test_legacy_image_macro_renders_responsive_image(tmp_path: Path):
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "Images").mkdir()
+    (s.project_dir / "Images" / "relic.png").write_bytes(b"image")
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{article}
+\newcommand{\image}[2]{#2}
+\begin{document}
+\section{Relic}
+\image{0.45\textwidth}{Images/relic.png}
+\end{document}
+''', encoding="utf-8")
+    page = build_wiki(s)["pages"][0]
+    assert "lore-image-custom" in page["html"]
+    assert "--image-width:45.0%" in page["html"]
+    assert "/project-asset/Images/relic.png" in page["html"]
+
+
+def test_chaptergroup_becomes_navigation_group_not_empty_page(tmp_path: Path):
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+\newcommand{\chaptergroup}[1]{#1}
+\begin{document}
+\chaptergroup{Player Options}
+\section{Feats}
+Useful rules live here.
+\section{Equipment}
+Useful items live here.
+\end{document}
+''', encoding="utf-8")
+    wiki = build_wiki(s)
+    assert [c["title"] for c in wiki["categories"]] == ["Player Options"]
+    assert [p["title"] for p in wiki["pages"]] == ["Feats", "Equipment"]
+    assert all(p["chapter"] == "Player Options" for p in wiki["pages"])
+    assert not any(p["title"] == "Player Options" for p in wiki["pages"])
+
+
+def test_engine_switch_clears_old_latexmk_dependency_state(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+    import app.latex as latex_mod
+    s = make_settings(tmp_path); init_db(s)
+    (s.project_dir / "main.tex").write_text(r'''\documentclass{book}
+\usepackage{fontspec}
+\setmainfont{TeX Gyre Adventor}
+\begin{document}Hello\end{document}
+''', encoding="utf-8")
+    stale = s.project_dir / "main.fdb_latexmk"
+    stale.write_text("old pdflatex state", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(latex_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    def fake_run(cmd, cwd, text, stdout, stderr, timeout, env):
+        calls.append(list(cmd))
+        (Path(cwd) / "main.pdf").write_bytes(b"%PDF-1.4 xelatex")
+        return SimpleNamespace(returncode=0, stdout="XeLaTeX build complete\n")
+    monkeypatch.setattr(latex_mod.subprocess, "run", fake_run)
+    result = compile_pdf(s)
+    assert result.ok is True
+    assert result.effective_engine == "xelatex"
+    assert not stale.exists()
+    assert "previous LaTeX engine" in result.recovery
+    assert any("-xelatex" in call for call in calls)

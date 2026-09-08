@@ -25,6 +25,7 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Long-entry navigation.** Section/subsection headings receive stable deep links and long articles get an **On this page** navigator with scroll tracking. Player bookmarks/recently viewed entries form a private browser-side reading trail.
 - **Stable codex sidebar.** Opening another entry no longer throws the player back to the top of the navigation. Loreforge remembers expanded chapter groups, scroll position, and the clicked row position across full page navigation.
 - **Build Doctor.** `latexmk` stale-failure states are detected and repaired automatically, the underlying TeX engine is invoked for a diagnostic pass when `latexmk` only returns a wrapper summary, and the editor surfaces likely fixes rather than only showing `pdflatex: gave an error`.
+- **Native PF2e campaign mechanics.** Your existing `\feat`, `\action`, `\itemtemplate`, creature/stat-block commands, action-symbol macros, `\chaptergroup`, `\pon`, and legacy `\image` helper remain authoritative LaTeX for the PDF while receiving dedicated responsive Codex rendering. Nested arguments are parsed safely, and the editor has a PF2e insertion palette for creating new entries with the same command vocabulary.
 - **Interactive atlas.** Upload a map image, enter explicit **＋ Location** placement mode, follow the placement crosshair, click once to place a marker, drag markers into position, attach descriptions and link them to codex pages. A searchable marker directory makes existing locations easy to find/focus. Player maps also expose a searchable location panel and category filters. Markers can be player-visible or GM-only and use distinct symbols for cities, ports, ruins, danger, secrets, temples, portals, quests, and more.
 - **Edge-locked map navigation.** Player maps use a cover-style minimum zoom by default: when you pan, the map cannot be pushed past the viewport and reveal empty space beyond its edges. Wheel, buttons, and touch pinch all zoom around the pointer/fingers.
 - **Fantasy atmosphere studio.** Per-map switches include moving clouds, cloud shadows, rolling fog, valley mist, god rays, rain, lightning, snow, blizzards, ashfall, sand/dust, heat haze, ocean shimmer, moving wave crests, embers, fireflies, pollen, leaves, petals, birds, bats, rare dragon shadows, arcane motes, spectral wisps, cursed miasma, ley lines, rune pulses, glowing spores, aurora, stars, shooting stars, vignette, fogged edges, parchment warmth, moonlight, blood-moon tint, cartographer grid, and compass rose. Presets now include Calm Fantasy, Stormbound, Frozen North, Haunted Realm, Arcane Night, Volcanic Wastes, Ancient Parchment, Coastal Breeze, Autumn Road, Feywild Glade, Scorched Desert, Underdark, Blood Moon, Ancient Ruins, Blighted Realm, and High Fantasy.
@@ -73,7 +74,7 @@ Optional:
 
 ```text
 PLAYER_PASSWORD=<password for the player-facing wiki>
-LATEX_ENGINE=pdflatex       # or xelatex / lualatex
+LATEX_ENGINE=auto           # recommended; also accepts pdflatex / xelatex / lualatex
 LATEX_TIMEOUT=60
 LATEX_ALLOW_SHELL_ESCAPE=0
 ```
@@ -144,6 +145,32 @@ The converter:
 - records unresolved images and discovered packages/macros in **Project → Formatting analysis**.
 
 This is intentionally tolerant. A campaign with a giant custom `.cls` file should still produce useful lore even when the HTML renderer does not know every visual TeX primitive.
+
+### Pathfinder 2e rule/stat-block macros
+
+Loreforge has native web renderers for the campaign commands you supplied. Your definitions remain unchanged and continue to control the PDF; Loreforge only recognizes their *usage* when building the player Codex:
+
+```latex
+\feat{Name}{Level}{Traits}{Description}
+\action{Name}{\actionOne}{Traits}{Description}
+\itemtemplate{Name}{Item 5}{Traits}{Description}
+
+\begin{monster}{Creature Name}{Level}{Traits}{Source}
+  \monsterline{Perception}{+12; darkvision}
+  \monsterabilityscores{+4}{+3}{+2}{+0}{+2}{-1}
+  \monsterdefenses{21}{Fort +13, Ref +12, Will +10}{HP 75}{Resistance 5 fire}
+  \monsterspeed{30 feet}
+  \monstersection{Offense}
+  \monsterattack{Melee \actionOne jaws}{15}{reach 10 feet}{2d8+7 piercing}
+  \monsterability{Special Ability}{Rules text.}
+\end{monster}
+```
+
+The player site renders these as responsive Pathfinder-style rule cards and creature stat blocks instead of flattening the four/six-argument macros into prose. `\actionOne`, `\actionTwo`, `\actionThree`, `\reaction`, and `\freeAction` use the images in `Images/Symbols/` when those files exist. `\image{0.5\textwidth}{Images/foo.png}` is also recognized as an image helper.
+
+The GM editor now includes an **PF2e** button beside **Artwork** and **Scene**. It inserts ready-to-fill feat, action, item, monster, stat-line, and action-symbol snippets using these existing commands.
+
+Custom commands that Loreforge does not know explicitly are now parsed with balanced braces for up to eight arguments, so nested `\textbf{...}`, `\emph{...}`, links, and other formatting inside long arguments are not discarded.
 
 ### Optional explicit wiki links
 
@@ -285,11 +312,23 @@ pytest -q
 
 Doing that would create a flood of commits and, with Railway GitHub auto-deploys enabled, could repeatedly redeploy the whole application while you type. Loreforge therefore treats the persistent project volume as the authoring store and provides project ZIP export for backups/Overleaf interchange. GitHub remains the clean application/deployment repository.
 
+## Fontspec / custom font projects
+
+`fontspec` cannot compile under pdfLaTeX. Loreforge now detects `fontspec`, `\setmainfont`, `\setsansfont`, `\setmonofont`, `unicode-math`, and `polyglossia` and automatically chooses XeLaTeX. Lua-only source is switched to LuaLaTeX. This works even if an older Railway deployment still has `LATEX_ENGINE=pdflatex`; `LATEX_ENGINE=auto` is nevertheless the recommended setting.
+
+The Docker image includes OpenType **TeX Gyre** fonts and **EB Garamond**, so the commonly used:
+
+```latex
+\setmainfont{TeX Gyre Adventor}
+```
+
+works after rebuilding the Railway image. For a different private font, keep the `.otf`/`.ttf` in the LaTeX project and reference it through normal `fontspec` file/path options, or add the relevant Debian font package to the Dockerfile.
+
 ## Troubleshooting: `latexmk` says “Nothing to do” but also “pdflatex: gave an error”
 
 That exact combination is usually a stale failed-build state in `latexmk`: its dependency database remembers a previous engine failure, then a later run decides there is nothing new to compile and only repeats the old failure summary.
 
-Loreforge v1.2 detects this pattern automatically. It removes only generated LaTeX dependency/auxiliary state (`.fdb_latexmk`, `.fls`, `.aux`, `.toc`, etc.), retries with a forced dependency rebuild, and—if the wrapper still has no useful source diagnostic—runs the selected TeX engine directly once to recover the actual error message. The **Build log** shows a **Build Doctor** card describing any recovery step and likely fixes.
+Loreforge detects this pattern automatically. It removes only generated LaTeX dependency/auxiliary state (`.fdb_latexmk`, `.fls`, `.aux`, `.toc`, etc.), retries with a forced dependency rebuild, and—if the wrapper still has no useful source diagnostic—runs the selected TeX engine directly once to recover the actual error message. The **Build log** shows a **Build Doctor** card describing any recovery step and likely fixes.
 
 You can still press **↻ Clean** manually at any time. It does not delete your `.tex`, images, `.sty`, `.cls`, bibliography, maps, or Loreforge metadata; it only clears generated compilation state before rebuilding.
 
@@ -306,4 +345,4 @@ The Project screen also reports total, used, and free persistent storage. If the
 
 ## v1.1 formatting and atlas fixes
 
-This build adds regression coverage for longtable column-spec leakage, `\pon` entity grouping/profile rendering, TikZ NPC portrait extraction, persistent-volume migration for map atmosphere settings, and effect-setting validation. The test suite currently contains 20 passing regression tests, including the v1.2 Build Doctor, scene-art, automatic TOC-art, and lore-linking cases.
+This build adds regression coverage for longtable column-spec leakage, `\pon` entity grouping/profile rendering, TikZ NPC portrait extraction, persistent-volume migration for map atmosphere settings, and effect-setting validation. The test suite now includes regression coverage for Build Doctor recovery, automatic XeLaTeX selection for fontspec projects, PF2e semantic feat/action/item/monster rendering, scene art, automatic TOC art, and lore linking.

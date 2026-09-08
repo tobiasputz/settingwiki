@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Loreforge Editor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
-<link rel="stylesheet" href="/static/admin.css?v=5"></head>
+<link rel="stylesheet" href="/static/admin.css?v=6"></head>
 <body class="admin-body">
 <div class="admin-app">
   <header class="admin-topbar">
@@ -20,7 +20,7 @@
     </aside>
     <div class="gutter" data-gutter="left"></div>
     <main class="editor-pane">
-      <div class="editor-tabs"><div id="activeFileTab" class="file-tab"><span class="tex-icon">TₑX</span><span id="activeFileName">No file open</span><i id="dirtyDot"></i></div><div class="editor-tools"><button id="insertArtworkBtn">Artwork</button><button id="insertSceneBtn" title="Wrap selected prose in a web-only atmospheric image panel">Scene</button><button id="historyBtn">History</button><button id="toggleWrapBtn">Wrap</button></div></div>
+      <div class="editor-tabs"><div id="activeFileTab" class="file-tab"><span class="tex-icon">TₑX</span><span id="activeFileName">No file open</span><i id="dirtyDot"></i></div><div class="editor-tools"><button id="insertArtworkBtn">Artwork</button><button id="insertSceneBtn" title="Wrap selected prose in a web-only atmospheric image panel">Scene</button><button id="insertPf2Btn" title="Insert PF2e feat, action, item, monster, or action-symbol markup">PF2e</button><button id="historyBtn">History</button><button id="toggleWrapBtn">Wrap</button></div></div>
       <div class="editor-wrap"><textarea id="sourceEditor" spellcheck="false" aria-label="LaTeX source"></textarea></div>
       <div class="editor-statusbar"><span id="cursorState">Ln 1, Col 1</span><span>UTF-8</span><span>LaTeX</span><span id="autosaveLabel">Autosave on</span></div>
     </main>
@@ -131,7 +131,7 @@
         <section class="settings-card"><h2>Campaign identity</h2><label>Site title<input id="siteTitle"></label><label>Tagline<textarea id="siteTagline"></textarea></label><label>Main LaTeX file<select id="mainFileSelect"></select></label><label class="check-row project-check"><input id="autoLinkCodex" type="checkbox" checked> Automatically cross-link codex names in prose</label><small class="storage-help">Loreforge links the first natural mention of unique entry names and builds backlinks automatically. Explicit <code>\wiki{}</code> links still work.</small><button id="saveSettingsBtn" class="compile-btn">Save settings</button></section>
         <section class="settings-card"><h2>Overleaf compatibility</h2><p>Import a full Overleaf source ZIP. Loreforge will inspect it, find the main file, resolve included files, detect custom macros, rebuild the player wiki, and compile the PDF.</p><label class="upload-box"><input id="importZip" type="file" accept=".zip"><span>⇧</span><strong>Import project ZIP</strong><small>Your current project is backed up before replacement.</small></label><a class="quiet-link" href="/api/admin/export">↓ Export current project as ZIP</a></section>
         <section class="settings-card"><h2>Formatting analysis</h2><div id="analysisSummary" class="analysis-summary"></div><details><summary>Detected custom macros</summary><div id="macroList" class="chip-list"></div></details><details><summary>LaTeX packages</summary><div id="packageList" class="chip-list"></div></details><details><summary>Missing images</summary><div id="missingList" class="diagnostic-list"></div></details></section>
-        <section class="settings-card"><h2>Railway persistence</h2><div id="persistenceState"></div><p>For Railway, attach a volume at <code>/data</code>. Application code can remain connected to GitHub and auto-deploy on pushes while campaign edits stay persistent.</p><button type="button" class="quiet-btn" id="cleanupStorageBtn">Clean failed-import leftovers</button><small class="storage-help">Only legacy <code>project-backup-*</code>, <code>import-*</code>, and <code>upload-*.zip</code> artifacts are removed. Your active campaign project is not deleted.</small><div class="env-table"><div><code>ADMIN_PASSWORD</code><span>GM editor password</span></div><div><code>PLAYER_PASSWORD</code><span>Optional player-site password</span></div><div><code>LATEX_ENGINE</code><span>pdflatex / xelatex / lualatex</span></div></div></section>
+        <section class="settings-card"><h2>Railway persistence</h2><div id="persistenceState"></div><p>For Railway, attach a volume at <code>/data</code>. Application code can remain connected to GitHub and auto-deploy on pushes while campaign edits stay persistent.</p><button type="button" class="quiet-btn" id="cleanupStorageBtn">Clean failed-import leftovers</button><small class="storage-help">Only legacy <code>project-backup-*</code>, <code>import-*</code>, and <code>upload-*.zip</code> artifacts are removed. Your active campaign project is not deleted.</small><div class="env-table"><div><code>ADMIN_PASSWORD</code><span>GM editor password</span></div><div><code>PLAYER_PASSWORD</code><span>Optional player-site password</span></div><div><code>LATEX_ENGINE</code><span>auto / pdflatex / xelatex / lualatex</span></div></div></section>
       </div>
     </main>
   </section>
@@ -142,6 +142,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/stex/stex.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
-<script src="/static/fantasy-map-effects.js?v=5"></script>
-<script src="/static/admin.js?v=5"></script>
+<script src="/static/fantasy-map-effects.js?v=6"></script>
+<script src="/static/admin.js?v=6"></script>
 </body></html>

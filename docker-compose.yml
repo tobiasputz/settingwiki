@@ -6,7 +6,7 @@ services:
     environment:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-loreforge}
       PLAYER_PASSWORD: ${PLAYER_PASSWORD:-}
-      LATEX_ENGINE: ${LATEX_ENGINE:-pdflatex}
+      LATEX_ENGINE: ${LATEX_ENGINE:-auto}
       LATEX_TIMEOUT: ${LATEX_TIMEOUT:-60}
     volumes:
       - loreforge-data:/data

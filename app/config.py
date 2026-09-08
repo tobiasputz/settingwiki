@@ -74,7 +74,7 @@ def load_settings() -> Settings:
         session_secret=_persistent_secret(data / ".session_secret", "SESSION_SECRET"),
         admin_password=admin_password,
         player_password=os.getenv("PLAYER_PASSWORD", "").strip() or None,
-        latex_engine=os.getenv("LATEX_ENGINE", "pdflatex").strip().lower(),
+        latex_engine=os.getenv("LATEX_ENGINE", "auto").strip().lower(),
         latex_timeout=max(10, int(os.getenv("LATEX_TIMEOUT", "60"))),
         allow_shell_escape=os.getenv("LATEX_ALLOW_SHELL_ESCAPE", "0").lower() in {"1", "true", "yes"},
     )
