@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.9 — terminal-pass success detection
+
+- Fixed the remaining false-negative XeLaTeX build state where an earlier failed latexmk pass in the same combined log poisoned a later successful `xdvipdfmx`/PDF pass.
+- Final PDF reconciliation is now chronological: a strong success witness (`N bytes written`, `Output written on main.pdf`, or `All targets (main.pdf) are up-to-date`) is accepted when it occurs after the last fatal marker.
+- Successful terminal PDF evidence is checked before Loreforge launches stale-state retries, preventing unnecessary recompilation of very large campaign books.
+- A fatal/error marker that occurs after the final PDF success witness still correctly keeps the build failed.
+- Added regression coverage matching the reported 347-page Railway log: early `gave an error`/collected summary followed by `144035686 bytes written` and a final up-to-date `main.pdf`.
+
 ## 1.3.8 — Successful-PDF reconciliation
 
 - Fixed a false compile failure where XeLaTeX/xdvipdfmx successfully wrote `main.pdf` but `latexmk` retained a non-zero wrapper status.

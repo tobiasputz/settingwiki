@@ -257,6 +257,10 @@ Navigation is image-backed by default without bringing back the old tiny thumbna
 
 Loreforge verifies the final PDF rather than trusting only `latexmk`'s process exit code. Some large XeLaTeX projects can finish `xdvipdfmx`, write a valid PDF, and still leave a non-zero wrapper status from an earlier rule. If the PDF is valid, no real TeX source error is present, and the build log explicitly confirms the final target (for example `All targets (main.pdf) are up-to-date`), Loreforge treats the build as successful instead of showing a false `Compilation failed`.
 
+## Compile status and large XeLaTeX projects
+
+Loreforge evaluates the **terminal** build state, not merely latexmk's process return code. This matters for large XeLaTeX books where an earlier pass may fail or be retried, while a later `xdvipdfmx` stage successfully writes the final PDF. If the final successful PDF witness occurs after all fatal markers, Loreforge accepts the build and does not mislabel old diagnostics from an earlier pass as the current blocker.
+
 ## Live editing behavior
 
 - Browser changes autosave after roughly 0.7 seconds of inactivity.
