@@ -193,3 +193,101 @@ def test_editor_reveal_composer_and_player_mystery_strings_are_shipped():
     assert 'insertRevealBtn' in admin_html
     assert 'function showRevealPanel' in admin_js and 'loreforge-reveal-start' in admin_js
     assert 'mystery-strings' in mysteries and 'edge.source_x' in mysteries
+
+
+def test_history_eras_and_historical_filter(tmp_path: Path):
+    from app.features import save_timeline_era, list_timeline_eras
+    s=setup(tmp_path)
+    era=save_timeline_era(s,{"name":"Age of Ash","start_label":"-900","end_label":"-310","start_sort":-900,"end_sort":-310,"summary":"The old empires burned."})
+    save_timeline_event(s,{"title":"The Ashfall","kind":"catastrophe","date_label":"-842","sort_key":-842,"era_id":era["id"],"significance":5,"certainty":"legend"})
+    save_timeline_event(s,{"title":"Session 12","kind":"session","date_label":"Today","sort_key":999})
+    assert [x["name"] for x in list_timeline_eras(s)]==["Age of Ash"]
+    history=list_timeline(s,historical_only=True)
+    assert [x["title"] for x in history]==["The Ashfall"]
+    assert history[0]["era_name"]=="Age of Ash" and history[0]["significance"]==5
+
+
+def test_player_character_ownership_privacy_and_multiple_characters(tmp_path: Path):
+    from app.features import list_player_characters, save_player_character, add_character_image, get_player_character
+    from app.storage import create_player_invite
+    s=setup(tmp_path)
+    a=create_player_invite(s,"Alice"); b=create_player_invite(s,"Bob")
+    hero=save_player_character(s,{"name":"Mira","ancestry":"Elf","class_name":"Wizard","visibility":"party"},invite_id=a["id"])
+    secret=save_player_character(s,{"name":"The Mask","visibility":"private"},invite_id=a["id"])
+    alt=save_player_character(s,{"name":"Old Mira","status":"retired","visibility":"party"},invite_id=a["id"])
+    save_player_character(s,{"name":"Borin","visibility":"party"},invite_id=b["id"])
+    mine={x["name"] for x in list_player_characters(s,invite_id=a["id"])}
+    theirs={x["name"] for x in list_player_characters(s,invite_id=b["id"])}
+    assert {"Mira","The Mask","Old Mira","Borin"} <= mine
+    assert "The Mask" not in theirs and {"Mira","Old Mira","Borin"} <= theirs
+    assert get_player_character(s,secret["id"],invite_id=b["id"]) is None
+    img=add_character_image(s,hero["id"],f"characters/{a['id']}/{hero['id']}/portrait.webp","portrait","Reference",invite_id=a["id"])
+    updated=get_player_character(s,hero["id"],invite_id=a["id"])
+    assert updated["portrait_path"].endswith("portrait.webp") and img["kind"]=="portrait"
+    assert len([x for x in list_player_characters(s,invite_id=a["id"]) if x["invite_id"]==a["id"]])==3
+
+
+def test_v21_network_history_characters_and_tablet_ui_are_shipped(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path); set_setting(s,'player_access_mode','public')
+    (s.project_dir/'main.tex').write_text(r'''\documentclass{book}
+\newcommand{\pon}[1]{\section*{#1}}
+\begin{document}
+\chapter{World}
+\pon{Tumerich Tumadum}
+Tumerich knows \wiki{Selenia}{Selenia}.
+\section{Selenia}
+A city.
+\end{document}
+''',encoding='utf-8')
+    build_wiki(s); monkeypatch.setattr(main,'settings',s)
+    client=TestClient(main.app)
+    assert client.get('/network').status_code==200
+    assert client.get('/timeline').status_code==200
+    assert client.get('/characters').status_code==200
+    network_js=(Path(__file__).resolve().parents[1]/'static'/'network.js').read_text(encoding='utf-8')
+    admin_css=(Path(__file__).resolve().parents[1]/'static'/'admin.css').read_text(encoding='utf-8')
+    admin_js=(Path(__file__).resolve().parents[1]/'static'/'admin.js').read_text(encoding='utf-8')
+    base=(Path(__file__).resolve().parents[1]/'templates'/'base.html').read_text(encoding='utf-8')
+    campaign=(Path(__file__).resolve().parents[1]/'templates'/'campaign_admin.html').read_text(encoding='utf-8')
+    assert 'function storyEdges' in network_js and 'pointers=new Map()' in network_js
+    assert '@media(max-width:1180px)' in admin_css and 'admin-mode-dock' in admin_css
+    assert 'editorTabStrip' in (Path(__file__).resolve().parents[1]/'templates'/'admin.html').read_text(encoding='utf-8')
+    assert 'tabs:[]' in admin_js and '/characters' in base
+    assert 'History Builder' in campaign and 'World Builder' in campaign and 'cc-party' in campaign
+
+
+def test_private_character_assets_and_search_follow_invite_visibility(tmp_path: Path, monkeypatch):
+    import app.main as main
+    from app.features import save_player_character, add_character_image
+    from app.storage import create_player_invite, set_setting
+    s=setup(tmp_path); set_setting(s,'player_access_mode','invite')
+    (s.project_dir/'main.tex').write_text('\\documentclass{book}\n\\begin{document}\n\\chapter{World}\n\\section{Welcome}\nHello.\n\\end{document}\n',encoding='utf-8')
+    build_wiki(s)
+    a=create_player_invite(s,'Alice'); b=create_player_invite(s,'Bob')
+    secret=save_player_character(s,{"name":"Night Mask","visibility":"private","summary":"Secret alter ego"},invite_id=a['id'])
+    rel=f"characters/{a['id']}/{secret['id']}/mask.webp"; asset=s.uploads_dir/rel; asset.parent.mkdir(parents=True,exist_ok=True); asset.write_bytes(b'fake-webp')
+    add_character_image(s,secret['id'],rel,'portrait','Mask',invite_id=a['id'])
+    monkeypatch.setattr(main,'settings',s)
+    ca=TestClient(main.app); cb=TestClient(main.app)
+    assert ca.get(a['invite_path']).status_code==200
+    assert cb.get(b['invite_path']).status_code==200
+    assert ca.get('/uploads/'+rel).status_code==200
+    assert cb.get('/uploads/'+rel).status_code==404
+    assert any(x['title']=='Night Mask' for x in ca.get('/api/public/search?q=Night').json())
+    assert all(x['title']!='Night Mask' for x in cb.get('/api/public/search?q=Night').json())
+
+
+def test_world_builder_can_create_and_wire_real_latex_entry(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path)
+    (s.project_dir/'main.tex').write_text('\\documentclass{book}\n\\begin{document}\n\\chapter{World}\n\\section{Welcome}\nHello.\n\\end{document}\n',encoding='utf-8')
+    build_wiki(s); monkeypatch.setattr(main,'settings',s)
+    client=TestClient(main.app); assert client.post('/admin/login',data={'password':'admin'}).status_code==200
+    r=client.post('/api/admin/entry-template/create',json={'kind':'settlement','title':'Glass Harbor'})
+    assert r.status_code==200, r.text
+    d=r.json(); assert d['path'].startswith('Worldbuilding/Places/') and d['path'].endswith('.tex')
+    assert (s.project_dir/d['path']).exists()
+    main_text=(s.project_dir/'main.tex').read_text(encoding='utf-8')
+    assert '\\include{'+Path(d['path']).with_suffix('').as_posix()+'}' in main_text
+    assert d['edit_url'].startswith('/admin?file=')

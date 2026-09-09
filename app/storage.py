@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS player_invites (
     max_devices INTEGER,
     revoked_at REAL,
     last_used_at REAL,
-    use_count INTEGER NOT NULL DEFAULT 0
+    use_count INTEGER NOT NULL DEFAULT 0,
+    role TEXT NOT NULL DEFAULT 'player'
 );
 CREATE TABLE IF NOT EXISTS player_devices (
     id TEXT PRIMARY KEY,
@@ -115,6 +116,8 @@ def init_db(settings: Settings) -> None:
         invite_columns = {row[1] for row in conn.execute("PRAGMA table_info(player_invites)").fetchall()}
         if invite_columns and "max_devices" not in invite_columns:
             conn.execute("ALTER TABLE player_invites ADD COLUMN max_devices INTEGER")
+        if invite_columns and "role" not in invite_columns:
+            conn.execute("ALTER TABLE player_invites ADD COLUMN role TEXT NOT NULL DEFAULT 'player'")
 
 
 def get_setting(settings: Settings, key: str, default: str = "") -> str:
@@ -168,7 +171,7 @@ def _invite_payload(settings: Settings, row: sqlite3.Row | dict, now: float | No
     return data
 
 
-def create_player_invite(settings: Settings, label: str, expires_at: float | None = None, max_devices: int | None = None) -> dict:
+def create_player_invite(settings: Settings, label: str, expires_at: float | None = None, max_devices: int | None = None, role: str = 'player') -> dict:
     label = str(label or "").strip()
     if not label:
         raise ValueError("Give the invitation a player name or label.")
@@ -187,12 +190,15 @@ def create_player_invite(settings: Settings, label: str, expires_at: float | Non
             raise ValueError("Device limit must be a number.")
         if max_devices < 1 or max_devices > 20:
             raise ValueError("Device limit must be between 1 and 20, or unlimited.")
+    role = str(role or 'player').strip().lower()
+    if role not in {'player','observer','guest','co-gm'}:
+        role = 'player'
     nonce = secrets.token_urlsafe(18)
     now = time.time()
     with connect(settings) as conn:
         cur = conn.execute(
-            "INSERT INTO player_invites(label,nonce,access_version,created_at,expires_at,max_devices) VALUES(?,?,?,?,?,?)",
-            (label, nonce, 1, now, expires_at, max_devices),
+            "INSERT INTO player_invites(label,nonce,access_version,created_at,expires_at,max_devices,role) VALUES(?,?,?,?,?,?,?)",
+            (label, nonce, 1, now, expires_at, max_devices, role),
         )
         row = conn.execute("SELECT * FROM player_invites WHERE id=?", (cur.lastrowid,)).fetchone()
     return _invite_payload(settings, row, now)

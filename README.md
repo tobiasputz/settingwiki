@@ -1,4 +1,4 @@
-# Loreforge — LaTeX-first interactive campaign wiki V2
+# Loreforge — LaTeX-first interactive campaign wiki
 
 Loreforge turns a normal multi-file LaTeX campaign project into **two synchronized views of the same setting**:
 
@@ -32,6 +32,43 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Revision safety.** Loreforge keeps up to 40 saved revisions of each file edited in the browser.
 - **Personal player invitations.** Player access is invitation-only by default. **Admin → Access** creates one signed link per player; each link can be copied, expired, revoked, restored, rotated, device-limited, or have its remembered devices reset independently. Legacy shared-password and public modes remain available, while the editor continues to use `ADMIN_PASSWORD`.
 - **Read → edit source bridge.** When you browse the player Codex while logged in as GM, a persistent **Edit source** control opens the exact LaTeX file/line in Campaign Studio. On long Person-of-Note pages it follows the section currently being read, and the editor offers **Back to entry** after the correction.
+
+## Loreforge 3: living world + player agency
+
+Loreforge 3 deliberately separates **authored lore** from **campaign state**. Your `.tex` files remain the durable setting manuscript; fast-changing table state lives in the database where it can evolve session by session without turning a 300+ page book into application metadata.
+
+The central design rule is: **give players agency where bookkeeping benefits from shared ownership, while keeping canonical lore and secrets under GM control.**
+
+- **Player/party-maintained plot threads:** players can create and maintain quests, mysteries and unresolved plotlines, add their own notes/clues/theories/questions, and link them to lore. Threads may be player-owned, party-editable or GM-owned. Note authorship is retained, so collaboration does not mean another player can silently rewrite someone's personal note. The GM can always supplement or correct shared state.
+- **Per-player knowledge:** the GM can track whether each player knows, suspects, has heard a rumor about, or has not discovered a lore/state target. Spoiler-aware views use that knowledge rather than assuming the entire party knows the same things.
+- **Living-world Fronts:** factions, threats, wars and projects can advance clocks and log off-screen moves between sessions.
+- **Dynamic NPC/entity state:** current location, status, attitude, faction, objective and last appearance are runtime facts, separate from historical biography.
+- **Changing relationships:** semantic relationships can have historical periods; family trees and organization charts get specialized hierarchy data instead of being forced through the general Lore Network.
+- **Historical cartography:** draw region polygons and dated border variants so political/geographic regions can change across the Chronicle.
+- **Rumors:** author location/faction-specific hearsay with hidden truth classification, then reveal only the rumor text to players.
+- **Player journals and character arcs:** invited players maintain private/party session journals, character promises/goals, arcs and character relationships themselves.
+- **Submissions rather than canonical edits:** players can submit setting ideas, recaps and relationship proposals for GM review without touching LaTeX source.
+- **GM Inbox:** capture notes, photos, reminders and voice memos during play, then organize them after the session.
+- **Staged publishing + live discoveries:** prepare lore privately, publish related changes together, and surface discoveries/spotlights on the player Session screen.
+- **Media Library:** tag portraits/maps/crests/handouts/backgrounds, set focal points/alt text, find every usage and (owner-only) replace references globally.
+- **Continuity + provenance:** detect likely contradictions between mutable state and authored lore, keep session-state snapshots, and retain where/when major lore appeared.
+- **Roles:** Owner, Co-GM, Player, Observer and Guest. Co-GMs can operate campaign-state tools without receiving owner-only infrastructure/export control; observers and guests stay read-only.
+- **Portable backup + archive mode:** export source + uploads + database + manifest in one archive, integrity-test it before relying on it, and freeze a completed campaign into a read-only archive.
+- **Foundry export:** send journals/characters outward without trying to replace Foundry's PF2e combat automation.
+
+The GM control center is `/admin/living`; the player-facing campaign hub is `/campaign`, with collaborative threads at `/campaign/threads`.
+
+## Loreforge 2.1: worldbuilding and party workflows
+
+Loreforge 2.1 focuses on the parts of v2 that should feel effortless at the table and during prep:
+
+- **Readable Lore Network:** the default Story view is deliberately selective. Explicit relationships and entity-centered references are kept; generic heading-to-heading noise is capped. Labels appear only where useful, selecting a node isolates its neighborhood, and touch users can pan and pinch-zoom naturally. **Curated relationships** shows only GM-authored semantic links; **All references** remains available when you really want the complete graph.
+- **Historical Chronicle:** History is organized into named eras with start/end dates, summaries and visual accents. Historical events support type, date ranges, significance, certainty, related Codex lore and player/GM visibility. Session recaps live in Session Mode rather than pretending to be world history.
+- **Visual World Builder:** months, weekdays and moons use structured editors instead of pipe-delimited text fields. Geography/travel values, lore creation, history, people/factions and maps are presented as task-oriented panels.
+- **Create real lore from a template:** choose Person, Settlement, Faction, Deity, Historical Event, Creature or Handout, name it, and press **Create entry in Campaign Studio**. Loreforge creates an ordinary `.tex` file under `Worldbuilding/`, inserts its `\include{}` into the canonical main source, and opens it in the editor.
+- **Tabbed Campaign Studio:** source files open in a reusable tab strip rather than replacing the only editor buffer or opening extra browser windows.
+- **Phone/iPad GM navigation:** Player, GM Session, Studio and Campaign Control are always reachable through persistent mode controls. iPads/tablets use touch-sized single-pane editor switching instead of a cramped desktop layout.
+- **Player Characters:** invited players can create more than one character, maintain their own profiles/biographies/goals, upload portraits and inspiration art, retire old PCs, and decide whether each character is party-visible or private to themselves and the GM. Character search and mobile navigation make the party shelf easy to reach during play.
 
 ## Loreforge 2: run the campaign from the wiki
 

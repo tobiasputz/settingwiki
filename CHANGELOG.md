@@ -1,3 +1,44 @@
+# Loreforge 3.0.0 — Living world, player agency & campaign memory
+
+- Added a formal **Lore vs. State** architecture. Canonical setting prose remains in LaTeX; mutable campaign state (where people are, what factions are doing, what players know, and what is currently unresolved) lives in Loreforge metadata instead of polluting the manuscript.
+- Added **per-player knowledge state** for lore/state targets so different invited players can know, suspect, or remain unaware of different facts without duplicating Codex pages.
+- Added **Campaign Fronts** with clocks, status, goals, stakes and advancement history for factions, threats, wars and off-screen projects.
+- Added **runtime NPC/entity state** for current location, status, attitude, faction, objective, last appearance and other volatile campaign facts.
+- Added **relationship history**, plus specialized family-tree / organization-chart relationships, so connections can change over historical time instead of being one permanent edge.
+- Added **historical map regions** with polygon borders and dated variants. Region shapes can change across eras and the Atlas API can resolve the appropriate boundary at a selected historical date.
+- Added the **Rumor Engine** with truth classification, location/faction targeting, heard state and GM-controlled sharing. Players only receive the rumor text, never the hidden truth classification.
+- Added first-class **Threads** for quests, mysteries and plotlines. Threads may be player-owned, party-editable or GM-owned; players can maintain status, notes, clues, theories, unresolved questions and lore links themselves while the GM retains correction/supplement powers.
+- Added **note authorship protection** inside shared threads: another player cannot overwrite somebody else's note, while the GM may annotate/correct it with an explicit GM-edited marker.
+- Added **player journals** (private or party-visible), character arcs, promises/goals, and character relationship notes. These live with the invited player's identity rather than in canonical LaTeX.
+- Added **player submissions** for proposed lore, recaps, relationship ideas and worldbuilding, with GM approval/rejection instead of direct canonical-source editing. Submissions and GM Inbox items support file/image uploads.
+- Added a fast **GM Inbox** for notes, NPC/location ideas, reminders, photos and browser-recorded voice memos to classify after the session.
+- Added **staged publishing** (Draft / Ready / Published) so the GM can prepare several related Codex changes and release them together after a session.
+- Added **session state snapshots** and provenance so Loreforge can answer what changed around a session and where an entry appeared/revealed over campaign history.
+- Added a **notification/live-push layer** for discoveries and session spotlights. Player Session surfaces newly delivered information without requiring players to manually hunt through the Codex.
+- Added **continuity checks and lore suggestions** for runtime/lore conflicts, missing relationships and opportunities to connect prose to existing lore. Suggestions are approval-only and never rewrite source automatically.
+- Added a dedicated **Media Library** with asset kinds/tags, focal points, alt text, usage lookup, thumbnails and owner-only reference replacement across LaTeX + supported metadata.
+- Added **Foundry-compatible journal/character export** endpoints rather than duplicating combat automation already handled by PF2e VTT tooling.
+- Added **portable campaign archives** containing source, uploads, database and a manifest, plus a non-destructive restore-integrity test before trusting a backup.
+- Added **read-only archive mode** for freezing a completed campaign while retaining its Codex, characters and campaign history.
+- Added role-aware collaboration: **Owner, Co-GM, Player, Observer and Guest**. Co-GMs can run campaign-state/world tools without receiving owner-only infrastructure/export powers; observers/guests are read-only.
+- Added a spoiler-aware **campaign assistant endpoint** that uses only the lore/state visible to the requesting role/player. It is infrastructure-ready and remains opt-in rather than forcing an AI provider on the deployment.
+- Rebuilt **Campaign Control → Living Campaign** around task-oriented panels for Fronts, State, Knowledge, Threads, Rumors, Relationship History, Hierarchies, Historical Regions, Publishing, Submissions, Inbox, Roles, Media, Continuity and Archive/Export.
+- Expanded Player Session and Campaign pages so party-maintained threads, journals and character-owned state are reachable from phone/tablet play rather than living only in GM screens.
+- Added regression coverage for player/party authorship boundaries, observer/co-GM permissions, archive freeze behavior, historical polygon round-trips, media usage/replacement, portable archive integrity, mobile player-session integration, and owner-only backup testing.
+
+# Loreforge 2.1.0 — World Builder, readable network & player characters
+
+- Rebuilt the **Lore Network** around readable story relationships instead of drawing every heading at once. Story mode caps noisy automatic references, prioritizes Person-of-Note/entity links and explicit semantic relationships, hides unconnected nodes, suppresses label clutter, supports chapter/search filters, and adds correct responsive pan/zoom plus two-finger pinch on touch devices. The false “No links yet” overlay is fixed.
+- Turned **Timeline** into a dedicated **Historical Chronicle**. GMs can create eras, date ranges, wars, reigns, discoveries, treaties, catastrophes, revolutions and other turning points; events have significance and historical certainty, while session recaps/festivals no longer clutter the historical view.
+- Rebuilt **Campaign Control → World Builder** as a visual authoring workflow: structured month/week/moon editors, geography/travel controls, world-health progress, purpose-based lore templates, and direct jumps into History, Relationships and Atlas tools.
+- Added **Create entry in Campaign Studio** from World Builder. It creates a normal LaTeX file under `Worldbuilding/`, revision-safely wires it into the main document, and opens that file directly in the Studio editor. A non-mutating “Copy LaTeX scaffold” option remains available.
+- Added **Obsidian-style source tabs** to Campaign Studio. Multiple `.tex`/source files can stay open, dirty state is shown per tab, files can be closed individually, and internal Loreforge navigation now stays in the same app window rather than spawning browser windows.
+- Added a persistent GM mode switcher between **Player / Session / Studio / Control** and expanded tablet behavior. iPad-sized screens now use the same Files / Editor / Preview single-pane authoring model as phones instead of squeezing the desktop three-pane layout into a narrow viewport.
+- Added a first-class **Player Characters** shelf. Each invited player can own multiple characters, edit biography/goals/status/profile information, choose party-visible or private-to-player+GM visibility, upload portraits, gallery art and inspiration references, and manage retired/alternate characters. GMs can inspect/edit every character.
+- Player characters are available from desktop navigation, the mobile bottom bar, Player Session quick actions, Campaign Control → Party, and global search. Private character dossiers and their uploaded images remain inaccessible to other players even if an asset URL is guessed.
+- Updated PWA/offline routing so character dossiers and their media are treated as invitation-protected campaign content.
+- Added regression coverage for historical eras, timeline filtering, multiple/private player characters, private character assets/search, direct World Builder file creation, network/mobile UI shipping, and existing v2 functionality.
+
 # Loreforge 2.0.0 — living campaign platform
 
 - Added dedicated **GM Session Mode** and **Player Session Mode** with live session state, spotlight lore/maps, discoveries, handouts, recaps, current location, and session history.
@@ -158,3 +199,10 @@
 - The setting affects both Codex overview entry rows and the desktop in-article Codex sidebar; disabling it returns navigation to text-only unless deliberate TOC art was assigned.
 - Automatic navigation backgrounds use a dedicated presentation field, so they do not unexpectedly turn first-entry images into Lore Network thumbnails or deliberate chapter-cover artwork.
 - PF2e action/reaction glyphs from `Images/Symbols` are skipped when choosing the automatic background, avoiding giant one-action icons when an entry begins with a rules block.
+
+### 2.1.0 final visual QA
+- Fixed the Lore Network heading/tools being hidden underneath the fixed site header on desktop and phone layouts.
+- Campaign Control navigation now keeps readable labels on touch devices instead of degrading into an unexplained icon-only strip.
+- Restyled World Builder calendar/geography/create-lore form controls so they remain dark, cohesive, and touch-friendly instead of using browser-default white inputs.
+- Reflowed the phone Campaign Studio header into a clean two-row layout so workspace tabs, Compile, and editor pane controls stay reachable without crowding each other.
+- Re-verified desktop (1440×900), iPad (1024×1366), and phone (390×844) shells for horizontal overflow and sticky navigation behavior.

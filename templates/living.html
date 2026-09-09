@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Campaign · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="living-shell">
+  <section class="living-hero">
+    <div><span class="eyebrow">LIVING CAMPAIGN</span><h1>Your campaign desk</h1><p>Keep track of what matters at the table: plot threads, journals, rumors, character arcs, discoveries, and the changing world.</p></div>
+    <div class="living-hero-actions">{% if gm_view %}<a class="primary-button" href="/admin/living">GM world state →</a>{% endif %}{% if can_author %}<button class="ghost-button" data-living-new-thread>＋ Add plot thread</button>{% elif archive_mode %}<span class="living-readonly-chip">Archived · read only</span>{% endif %}</div>
+  </section>
+
+  {% if notifications %}<section class="living-notice-strip" id="livingNotifications">{% for n in notifications[:5] %}<article data-notification-id="{{ n.id }}" class="kind-{{ n.kind }}"><span>✦</span><div><small>{{ n.kind|replace('_',' ')|upper }}</small><strong>{{ n.title }}</strong><p>{{ n.body }}</p></div><button data-dismiss-notice="{{ n.id }}">×</button></article>{% endfor %}</section>{% endif %}
+
+  <nav class="living-tabs" aria-label="Campaign desk sections">
+    <button class="active" data-living-tab="threads">Threads <i>{{ threads|selectattr('status','equalto','open')|list|length }}</i></button>
+    <button data-living-tab="journal">Journal</button>
+    <button data-living-tab="characters">Characters <i>{{ characters|length }}</i></button>
+    <button data-living-tab="rumors">Rumors</button>
+    <button data-living-tab="world">World pulse</button>
+    <button data-living-tab="assistant">Ask Loreforge</button>
+    <button data-living-tab="contribute">Contribute</button>
+  </nav>
+
+  <section class="living-pane active" data-living-pane="threads" id="threads">
+    <div class="living-pane-head"><div><span class="eyebrow">PLAYER-MAINTAINED</span><h2>Plot threads & quests</h2><p>These belong to the table, not just the GM. Add clues, update status, connect lore, and keep your own campaign memory alive.</p></div>{% if can_author %}<button class="primary-button" data-living-new-thread>＋ New thread</button>{% endif %}</div>
+    <div class="thread-board" id="threadBoard">
+      {% for t in threads %}<article class="thread-card priority-{{ t.priority }} status-{{ t.status }}" data-thread-id="{{ t.id }}">
+        <header><div><small>{{ t.priority|upper }} · {{ t.status|upper }}</small><h3>{{ t.title }}</h3></div><button data-thread-edit="{{ t.id }}">•••</button></header><p>{{ t.summary or 'No summary yet. Add what the party currently thinks is going on.' }}</p>
+        {% if t.links %}<div class="thread-links">{% for l in t.links[:6] %}{% if l.target_type == 'page' %}<a href="/wiki/{{ l.target_key }}">{{ l.label or l.target_key|replace('-',' ')|title }}</a>{% else %}<span>{{ l.label or l.target_key }}</span>{% endif %}{% endfor %}</div>{% endif %}
+        <div class="thread-note-stream">{% for n in t.notes[:3] %}<div><small>{{ n.author_label }} · {{ n.kind }}</small><p>{{ n.body }}</p></div>{% endfor %}</div>
+        {% if can_author %}<footer><button data-thread-note="{{ t.id }}">＋ Note</button><button data-thread-link="{{ t.id }}">⌘ Link lore</button><button data-thread-edit="{{ t.id }}">Edit thread</button></footer>{% endif %}
+      </article>{% else %}<div class="living-empty"><span>◇</span><h3>No plot threads yet</h3><p>{% if can_author %}Anyone in the party can create the first one.{% else %}No shared thread has been created yet.{% endif %}</p>{% if can_author %}<button class="primary-button" data-living-new-thread>Create a thread</button>{% endif %}</div>{% endfor %}
+    </div>
+  </section>
+
+  <section class="living-pane" data-living-pane="journal">
+    <div class="living-pane-head"><div><span class="eyebrow">YOUR MEMORY</span><h2>Session journal</h2><p>Your notes can stay private or be shared with the party. The GM can read party notes but does not need to maintain them for you.</p></div>{% if can_author %}<button class="primary-button" data-new-journal>＋ Journal entry</button>{% endif %}</div>
+    <div class="journal-grid" id="journalGrid">{% for j in journals %}<article data-journal-id="{{ j.id }}"><small>{{ 'PRIVATE' if j.visibility=='private' else 'PARTY JOURNAL' }}{% if j.session_id %} · SESSION {{ j.session_id }}{% endif %}</small><h3>{{ j.title }}</h3><p>{{ j.body }}</p>{% if can_author %}<button data-edit-journal="{{ j.id }}">Edit</button>{% endif %}</article>{% else %}<div class="living-empty"><span>✎</span><h3>No journal entries yet</h3><p>Write down the thing everyone will otherwise forget by next week.</p></div>{% endfor %}</div>
+  </section>
+
+  <section class="living-pane" data-living-pane="characters">
+    <div class="living-pane-head"><div><span class="eyebrow">YOUR HEROES</span><h2>Characters & personal arcs</h2><p>Track multiple characters, private goals, relationships, promises, regrets, and milestones.</p></div><a class="primary-button" href="/characters">Character dossiers →</a></div>
+    <div class="living-character-grid">{% for c in characters %}<article class="living-character-card" data-character-id="{{ c.id }}">{% if c.portrait_path %}<div class="living-character-portrait" style="background-image:url('/uploads/{{ c.portrait_path }}')"></div>{% endif %}<div><small>{{ c.ancestry }}{% if c.class_name %} · {{ c.class_name }}{% endif %}</small><h3>{{ c.name }}</h3><p>{{ c.summary }}</p><div class="arc-list">{% for a in c.arcs[:4] %}<span class="arc-chip status-{{ a.status }}">{{ a.kind }} · {{ a.title }}</span>{% endfor %}</div><div class="character-card-actions"><a href="/characters/{{ c.id }}">Open dossier</a>{% if can_author and (gm_view or (player and c.invite_id == player.id)) %}<button data-new-arc="{{ c.id }}">＋ Arc</button><button data-new-char-rel="{{ c.id }}">＋ Relationship</button>{% endif %}</div></div></article>{% else %}<div class="living-empty"><span>♟</span><h3>No player characters yet</h3><p>Create one from the Characters screen.</p></div>{% endfor %}</div>
+  </section>
+
+  <section class="living-pane" data-living-pane="rumors">
+    <div class="living-pane-head"><div><span class="eyebrow">HEARSAY</span><h2>Rumor notebook</h2><p>Rumors are deliberately not the same as facts. Keep them around until the party confirms or disproves them.</p></div></div>
+    <div class="rumor-grid">{% for r in rumors %}<article class="rumor-card truth-{{ r.truth_state }}"><small>{{ r.status|upper }}{% if r.location_slug %} · {{ r.location_slug|replace('-',' ')|title }}{% endif %}</small><h3>{{ r.title }}</h3><p>“{{ r.body }}”</p>{% if r.status in ['confirmed','disproved'] %}<strong>{{ r.status|title }}</strong>{% endif %}{% if r.page_slug %}<a href="/wiki/{{ r.page_slug }}">Related lore →</a>{% endif %}</article>{% else %}<div class="living-empty"><span>☁</span><h3>No shared rumors</h3><p>The GM can seed rumors during a session.</p></div>{% endfor %}</div>
+  </section>
+
+  <section class="living-pane" data-living-pane="world">
+    <div class="living-pane-head"><div><span class="eyebrow">RIGHT NOW</span><h2>The world is moving</h2><p>Current state lives here while the Codex remains the durable history of the setting.</p></div></div>
+    {% if fronts %}<div class="front-grid">{% for f in fronts %}<article class="front-card"><header><small>{{ f.kind|upper }}</small><h3>{{ f.title }}</h3></header><p>{{ f.summary }}</p><div class="doom-clock" style="--clock-progress:{{ (100*f.current_value/f.max_value)|round }}%"><div><strong>{{ f.current_value }}</strong><small>/ {{ f.max_value }}</small></div></div><small>GOAL</small><p>{{ f.goal }}</p></article>{% endfor %}</div>{% endif %}
+    {% if runtime_states %}<div class="world-state-list"><h3>Current people & places</h3>{% for s in runtime_states[:24] %}<a href="/wiki/{{ s.page_slug }}"><strong>{{ s.page_slug|replace('-',' ')|title }}</strong><span>{{ s.status or 'Active' }}{% if s.location_slug %} · at {{ s.location_slug|replace('-',' ')|title }}{% endif %}</span><small>{{ s.objective }}</small></a>{% endfor %}</div>{% endif %}
+  </section>
+
+  <section class="living-pane" data-living-pane="assistant">
+    <div class="living-pane-head"><div><span class="eyebrow">SPOILER-AWARE</span><h2>Ask the campaign</h2><p>Loreforge only searches lore your current invitation is allowed to see. If an AI provider is configured, the same spoiler-filtered context is used.</p></div></div>
+    <div class="assistant-box"><textarea id="assistantQuestion" placeholder="What do we currently know about the Sunstone?"></textarea><button id="askLoreforge" class="primary-button">Ask Loreforge</button><div id="assistantAnswer" class="assistant-answer"><span>✦</span><p>Ask about people, places, history, factions, or what the party currently knows.</p></div></div>
+  </section>
+
+  <section class="living-pane" data-living-pane="contribute">
+    <div class="living-pane-head"><div><span class="eyebrow">PLAYER AUTHORSHIP</span><h2>Contribute to the world</h2><p>Propose hometown lore, character-connected details, images, session writeups, or relationship ideas. The GM can approve them into canonical worldbuilding.</p></div>{% if can_author %}<button class="primary-button" data-new-submission>＋ Submission</button>{% endif %}</div>
+    <div class="submission-list" id="submissionList">{% for s in submissions %}<article><span class="submission-status status-{{ s.status }}">{{ s.status }}</span><div><small>{{ s.kind|upper }}</small><h3>{{ s.title }}</h3><p>{{ s.body }}</p>{% if s.asset_ref %}<a class="submission-asset" href="{{ '/uploads/' + s.asset_ref.split(':',1)[1] if s.asset_ref.startswith('upload:') else s.asset_ref }}" target="_blank" rel="noopener">Attached file →</a>{% endif %}{% if s.gm_note %}<blockquote>GM: {{ s.gm_note }}</blockquote>{% endif %}</div></article>{% else %}<div class="living-empty"><span>✦</span><h3>No submissions yet</h3><p>Your character's corner of the setting can be yours to help build.</p></div>{% endfor %}</div>
+  </section>
+</main>
+<div class="modal-backdrop hidden" id="livingModal"><div class="modal living-modal"><button class="modal-close" data-living-close>×</button><div id="livingModalContent"></div></div></div>
+<div class="toast-stack" id="toastStack"></div>
+<script>window.LF_LIVING={{ {"threads":threads,"journals":journals,"characters":characters,"submissions":submissions,"gm":gm_view,"pages":wiki.pages,"can_author":can_author}|tojson }};</script>
+{% endblock %}
+{% block scripts %}<script src="/static/living.js?v=3000"></script>{% endblock %}

@@ -215,6 +215,53 @@ CREATE TABLE IF NOT EXISTS campaign_snapshots (
     path TEXT NOT NULL,
     created_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS timeline_eras (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    start_label TEXT NOT NULL DEFAULT '',
+    end_label TEXT NOT NULL DEFAULT '',
+    start_sort REAL NOT NULL DEFAULT 0,
+    end_sort REAL NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT '',
+    accent TEXT NOT NULL DEFAULT '#b79661',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    visibility TEXT NOT NULL DEFAULT 'players',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS player_characters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invite_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    slug TEXT UNIQUE NOT NULL,
+    pronouns TEXT NOT NULL DEFAULT '',
+    ancestry TEXT NOT NULL DEFAULT '',
+    class_name TEXT NOT NULL DEFAULT '',
+    level INTEGER,
+    status TEXT NOT NULL DEFAULT 'active',
+    summary TEXT NOT NULL DEFAULT '',
+    biography TEXT NOT NULL DEFAULT '',
+    goals TEXT NOT NULL DEFAULT '',
+    player_notes TEXT NOT NULL DEFAULT '',
+    visibility TEXT NOT NULL DEFAULT 'party',
+    portrait_path TEXT NOT NULL DEFAULT '',
+    theme_color TEXT NOT NULL DEFAULT '#b79661',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY(invite_id) REFERENCES player_invites(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_player_characters_invite ON player_characters(invite_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS character_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_id INTEGER NOT NULL,
+    image_path TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'inspiration',
+    caption TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    FOREIGN KEY(character_id) REFERENCES player_characters(id) ON DELETE CASCADE
+);
 """
 
 
@@ -226,6 +273,24 @@ def init_feature_db(settings: Settings) -> None:
         update_cols = {r[1] for r in conn.execute("PRAGMA table_info(session_updates)").fetchall()}
         if "audience_json" not in update_cols:
             conn.execute("ALTER TABLE session_updates ADD COLUMN audience_json TEXT NOT NULL DEFAULT '[]'")
+        timeline_cols = {r[1] for r in conn.execute("PRAGMA table_info(timeline_events)").fetchall()}
+        timeline_add = {
+            "era_id": "INTEGER",
+            "end_date_label": "TEXT NOT NULL DEFAULT ''",
+            "end_sort_key": "REAL",
+            "significance": "INTEGER NOT NULL DEFAULT 2",
+            "certainty": "TEXT NOT NULL DEFAULT 'recorded'",
+        }
+        for col, ddl in timeline_add.items():
+            if col not in timeline_cols:
+                conn.execute(f"ALTER TABLE timeline_events ADD COLUMN {col} {ddl}")
+
+    # v3 extends the feature database with living-campaign state. Keep this
+    # initialization chained here so older integrations/tests that have always
+    # called init_feature_db() automatically receive the new schema too.
+    from .living import init_living_db
+    init_living_db(settings)
+
 
 
 def _rows(settings: Settings, sql: str, params: tuple = ()) -> list[dict]:
@@ -329,17 +394,49 @@ def add_session_update(settings: Settings, payload: dict) -> dict:
     return _row(settings,"SELECT * FROM session_updates WHERE id=?",(rid,)) or {}
 
 
-# --- Timeline/calendar ------------------------------------------------------
-def list_timeline(settings: Settings, *, admin: bool = False) -> list[dict]:
-    rows=_rows(settings,"SELECT * FROM timeline_events ORDER BY sort_key,date_label,id")
+# --- Historical timeline / world chronology ---------------------------------
+HISTORICAL_KINDS = {"event","founding","war","reign","catastrophe","treaty","discovery","migration","birth","death","journey","age","revolution"}
+
+
+def list_timeline_eras(settings: Settings, *, admin: bool = False) -> list[dict]:
+    rows=_rows(settings,"SELECT * FROM timeline_eras ORDER BY sort_order,start_sort,id")
     return [r for r in rows if _visible(r["visibility"],admin)]
 
 
-def save_timeline_event(settings: Settings,p:dict)->dict:
-    now=time.time(); rid=p.get("id"); vals=(str(p.get("title") or "Event"),str(p.get("date_label") or ""),float(p.get("sort_key") or 0),str(p.get("body") or ""),str(p.get("kind") or "event"),p.get("page_slug") or None,str(p.get("image_ref") or ""),str(p.get("visibility") or "players"),now)
+def save_timeline_era(settings: Settings, p: dict) -> dict:
+    now=time.time(); rid=p.get("id")
+    vals=(str(p.get("name") or "Unnamed era").strip(),str(p.get("start_label") or ""),str(p.get("end_label") or ""),float(p.get("start_sort") or 0),float(p.get("end_sort") or 0),str(p.get("summary") or ""),str(p.get("accent") or "#b79661"),int(p.get("sort_order") or 0),str(p.get("visibility") or "players"),now)
     with connect(settings) as conn:
-        if rid: conn.execute("UPDATE timeline_events SET title=?,date_label=?,sort_key=?,body=?,kind=?,page_slug=?,image_ref=?,visibility=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
-        else: out=conn.execute("INSERT INTO timeline_events(title,date_label,sort_key,body,kind,page_slug,image_ref,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",vals[:-1]+(now,now)).lastrowid
+        if rid:
+            conn.execute("UPDATE timeline_eras SET name=?,start_label=?,end_label=?,start_sort=?,end_sort=?,summary=?,accent=?,sort_order=?,visibility=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
+        else:
+            out=conn.execute("INSERT INTO timeline_eras(name,start_label,end_label,start_sort,end_sort,summary,accent,sort_order,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",vals[:-1]+(now,now)).lastrowid
+    return _row(settings,"SELECT * FROM timeline_eras WHERE id=?",(out,)) or {}
+
+
+def delete_timeline_era(settings: Settings, rid: int) -> None:
+    with connect(settings) as conn:
+        conn.execute("UPDATE timeline_events SET era_id=NULL WHERE era_id=?",(int(rid),))
+        conn.execute("DELETE FROM timeline_eras WHERE id=?",(int(rid),))
+
+
+def list_timeline(settings: Settings, *, admin: bool = False, historical_only: bool = False) -> list[dict]:
+    rows=_rows(settings,"SELECT e.*, r.name AS era_name, r.accent AS era_accent FROM timeline_events e LEFT JOIN timeline_eras r ON r.id=e.era_id ORDER BY COALESCE(r.sort_order,999999), e.sort_key,e.date_label,e.id")
+    rows=[r for r in rows if _visible(r["visibility"],admin)]
+    if historical_only:
+        rows=[r for r in rows if r.get("kind") in HISTORICAL_KINDS]
+    return rows
+
+
+def save_timeline_event(settings: Settings,p:dict)->dict:
+    now=time.time(); rid=p.get("id")
+    end_sort=p.get("end_sort_key")
+    vals=(str(p.get("title") or "Event"),str(p.get("date_label") or ""),float(p.get("sort_key") or 0),str(p.get("end_date_label") or ""),float(end_sort) if end_sort not in (None,"") else None,str(p.get("body") or ""),str(p.get("kind") or "event"),int(p.get("era_id")) if p.get("era_id") not in (None,"") else None,p.get("page_slug") or None,str(p.get("image_ref") or ""),max(1,min(5,int(p.get("significance") or 2))),str(p.get("certainty") or "recorded"),str(p.get("visibility") or "players"),now)
+    with connect(settings) as conn:
+        if rid:
+            conn.execute("UPDATE timeline_events SET title=?,date_label=?,sort_key=?,end_date_label=?,end_sort_key=?,body=?,kind=?,era_id=?,page_slug=?,image_ref=?,significance=?,certainty=?,visibility=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
+        else:
+            out=conn.execute("INSERT INTO timeline_events(title,date_label,sort_key,end_date_label,end_sort_key,body,kind,era_id,page_slug,image_ref,significance,certainty,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",vals[:-1]+(now,now)).lastrowid
     return _row(settings,"SELECT * FROM timeline_events WHERE id=?",(out,)) or {}
 
 
@@ -619,6 +716,92 @@ def save_fog_region(settings:Settings,map_id:int,p:dict)->dict:
 def travel_between_markers(marker_a:dict,marker_b:dict,world_width:float=1000.0,speed:float=40.0)->dict:
     dist=math.hypot(float(marker_a["x"])-float(marker_b["x"]),float(marker_a["y"])-float(marker_b["y"]))*float(world_width)
     return {"distance":round(dist,1),"days":round(dist/max(.1,float(speed)),1),"world_width":world_width,"speed":speed}
+
+
+
+# --- Player-owned characters ------------------------------------------------
+def _character_payload(settings: Settings, row: dict) -> dict:
+    out=dict(row)
+    out["portrait_url"] = ("/uploads/" + out["portrait_path"]) if out.get("portrait_path") else ""
+    imgs=_rows(settings,"SELECT * FROM character_images WHERE character_id=? ORDER BY sort_order,id",(int(out["id"]),))
+    for img in imgs: img["url"]="/uploads/"+img["image_path"]
+    out["images"]=imgs
+    return out
+
+
+def list_player_characters(settings: Settings, *, invite_id: int|None=None, admin: bool=False) -> list[dict]:
+    if admin:
+        rows=_rows(settings,"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id ORDER BY c.updated_at DESC,c.id DESC")
+    elif invite_id is None:
+        rows=_rows(settings,"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.visibility='party' ORDER BY c.updated_at DESC,c.id DESC")
+    else:
+        rows=_rows(settings,"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.visibility='party' OR c.invite_id=? ORDER BY CASE WHEN c.invite_id=? THEN 0 ELSE 1 END,c.updated_at DESC,c.id DESC",(int(invite_id),int(invite_id)))
+    return [_character_payload(settings,r) for r in rows]
+
+
+def get_player_character(settings: Settings, character_id: int, *, invite_id: int|None=None, admin: bool=False) -> dict|None:
+    row=_row(settings,"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.id=?",(int(character_id),))
+    if not row: return None
+    if not admin and row.get("visibility")!="party" and int(row.get("invite_id") or 0)!=int(invite_id or -1): return None
+    return _character_payload(settings,row)
+
+
+def save_player_character(settings: Settings, p: dict, *, invite_id: int|None, admin: bool=False) -> dict:
+    rid=p.get("id"); now=time.time()
+    owner=int(p.get("invite_id") or invite_id or 0)
+    if not owner: raise ValueError("A player invitation is required to own this character.")
+    if rid:
+        current=_row(settings,"SELECT * FROM player_characters WHERE id=?",(int(rid),))
+        if not current: raise ValueError("Character not found.")
+        if not admin and int(current["invite_id"])!=int(invite_id or -1): raise PermissionError("You can only edit your own characters.")
+        owner=int(current["invite_id"])
+    name=str(p.get("name") or "Unnamed hero").strip()[:160]
+    vis=str(p.get("visibility") or "party"); vis=vis if vis in {"party","private"} else "party"
+    status=str(p.get("status") or "active")[:40]
+    theme=str(p.get("theme_color") or "#b79661")
+    if not re.match(r"^#[0-9a-fA-F]{6}$",theme): theme="#b79661"
+    vals=(owner,name,str(p.get("pronouns") or "")[:80],str(p.get("ancestry") or "")[:120],str(p.get("class_name") or "")[:120],int(p.get("level")) if str(p.get("level") or "").isdigit() else None,status,str(p.get("summary") or "")[:5000],str(p.get("biography") or "")[:30000],str(p.get("goals") or "")[:10000],str(p.get("player_notes") or "")[:15000],vis,theme,now)
+    with connect(settings) as conn:
+        if rid:
+            conn.execute("UPDATE player_characters SET invite_id=?,name=?,pronouns=?,ancestry=?,class_name=?,level=?,status=?,summary=?,biography=?,goals=?,player_notes=?,visibility=?,theme_color=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
+        else:
+            base=_slug(name); slug=base
+            n=2
+            while conn.execute("SELECT 1 FROM player_characters WHERE slug=?",(slug,)).fetchone(): slug=f"{base}-{n}"; n+=1
+            out=conn.execute("INSERT INTO player_characters(invite_id,name,slug,pronouns,ancestry,class_name,level,status,summary,biography,goals,player_notes,visibility,theme_color,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",vals[:2]+(slug,)+vals[2:-1]+(now,now)).lastrowid
+    return get_player_character(settings,out,invite_id=owner,admin=True) or {}
+
+
+def delete_player_character(settings: Settings, character_id: int, *, invite_id: int|None, admin: bool=False) -> list[str]:
+    row=_row(settings,"SELECT * FROM player_characters WHERE id=?",(int(character_id),))
+    if not row: return []
+    if not admin and int(row["invite_id"])!=int(invite_id or -1): raise PermissionError("You can only delete your own characters.")
+    paths=[x["image_path"] for x in _rows(settings,"SELECT image_path FROM character_images WHERE character_id=?",(int(character_id),))]
+    if row.get("portrait_path"): paths.append(row["portrait_path"])
+    with connect(settings) as conn: conn.execute("DELETE FROM player_characters WHERE id=?",(int(character_id),))
+    return list(dict.fromkeys(paths))
+
+
+def add_character_image(settings: Settings, character_id:int, image_path:str, kind:str="inspiration", caption:str="", *, invite_id:int|None, admin:bool=False) -> dict:
+    char=_row(settings,"SELECT * FROM player_characters WHERE id=?",(int(character_id),))
+    if not char: raise ValueError("Character not found.")
+    if not admin and int(char["invite_id"])!=int(invite_id or -1): raise PermissionError("You can only upload art for your own characters.")
+    kind=kind if kind in {"portrait","inspiration","gallery"} else "inspiration"
+    with connect(settings) as conn:
+        rid=conn.execute("INSERT INTO character_images(character_id,image_path,kind,caption,created_at) VALUES(?,?,?,?,?)",(int(character_id),image_path,kind,str(caption or "")[:500],time.time())).lastrowid
+        if kind=="portrait": conn.execute("UPDATE player_characters SET portrait_path=?,updated_at=? WHERE id=?",(image_path,time.time(),int(character_id)))
+    row=_row(settings,"SELECT * FROM character_images WHERE id=?",(rid,)) or {}; row["url"]="/uploads/"+image_path
+    return row
+
+
+def delete_character_image(settings: Settings, image_id:int, *, invite_id:int|None, admin:bool=False) -> str:
+    row=_row(settings,"SELECT ci.*,pc.invite_id,pc.portrait_path FROM character_images ci JOIN player_characters pc ON pc.id=ci.character_id WHERE ci.id=?",(int(image_id),))
+    if not row: return ""
+    if not admin and int(row["invite_id"])!=int(invite_id or -1): raise PermissionError("You can only remove art from your own characters.")
+    with connect(settings) as conn:
+        conn.execute("DELETE FROM character_images WHERE id=?",(int(image_id),))
+        if row.get("portrait_path")==row.get("image_path"): conn.execute("UPDATE player_characters SET portrait_path='' WHERE id=?",(int(row["character_id"]),))
+    return str(row.get("image_path") or "")
 
 
 # --- Campaign snapshots / health -------------------------------------------

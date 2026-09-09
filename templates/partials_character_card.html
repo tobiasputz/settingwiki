@@ -1,0 +1,3 @@
+<a class="character-card" href="/characters/{{ c.id }}" style="--character-accent:{{ c.theme_color or '#b79661' }};{% if c.portrait_url %}--character-image:url('{{ c.portrait_url }}'){% endif %}">
+  <div class="character-card-art"></div><div class="character-card-gradient"></div><div class="character-card-copy"><small>{{ c.player_label }} · {{ c.status|upper }}</small><h3>{{ c.name }}</h3><p>{% if c.ancestry %}{{ c.ancestry }}{% endif %}{% if c.class_name %} · {{ c.class_name }}{% endif %}{% if c.level is not none %} · Level {{ c.level }}{% endif %}</p>{% if c.summary %}<blockquote>{{ c.summary }}</blockquote>{% endif %}</div>
+</a>

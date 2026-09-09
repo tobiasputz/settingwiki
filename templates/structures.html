@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Families & Organizations · {{ wiki.title }}{% endblock %}
+{% macro branch(slug, children, titles, relations, depth=0) -%}
+<li class="structure-node depth-{{ depth }}"><div class="structure-person"><a href="/wiki/{{ slug }}">{{ titles.get(slug, slug|replace('-',' ')|title) }}</a>{% if relations.get(slug) %}<small>{{ relations.get(slug) }}</small>{% endif %}</div>{% if children.get(slug) %}<ul>{% for child in children.get(slug) %}{{ branch(child,children,titles,relations,depth+1) }}{% endfor %}</ul>{% endif %}</li>
+{%- endmacro %}
+{% block body %}
+<main class="structures-shell">
+  <section class="structures-hero"><div><span class="eyebrow">SPECIALIZED NETWORKS</span><h1>Families, orders & institutions</h1><p>Some relationships make more sense as a lineage or chain of command than as a sprawling network. These charts show the hierarchy directly.</p></div><a href="/network" class="ghost-button">Open Lore Network →</a></section>
+  <nav class="structure-filter" id="structureFilter"><button class="active" data-structure-kind="all">All</button><button data-structure-kind="family">Families</button><button data-structure-kind="organization">Organizations</button><button data-structure-kind="religion">Religions</button><button data-structure-kind="military">Military</button></nav>
+  <div class="structure-chart-grid">
+  {% for chart in charts %}
+    <section class="structure-chart" data-structure-chart data-kind="{{ chart.kind }}"><header><span class="eyebrow">{{ chart.kind|upper }}</span><h2>{{ chart.title }}</h2><p>{{ chart.nodes|length }} recorded relationships</p></header>
+      <div class="structure-tree-scroll"><ul class="structure-tree">{% for root in chart.roots %}{{ branch(root,chart.children,chart.titles,chart.relations) }}{% endfor %}</ul></div>
+    </section>
+  {% else %}<section class="structure-empty"><span>⌘</span><h2>No family trees or organization charts yet.</h2><p>Your GM can create them in Living Campaign → Family & organizations.</p></section>{% endfor %}
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}<script>document.querySelectorAll('[data-structure-kind]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-structure-kind]').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('[data-structure-chart]').forEach(x=>x.hidden=b.dataset.structureKind!=='all'&&x.dataset.kind!==b.dataset.structureKind)})</script>{% endblock %}

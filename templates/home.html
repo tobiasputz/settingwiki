@@ -22,6 +22,13 @@
   </section>
 
 
+  <section class="home-section reveal campaign-now-home"><div class="section-heading"><div><span class="eyebrow">YOUR CAMPAIGN NOW</span><h2>Pick up where the table left off</h2></div><a href="/campaign" class="quiet-link">Open campaign desk →</a></div><div class="campaign-now-grid">
+    <a class="campaign-now-card" href="/campaign#threads"><small>OPEN THREADS</small><strong>{{ threads|selectattr('status','equalto','open')|list|length }}</strong><p>{% if threads %}{{ threads[0].title }}{% else %}No active plot threads yet.{% endif %}</p></a>
+    <a class="campaign-now-card" href="/characters"><small>YOUR CHARACTERS</small><strong>{{ characters|length }}</strong><p>{% if characters %}{{ characters[0].name }}{% else %}Create a player character dossier.{% endif %}</p></a>
+    <a class="campaign-now-card" href="/calendar"><small>WORLD DATE</small><strong>{{ calendar.current_date or '—' }}</strong><p>{{ calendar.season or calendar.name }}</p></a>
+    <a class="campaign-now-card" href="/campaign#world"><small>WORLD FRONTS</small><strong>{{ fronts|selectattr('status','equalto','active')|list|length }}</strong><p>{% if fronts %}{{ fronts[0].title }}{% else %}No player-visible fronts.{% endif %}</p></a>
+  </div></section>
+
   {% if live_session %}
   <section class="home-section live-session-home reveal"><a href="/session" class="live-session-banner"><div><span class="eyebrow"><i class="live-dot"></i> SESSION LIVE</span><h2>{% if live_session.session_number %}Session {{ live_session.session_number }} · {% endif %}{{ live_session.title }}</h2><p>{{ live_session.summary or 'The campaign is live. Open the player session screen for spotlight lore, handouts, and discoveries.' }}</p></div><strong>Enter session →</strong></a></section>
   {% endif %}
