@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ calendar.name }} · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="calendar-page">
+  <section class="calendar-hero"><span class="eyebrow">WORLD CALENDAR</span><h1>{{ calendar.name }}</h1><div class="calendar-now"><small>CURRENT CAMPAIGN DATE</small><strong>{{ calendar.current_date or 'Not set' }}</strong>{% if calendar.season %}<span>{{ calendar.season }}</span>{% endif %}</div></section>
+  <section class="calendar-layout">
+    <div class="calendar-main">
+      {% if calendar.months %}<section class="calendar-card"><span class="eyebrow">YEAR</span><h2>Months & seasons</h2><div class="calendar-month-grid">{% for m in calendar.months %}<article><small>{{ '%02d'|format(loop.index) }}</small><strong>{{ m.name if m is mapping else m }}</strong>{% if m is mapping and m.days %}<span>{{ m.days }} days</span>{% endif %}{% if m is mapping and m.season %}<em>{{ m.season }}</em>{% endif %}</article>{% endfor %}</div></section>{% endif %}
+      {% if festivals %}<section class="calendar-card"><span class="eyebrow">OBSERVANCES</span><h2>Festivals & important dates</h2><div class="calendar-event-list">{% for e in festivals %}<a href="{{ '/wiki/' ~ e.page_slug if e.page_slug else '/timeline' }}"><time>{{ e.date_label }}</time><strong>{{ e.title }}</strong><p>{{ e.body }}</p></a>{% endfor %}</div></section>{% endif %}
+    </div>
+    <aside class="calendar-side">
+      {% if calendar.weekdays %}<section class="calendar-card"><span class="eyebrow">WEEK</span><h2>Days</h2><ol class="weekday-list">{% for d in calendar.weekdays %}<li>{{ d.name if d is mapping else d }}</li>{% endfor %}</ol></section>{% endif %}
+      {% if calendar.moons %}<section class="calendar-card"><span class="eyebrow">SKY</span><h2>Moons</h2><div class="moon-list">{% for moon in calendar.moons %}<article><span>◐</span><div><strong>{{ moon.name if moon is mapping else moon }}</strong>{% if moon is mapping and moon.cycle %}<small>{{ moon.cycle }}-day cycle</small>{% endif %}{% if moon is mapping and moon.note %}<p>{{ moon.note }}</p>{% endif %}</div></article>{% endfor %}</div></section>{% endif %}
+    </aside>
+  </section>
+</main>
+{% endblock %}

@@ -106,5 +106,69 @@
   const trail=document.getElementById('personalTrail'),trailSection=document.getElementById('personalTrailSection');
   if(trail&&trailSection){const bookmarks=readStore(bookmarkKey).map(x=>({...x,bookmarked:true})),recent=readStore(recentKey),seen=new Set(),items=[];for(const x of [...bookmarks,...recent]){if(!x?.slug||seen.has(x.slug))continue;seen.add(x.slug);items.push(x);if(items.length>=8)break}if(items.length){trailSection.classList.remove('hidden');trail.innerHTML=items.map(x=>`<a class="trail-card ${x.image?'has-image':''}" href="${escapeHtml(x.href||('/wiki/'+x.slug))}" ${x.image?`style="--trail-image:url('${escapeHtml(x.image)}')"`:''}><small>${escapeHtml((x.bookmarked?'★ SAVED · ':'')+(x.chapter||'Setting'))}</small><strong>${escapeHtml(x.title||'Lore')}</strong><i>→</i></a>`).join('')}}
 
+  // Loreforge 2 — installable phone/tablet experience.
+  if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  // Browser-local campaign data must not bleed between two personal invitation
+  // identities used on the same device. A changed access key clears private
+  // offline content and requires the new player to opt in again.
+  const accessKey=document.body.dataset.playerAccessKey||'',storedAccessKey=localStorage.getItem('loreforge.playerAccessKey')||'';
+  if(accessKey&&storedAccessKey&&accessKey!==storedAccessKey){localStorage.setItem('loreforge.offline.enabled','0');if('serviceWorker' in navigator)navigator.serviceWorker.ready.then(r=>r.active?.postMessage('CLEAR_PRIVATE')).catch(()=>{})}
+  if(accessKey)localStorage.setItem('loreforge.playerAccessKey',accessKey);
+  const moreBtn=document.querySelector('[data-mobile-more]'),moreSheet=document.getElementById('mobileMoreSheet');
+  moreBtn?.addEventListener('click',()=>{const open=!moreSheet.classList.contains('open');moreSheet.classList.toggle('open',open);moreSheet.setAttribute('aria-hidden',open?'false':'true')});
+  document.addEventListener('click',e=>{if(moreSheet?.classList.contains('open')&&!moreSheet.contains(e.target)&&!moreBtn?.contains(e.target)){moreSheet.classList.remove('open');moreSheet.setAttribute('aria-hidden','true')}});
+  const installBanner=document.getElementById('installBanner'),installBtn=document.getElementById('installAppBtn'),installHint=document.getElementById('installHint');let installPrompt=null;
+  const dismissed=localStorage.getItem('loreforge.install.dismissed')==='1',standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+  const isiOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  if(!dismissed&&!standalone){if(isiOS){installBanner?.classList.remove('hidden');if(installHint)installHint.textContent='On iPhone/iPad: Share → Add to Home Screen.';if(installBtn)installBtn.textContent='How';installBtn?.addEventListener('click',()=>alert('Safari: tap the Share button, then “Add to Home Screen”. Loreforge will open like an app.'))}else{window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;installBanner?.classList.remove('hidden')});installBtn?.addEventListener('click',async()=>{if(!installPrompt)return;installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;installBanner?.classList.add('hidden')})}}
+  document.querySelector('[data-dismiss-install]')?.addEventListener('click',()=>{installBanner?.classList.add('hidden');localStorage.setItem('loreforge.install.dismissed','1')});
+
+  // Explicit private offline cache. Invitation-protected campaign pages are only
+  // retained after the player opts in; turning this off asks the service worker
+  // to purge all cached campaign HTML immediately.
+  const offlineBtn=document.querySelector('[data-offline-toggle]');
+  const offlineKey='loreforge.offline.enabled';
+  const offlineState=()=>localStorage.getItem(offlineKey)==='1';
+  const renderOffline=()=>{if(offlineBtn)offlineBtn.textContent=offlineState()?'⇩ Offline cache: on':'⇩ Offline cache: off'};renderOffline();
+  offlineBtn?.addEventListener('click',async()=>{const enabled=!offlineState();localStorage.setItem(offlineKey,enabled?'1':'0');renderOffline();try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage(enabled?'OFFLINE_ON':'OFFLINE_OFF')}catch(_){}});
+  if('serviceWorker' in navigator&&offlineState())navigator.serviceWorker.ready.then(reg=>reg.active?.postMessage('OFFLINE_ON')).catch(()=>{});
+  document.querySelectorAll('[data-player-logout]').forEach(btn=>btn.addEventListener('click',async()=>{
+    if(!confirm('Sign out of this campaign on this device?'))return;
+    localStorage.setItem(offlineKey,'0');localStorage.removeItem('loreforge.playerAccessKey');
+    try{const reg=await navigator.serviceWorker.ready;reg.active?.postMessage('CLEAR_PRIVATE')}catch(_){}
+    try{await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}catch(_){}
+    location.href='/';
+  }));
+
+  // Command palette augments search with fast navigation and GM-only actions.
+  const adminMode=document.body.dataset.adminView==='true';
+  const baseInputHandler=input?.oninput;
+  const commandRows=q=>{const low=q.toLowerCase().trim(),rows=[];const add=(title,chapter,href,excerpt='')=>rows.push({title,chapter,href,excerpt,type:'command'});if('session'.includes(low)||low.startsWith('session'))add(adminMode?'Open GM Session Mode':'Open player session','Command',adminMode?'/gm/session':'/session','Run or follow the current session.');if('timeline'.includes(low))add('Open timeline','Command','/timeline','Browse campaign chronology.');if('mysteries'.includes(low)||low==='board')add('Open mystery board','Command','/mysteries','Clues, theories, and unresolved threads.');if(adminMode&&low.startsWith('edit ')){const name=q.slice(5).trim();add('Edit '+name,'GM command','/admin?search='+encodeURIComponent(name),'Jump into Campaign Studio.')}if(adminMode&&('campaign control'.includes(low)||low==='control'))add('Open Campaign Control','GM command','/admin/campaign','Sessions, reveals, timeline, handouts, health, and snapshots.');return rows};
+  if(input){input.addEventListener('input',()=>{const q=input.value.trim();if(!q)return;setTimeout(()=>{const commands=commandRows(q);if(!commands.length)return;const existing=results.querySelectorAll('.search-result').length;const html=commands.map(x=>`<a class="search-result command-result" href="${escapeHtml(x.href)}"><small>${escapeHtml(x.chapter)}<span class="search-type">command</span></small><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.excerpt)}</p></a>`).join('');results.insertAdjacentHTML('afterbegin',html)},190)})}
+
+  // Rich hover previews for linked Codex names. Disabled on touch-first devices.
+  const hoverCard=document.getElementById('loreHoverCard');let hoverTimer=0,hoverAbort=null;
+  if(hoverCard&&matchMedia('(hover:hover) and (pointer:fine)').matches){document.body.addEventListener('mouseover',e=>{const a=e.target.closest('a[href^="/wiki/"]');if(!a)return;clearTimeout(hoverTimer);hoverTimer=setTimeout(async()=>{const slug=a.getAttribute('href').split('/wiki/')[1]?.split(/[?#]/)[0];if(!slug)return;hoverAbort?.abort();hoverAbort=new AbortController();try{const d=await fetch('/api/public/page-card/'+encodeURIComponent(slug),{signal:hoverAbort.signal}).then(r=>r.json());hoverCard.innerHTML=`${d.image?`<div class="hover-card-art" style="background-image:url('${escapeHtml(d.image)}')"></div>`:''}<small>${escapeHtml(d.chapter||'SETTING')}</small><strong>${escapeHtml(d.title)}</strong><p>${escapeHtml(d.excerpt||'')}</p>${(d.relationships||[]).length?`<div class="hover-relations">${d.relationships.slice(0,3).map(r=>`<span>${escapeHtml(r.label||r.relation)}</span>`).join('')}</div>`:''}`;const r=a.getBoundingClientRect();hoverCard.style.left=Math.min(innerWidth-330,Math.max(12,r.left))+'px';hoverCard.style.top=Math.min(innerHeight-240,Math.max(70,r.bottom+8))+'px';hoverCard.classList.add('open');hoverCard.setAttribute('aria-hidden','false')}catch(_){}} ,320)});document.body.addEventListener('mouseout',e=>{if(e.target.closest('a[href^="/wiki/"]')){clearTimeout(hoverTimer);hoverTimer=setTimeout(()=>{hoverCard.classList.remove('open');hoverCard.setAttribute('aria-hidden','true')},120)}})}
+
+  // Selection-based player annotations and GM margin notes.
+  if(pageShell){const noteBubble=document.createElement('button');noteBubble.type='button';noteBubble.className='selection-note-bubble';noteBubble.textContent=adminMode?'＋ GM note':'＋ Note';document.body.appendChild(noteBubble);let selectedText='',selectedAnchor='';const hideBubble=()=>noteBubble.classList.remove('open');document.addEventListener('selectionchange',()=>{const sel=getSelection();if(!sel||sel.isCollapsed||!document.querySelector('[data-lore-article]')?.contains(sel.anchorNode)){hideBubble();return}selectedText=sel.toString().trim().slice(0,500);if(!selectedText){hideBubble();return}const range=sel.getRangeAt(0),rect=range.getBoundingClientRect();const heading=sel.anchorNode?.parentElement?.closest('section,h2,h3,h4')?.id||location.hash.replace('#','')||'';selectedAnchor=heading;noteBubble.style.left=Math.max(8,Math.min(innerWidth-110,rect.left+rect.width/2-45))+'px';noteBubble.style.top=(scrollY+rect.top-42)+'px';noteBubble.classList.add('open')});noteBubble.onclick=()=>{hideBubble();const note=prompt(adminMode?'Private GM margin note:':'Add a note to this passage:');if(!note)return;const visibility=adminMode?'gm':(confirm('Share this note with the whole party?\nOK = party note · Cancel = private note')?'party':'private');fetch('/api/public/annotations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page_slug:pageShell.dataset.pageSlug,anchor:selectedAnchor,quote:selectedText,note,visibility})}).then(r=>r.json()).then(()=>{const tray=document.querySelector('[data-annotation-tray]');if(tray)loadNotes(tray);}).catch(()=>{})};async function loadNotes(tray){try{const notes=await fetch('/api/public/annotations/'+encodeURIComponent(pageShell.dataset.pageSlug)).then(r=>r.json());tray.innerHTML=notes.length?notes.map(n=>`<article class="margin-note ${escapeHtml(n.visibility)}"><small>${escapeHtml(n.visibility.toUpperCase())}${n.author_label?' · '+escapeHtml(n.author_label):''}</small>${n.quote?`<blockquote>${escapeHtml(n.quote)}</blockquote>`:''}<p>${escapeHtml(n.note)}</p></article>`).join(''):'<div class="empty-mini">No notes on this entry yet.</div>'}catch(_){}}const tray=document.querySelector('[data-annotation-tray]');if(tray)loadNotes(tray);
+    fetch('/api/public/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event_type:'view',target_key:pageShell.dataset.pageSlug})}).catch(()=>{});
+    // Sync bookmarks to the invitation identity while retaining local fallback.
+    const syncBookmarkBtn=document.querySelector('[data-bookmark-page]');
+    syncBookmarkBtn?.addEventListener('click',()=>setTimeout(()=>{const slug=pageShell.dataset.pageSlug;const enabled=readStore(bookmarkKey).some(x=>x.slug===slug);fetch('/api/public/bookmark/'+encodeURIComponent(slug),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})}).catch(()=>{})},20));
+  }
+
+  // Player Session Mode is live without websockets: invited devices poll a tiny
+  // timestamp endpoint and refresh only when the GM changes the live session, a
+  // reveal, handout, or discovery feed. This keeps Railway deployment simple.
+  const sessionScreen=document.querySelector('[data-session-pulse]');
+  if(sessionScreen){let pulse=null,busy=false;const poll=async()=>{if(busy||document.hidden)return;busy=true;try{const next=await fetch('/api/public/session-pulse',{cache:'no-store'}).then(r=>r.json());if(pulse&&(next.session_id!==pulse.session_id||next.session_updated>pulse.session_updated||next.latest_update>pulse.latest_update||next.latest_reveal>pulse.latest_reveal||next.latest_handout>pulse.latest_handout)){location.reload();return}pulse=next}catch(_){ }finally{busy=false}};poll();setInterval(poll,5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()})}
+
+  // Share/QR helper for phones at the physical table.
+  document.querySelectorAll('[data-share-qr]').forEach(btn=>btn.addEventListener('click',()=>{const path=btn.dataset.shareQr||location.pathname+location.search;const box=document.createElement('div');box.className='qr-share-modal';box.innerHTML=`<button type="button">×</button><small>SCAN AT THE TABLE</small><strong>${escapeHtml(document.title.split('·')[0].trim())}</strong><img src="/share/qr?path=${encodeURIComponent(path)}" alt="QR code"><p>Scanning opens this player-visible page. The player still needs a valid Loreforge invitation session.</p>`;document.body.appendChild(box);box.querySelector('button').onclick=()=>box.remove()}));
+
+  // Ambient audio is opt-in per entry and never autoplays.
+  const ambient=document.querySelector('[data-ambient-audio]');if(ambient){const audio=new Audio(ambient.dataset.ambientAudio);audio.loop=true;audio.preload='none';ambient.addEventListener('click',async()=>{if(audio.paused){try{await audio.play();ambient.classList.add('playing');ambient.textContent='◼ Stop ambience'}catch(_){}}else{audio.pause();ambient.classList.remove('playing');ambient.textContent='♪ Ambience'}})}
+
   function escapeHtml(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 })();

@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}What's new · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="updates-shell"><header class="compact-page-hero"><span class="eyebrow">DISCOVERY LOG</span><h1>What changed?</h1><p>Newly revealed lore, handouts, and changes since your last visit.</p></header>
+<div class="updates-timeline">{% for u in updates %}<article><div class="update-dot"></div><time data-epoch="{{ u.created_at }}"></time><h2>{{ u.title }}</h2><p>{{ u.body }}</p>{% if u.target_type == 'lore' and u.target_key %}<a href="/wiki/{{ u.target_key }}">Open entry →</a>{% elif u.target_type == 'handout' and u.target_key %}<a href="/handout/{{ u.target_key }}">Open handout →</a>{% endif %}</article>{% else %}<div class="timeline-empty"><h2>No discoveries logged yet.</h2></div>{% endfor %}</div></main>
+{% endblock %}

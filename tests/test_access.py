@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.storage import create_player_invite, init_db, register_player_device, revoke_player_invite, set_setting
+from app.features import init_feature_db
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -16,7 +17,7 @@ class DummyRequest:
 
 def test_invite_mode_requires_live_personal_invitation_session(tmp_path: Path, monkeypatch):
     import app.main as main
-    s=make_settings(tmp_path);init_db(s);set_setting(s,'player_access_mode','invite')
+    s=make_settings(tmp_path);init_db(s);init_feature_db(s);set_setting(s,'player_access_mode','invite')
     monkeypatch.setattr(main,'settings',s)
     assert main.player_allowed(DummyRequest()) is False
     invite=create_player_invite(s,'Piotr')
@@ -29,7 +30,7 @@ def test_invite_mode_requires_live_personal_invitation_session(tmp_path: Path, m
 
 def test_admin_always_has_player_view_access(tmp_path: Path, monkeypatch):
     import app.main as main
-    s=make_settings(tmp_path);init_db(s);set_setting(s,'player_access_mode','invite')
+    s=make_settings(tmp_path);init_db(s);init_feature_db(s);set_setting(s,'player_access_mode','invite')
     monkeypatch.setattr(main,'settings',s)
     assert main.player_allowed(DummyRequest({'admin':True})) is True
 
@@ -38,7 +39,7 @@ def test_invitation_route_authenticates_one_browser_and_revocation_is_live(tmp_p
     from fastapi.testclient import TestClient
     import app.main as main
 
-    s=make_settings(tmp_path);init_db(s);set_setting(s,'player_access_mode','invite')
+    s=make_settings(tmp_path);init_db(s);init_feature_db(s);set_setting(s,'player_access_mode','invite')
     monkeypatch.setattr(main,'settings',s)
 
     admin=TestClient(main.app)
@@ -82,7 +83,7 @@ def test_admin_opening_invite_does_not_consume_device_slot(tmp_path: Path, monke
     import app.main as main
     from app.storage import get_player_invite
 
-    s=make_settings(tmp_path);init_db(s);set_setting(s,'player_access_mode','invite')
+    s=make_settings(tmp_path);init_db(s);init_feature_db(s);set_setting(s,'player_access_mode','invite')
     monkeypatch.setattr(main,'settings',s)
     admin=TestClient(main.app)
     assert admin.post('/admin/login',data={'password':'admin'},follow_redirects=False).status_code==303

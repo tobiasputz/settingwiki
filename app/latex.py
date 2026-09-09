@@ -595,7 +595,7 @@ def build_wiki(settings: Settings) -> dict:
         # Preserve Loreforge's web-only image placement comment until the
         # fragment renderer consumes it. Ordinary LaTeX comments are still
         # stripped here so they never become player-visible prose.
-        if re.match(r"^\s*%\s*loreforge-(?:image|panel-start|panel-end)\b", src.text, flags=re.IGNORECASE):
+        if re.match(r"^\s*%\s*loreforge-(?:image|panel-start|panel-end|reveal-start|reveal-end)\b", src.text, flags=re.IGNORECASE):
             line = src.text
         else:
             line = strip_comments(src.text)
@@ -1175,6 +1175,34 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
     # GM put a selected passage over atmospheric artwork without changing the PDF.
     tokens: dict[str, str] = {}
     if _allow_panels:
+        # Progressive lore blocks use comments so the canonical PDF source is
+        # unchanged. Example:
+        #   % loreforge-reveal-start: key=corvina-truth rumor="Something is off."
+        #   Secret paragraph visible after the GM reveals it.
+        #   % loreforge-reveal-end
+        reveal_re = re.compile(
+            r"(?ms)^[ \t]*%\s*loreforge-reveal-start\s*:\s*([^\r\n]+)\r?\n(.*?)^[ \t]*%\s*loreforge-reveal-end\s*$"
+        )
+        def reveal_sub(m: re.Match) -> str:
+            try:
+                opts = shlex.split(m.group(1), posix=True)
+            except ValueError:
+                opts = m.group(1).split()
+            kv = {}
+            for bit in opts:
+                if "=" in bit:
+                    k, v = bit.split("=", 1); kv[k.strip().lower()] = v.strip().strip('"').strip("'")
+            key = re.sub(r"[^a-zA-Z0-9_.:-]+", "-", kv.get("key", "secret")).strip("-") or "secret"
+            rumor = kv.get("rumor", "")
+            inner_rendered, _ = latex_fragment_to_html(m.group(2), settings, page_kind=page_kind, analysis=analysis, _allow_panels=False)
+            token = f"@@LOREFORGE_REVEAL_{len(tokens)}@@"
+            tokens[token] = (
+                f'<section class="lore-reveal" data-lore-reveal="{html.escape(key, quote=True)}" '
+                f'data-rumor="{html.escape(rumor, quote=True)}">{inner_rendered.replace(chr(10), "")}</section>'
+            )
+            return "\n" + token + "\n"
+        raw = reveal_re.sub(reveal_sub, raw)
+
         panel_re = re.compile(
             r"(?ms)^[ \t]*%\s*loreforge-panel-start\s*:\s*([^\r\n]+)\r?\n(.*?)^[ \t]*%\s*loreforge-panel-end\s*$"
         )

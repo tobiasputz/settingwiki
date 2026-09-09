@@ -1,0 +1,39 @@
+const STATIC='loreforge-static-v250';
+const PRIVATE='loreforge-private-v250';
+const META='loreforge-offline-meta-v250';
+const ENABLE_KEY='/__loreforge_offline_enabled__';
+const SHELL=['/static/wiki.css?v=250','/static/wiki.js?v=250','/static/loreforge-icon.svg','/static/icon-192.png','/static/icon-512.png'];
+const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/');
+const privateAsset=u=>u.pathname.startsWith('/project-asset/')||u.pathname.startsWith('/uploads/');
+async function offlineEnabled(){const c=await caches.open(META);return !!(await c.match(ENABLE_KEY))}
+async function enableOffline(){const c=await caches.open(META);await c.put(ENABLE_KEY,new Response('1'));return true}
+async function disableOffline(){await caches.delete(PRIVATE);const c=await caches.open(META);await c.delete(ENABLE_KEY);return true}
+self.addEventListener('install',e=>e.waitUntil(caches.open(STATIC).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
+self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>(k.startsWith('loreforge-static-')&&k!==STATIC)||(k.startsWith('loreforge-private-')&&k!==PRIVATE)||(k.startsWith('loreforge-offline-meta-')&&k!==META)).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
+self.addEventListener('fetch',e=>{
+  const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin)return;
+  if(u.pathname.startsWith('/static/')){e.respondWith(caches.match(e.request).then(hit=>hit||fetch(e.request).then(r=>{if(r.ok){const copy=r.clone();caches.open(STATIC).then(c=>c.put(e.request,copy))}return r})));return}
+  if(privatePage(u)||privateAsset(u)){
+    e.respondWith((async()=>{
+      const enabled=await offlineEnabled();
+      try{
+        const r=await fetch(e.request);
+        // Invitation-protected campaign data is cached only by explicit player
+        // opt-in. Never persist redirects/login gates/error responses. Assets are
+        // cached only as the player actually visits pages that request them.
+        const type=r.headers.get('content-type')||'';
+        const cacheablePage=privatePage(u)&&type.includes('text/html');
+        const cacheableAsset=privateAsset(u)&&(type.startsWith('image/')||type.startsWith('audio/')||type==='application/pdf');
+        if(enabled&&r.ok&&!r.redirected&&(cacheablePage||cacheableAsset)){const c=await caches.open(PRIVATE);await c.put(e.request,r.clone())}
+        return r;
+      }catch(err){
+        if(enabled){const hit=await caches.match(e.request);if(hit)return hit;if(privatePage(u)){const home=await caches.match('/');if(home)return home}}
+        throw err;
+      }
+    })());
+  }
+});
+self.addEventListener('message',e=>{
+  if(e.data==='OFFLINE_ON')e.waitUntil(enableOffline());
+  if(e.data==='OFFLINE_OFF'||e.data==='CLEAR_PRIVATE')e.waitUntil(disableOffline());
+});

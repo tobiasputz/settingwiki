@@ -2,36 +2,70 @@
 <html lang="en" data-theme="night">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#17130f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Loreforge">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/loreforge-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Loreforge' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=140">
+  <link rel="stylesheet" href="/static/wiki.css?v=250">
   {% block head %}{% endblock %}
 </head>
-<body>
+<body data-admin-view="{{ 'true' if request.session.get('admin') else 'false' }}" data-player-access-key="{{ wiki.player_access_key if wiki else '' }}">
   <div class="ambient-grain"></div>
   <header class="site-header">
     <a class="brand" href="/">
       <span class="brand-mark">✦</span>
-      <span><strong>{{ wiki.title if wiki else 'Loreforge' }}</strong><small>Campaign Atlas</small></span>
+      <span><strong>{{ wiki.title if wiki else 'Loreforge' }}</strong><small>{{ wiki.player_label if wiki and wiki.player_label else 'Campaign Atlas' }}</small></span>
     </a>
     <nav class="site-nav">
       <a href="/">Codex</a>
+      <a href="/session" class="nav-session">Session{% if wiki and wiki.live_session and wiki.live_session.status == 'live' %}<i class="live-dot"></i>{% endif %}</a>
+      <a href="/timeline">Timeline</a>
+      <a href="/calendar">Calendar</a>
+      <a href="/mysteries">Mysteries</a>
       <a href="/network">Lore Network</a>
-      {% if maps %}<a href="/#atlas">Atlas</a>{% endif %}
-      <button class="search-open" data-open-search aria-label="Search">⌕ <span>Search</span><kbd>/</kbd></button>
+      {% if maps|default([]) %}<a href="/#atlas">Atlas</a>{% endif %}
+      <button class="search-open" data-open-search aria-label="Open command palette">⌕ <span>Search</span><kbd>⌘K</kbd></button>
+      {% if request.session.get('admin') %}<a href="/gm/session" class="gm-nav-link">GM Session</a>{% elif wiki and wiki.player_label %}<button type="button" class="nav-signout" data-player-logout title="Sign out of this campaign">Sign out</button>{% endif %}
     </nav>
   </header>
 
   {% block body %}{% endblock %}
 
+  <nav class="mobile-tabbar" aria-label="Primary navigation">
+    <a href="/" data-mobile-nav="codex"><span>⌂</span><small>Codex</small></a>
+    <a href="/session" data-mobile-nav="session"><span>✦</span><small>Session</small>{% if wiki and wiki.live_session and wiki.live_session.status == 'live' %}<i></i>{% endif %}</a>
+    <button type="button" data-open-search><span>⌕</span><small>Search</small></button>
+    <a href="/timeline" data-mobile-nav="timeline"><span>⌛</span><small>Timeline</small></a>
+    <button type="button" data-mobile-more><span>☰</span><small>More</small></button>
+  </nav>
+  <div class="mobile-more-sheet" id="mobileMoreSheet" aria-hidden="true">
+    <div class="mobile-sheet-handle"></div>
+    <a href="/mysteries">◇ Mysteries</a><a href="/network">⌘ Lore Network</a><a href="/handouts">✉ Handouts</a><a href="/updates">✦ What's new</a><a href="/calendar">☾ Calendar</a><a href="/#atlas">⌖ Atlas</a><button type="button" class="mobile-sheet-action" data-offline-toggle>⇩ Offline cache: off</button>
+    {% if request.session.get('admin') %}<hr><a href="/gm/session">⚙ GM Session</a><a href="/admin">✎ Campaign Studio</a><a href="/admin/campaign">✦ Campaign Control</a>{% elif wiki and wiki.player_label %}<hr><button type="button" class="mobile-sheet-action danger" data-player-logout>↪ Sign out of {{ wiki.player_label }}</button>{% endif %}
+  </div>
+
   <div class="search-overlay" id="searchOverlay" aria-hidden="true">
-    <div class="search-panel">
-      <div class="search-top"><span>⌕</span><input id="globalSearch" placeholder="Search the setting…" autocomplete="off"><kbd>ESC</kbd></div>
-      <div id="searchResults" class="search-results"><div class="search-hint">Type a place, person, faction, item, or phrase.</div></div>
+    <div class="search-panel command-palette">
+      <div class="search-top"><span>⌕</span><input id="globalSearch" placeholder="Search lore, maps, commands…" autocomplete="off"><kbd>ESC</kbd></div>
+      <div class="command-hints"><span>Try <b>edit Tumerich</b></span><span><b>map Selenia</b></span><span><b>session</b></span></div>
+      <div id="searchResults" class="search-results"><div class="search-hint">Search the setting, jump to tools, or type a command.</div></div>
     </div>
   </div>
-  <script src="/static/wiki.js?v=140"></script>
+  <div id="loreHoverCard" class="lore-hover-card" aria-hidden="true"></div>
+
+  <div class="install-banner hidden" id="installBanner">
+    <div><span>✦</span><p><strong>Install Loreforge</strong><small id="installHint">Keep the campaign one tap away.</small></p></div>
+    <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
+  </div>
+
+  <script src="/static/wiki.js?v=250"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

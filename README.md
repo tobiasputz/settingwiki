@@ -33,6 +33,24 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Personal player invitations.** Player access is invitation-only by default. **Admin → Access** creates one signed link per player; each link can be copied, expired, revoked, restored, rotated, device-limited, or have its remembered devices reset independently. Legacy shared-password and public modes remain available, while the editor continues to use `ADMIN_PASSWORD`.
 - **Read → edit source bridge.** When you browse the player Codex while logged in as GM, a persistent **Edit source** control opens the exact LaTeX file/line in Campaign Studio. On long Person-of-Note pages it follows the section currently being read, and the editor offers **Back to entry** after the correction.
 
+## Loreforge 2: run the campaign from the wiki
+
+Loreforge 2 adds a campaign-runtime layer on top of the LaTeX/PDF workflow rather than replacing it. The canonical source remains ordinary LaTeX, while the live site can now change what each invited player knows and what the table is currently focused on.
+
+- **GM Session Mode:** start/end sessions, spotlight relevant lore and maps, reveal secrets, send discoveries, and surface handouts from a touch-friendly session dashboard.
+- **Player Session Mode:** a phone-first table screen with current location, spotlight lore, live discoveries, open mysteries, handouts, and previous-session recaps.
+- **Progressive lore:** select prose in the editor and press **Reveal** to create a web-only hidden/rumor/discovered/public block. Audience and expiry controls live in Campaign Control / GM Session Mode.
+- **Timeline + world calendar:** maintain eras, wars, reigns, discoveries, festivals, custom months/weekdays/moons, seasons, and the current in-world date.
+- **Mystery boards:** pin clues and connect them with editable red-string relationships. Player boards render only clues and connections the player is allowed to know.
+- **Relationships and dossiers:** explicit `member of`, `worships`, `located in`, `enemy of`, etc. relationships feed profiles, backlinks, hover previews and the Lore Network; aliases redirect alternate names to the canonical entry.
+- **Notes and reading history:** players can keep private/party notes and bookmarks while the GM can keep private margin notes. Recent-reading and newly-discovered feeds help players return after a session.
+- **Handouts:** letters, parchment documents, newspapers, wanted posters, journals and visions can be delivered independently or attached to a session.
+- **Atlas layers + discovery fog:** overlay political/road/trade/religion/etc. layers, reveal regions as the party explores, and estimate map travel between discovered markers.
+- **Campaign Control:** health checks, snapshots/restore, templates, world settings, lore styling, session history and campaign state live in one GM workspace.
+- **Phone/iPad/PWA:** the player site has a bottom-tab mobile UI, touch Atlas controls and responsive reading/session layouts. The GM editor becomes Files / Editor / Preview panes on small screens. iPhone/iPad: Safari → Share → **Add to Home Screen**. Android/Chrome: **Install app** / Add to Home Screen.
+
+The editor's top application bar is persistent while working in long files, and the GM can still jump from a typo in the player Codex directly to the exact `.tex` source line and back.
+
 ## Repository layout
 
 ```text

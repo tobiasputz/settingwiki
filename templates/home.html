@@ -21,6 +21,14 @@
     <div class="scroll-cue"><span></span>SCROLL TO EXPLORE</div>
   </section>
 
+
+  {% if live_session %}
+  <section class="home-section live-session-home reveal"><a href="/session" class="live-session-banner"><div><span class="eyebrow"><i class="live-dot"></i> SESSION LIVE</span><h2>{% if live_session.session_number %}Session {{ live_session.session_number }} · {% endif %}{{ live_session.title }}</h2><p>{{ live_session.summary or 'The campaign is live. Open the player session screen for spotlight lore, handouts, and discoveries.' }}</p></div><strong>Enter session →</strong></a></section>
+  {% endif %}
+
+  {% if updates %}
+  <section class="home-section reveal"><div class="section-heading"><div><span class="eyebrow">WHAT'S NEW</span><h2>Recent discoveries</h2></div><a href="/updates" class="quiet-link">View discovery log →</a></div><div class="home-update-grid">{% for u in updates %}<a href="{% if u.target_type == 'lore' and u.target_key %}/wiki/{{ u.target_key }}{% else %}/updates{% endif %}"><small><time data-epoch="{{ u.created_at }}"></time></small><strong>{{ u.title }}</strong><p>{{ u.body }}</p></a>{% endfor %}</div></section>
+  {% endif %}
   {% if featured %}
   <section class="home-section featured-section reveal">
     <div class="section-heading"><div><span class="eyebrow">FEATURED LORE</span><h2>Threads worth following</h2></div><p>The GM can pin important people, places, revelations, and current story threads here.</p></div>

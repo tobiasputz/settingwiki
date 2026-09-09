@@ -1,17 +1,22 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Loreforge Editor</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Loreforge Editor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
-<link rel="stylesheet" href="/static/admin.css?v=140"></head>
+<link rel="stylesheet" href="/static/admin.css?v=250"></head>
 <body class="admin-body">
 <div class="admin-app">
   <header class="admin-topbar">
     <div class="admin-brand"><span class="brand-rune">✦</span><div><strong>Loreforge</strong><small>Campaign Studio</small></div></div>
     <div class="workspace-tabs"><button class="workspace-tab active" data-workspace="editor">Editor</button><button class="workspace-tab" data-workspace="codex">Codex Studio</button><button class="workspace-tab" data-workspace="maps">Maps</button><button class="workspace-tab" data-workspace="access">Access</button><button class="workspace-tab" data-workspace="project">Project</button></div>
-    <div class="top-actions"><span id="saveState" class="save-state">Ready</span><button id="returnToCodex" class="quiet-btn hidden">← Back to entry</button><button id="openPlayer" class="quiet-btn">↗ Player site</button><button id="cleanCompileBtn" class="quiet-btn" title="Clear auxiliary LaTeX state and rebuild">↻ Clean</button><button id="compileBtn" class="compile-btn">▶ Compile</button><button id="menuBtn" class="icon-btn">⋯</button></div>
+    <div class="top-actions"><a href="/gm/session" class="quiet-btn admin-mode-link">✦ GM Session</a><a href="/admin/campaign" class="quiet-btn admin-mode-link">Campaign Control</a><span id="saveState" class="save-state">Ready</span><button id="returnToCodex" class="quiet-btn hidden">← Back to entry</button><button id="openPlayer" class="quiet-btn">↗ Player site</button><button id="cleanCompileBtn" class="quiet-btn" title="Clear auxiliary LaTeX state and rebuild">↻ Clean</button><button id="compileBtn" class="compile-btn">▶ Compile</button><button id="menuBtn" class="icon-btn">⋯</button></div>
   </header>
+  <div class="mobile-editor-switcher" aria-label="Editor panes">
+    <button type="button" data-mobile-editor-pane="files">Files</button>
+    <button type="button" class="active" data-mobile-editor-pane="editor">Editor</button>
+    <button type="button" data-mobile-editor-pane="preview">Preview</button>
+  </div>
 
-  <section class="workspace active" id="workspace-editor">
+  <section class="workspace active mobile-view-editor" id="workspace-editor">
     <aside class="file-pane">
       <div class="pane-title"><span>PROJECT</span><div><button id="newFileBtn" title="New file">＋</button><button id="refreshFilesBtn" title="Refresh">↻</button></div></div>
       <div class="file-filter"><span>⌕</span><input id="fileFilter" placeholder="Filter files"></div>
@@ -20,7 +25,7 @@
     </aside>
     <div class="gutter" data-gutter="left"></div>
     <main class="editor-pane">
-      <div class="editor-tabs"><div id="activeFileTab" class="file-tab"><span class="tex-icon">TₑX</span><span id="activeFileName">No file open</span><i id="dirtyDot"></i></div><div class="editor-tools"><button id="insertArtworkBtn">Artwork</button><button id="insertSceneBtn" title="Wrap selected prose in a web-only atmospheric image panel">Scene</button><button id="insertPf2Btn" title="Insert PF2e feat, action, item, monster, or action-symbol markup">PF2e</button><button id="historyBtn">History</button><button id="toggleWrapBtn">Wrap</button></div></div>
+      <div class="editor-tabs"><div id="activeFileTab" class="file-tab"><span class="tex-icon">TₑX</span><span id="activeFileName">No file open</span><i id="dirtyDot"></i></div><div class="editor-tools"><button id="insertArtworkBtn">Artwork</button><button id="insertSceneBtn" title="Wrap selected prose in a web-only atmospheric image panel">Scene</button><button id="insertRevealBtn" title="Wrap selected prose as progressive player lore">Reveal</button><button id="insertPf2Btn" title="Insert PF2e feat, action, item, monster, or action-symbol markup">PF2e</button><button id="historyBtn">History</button><button id="toggleWrapBtn">Wrap</button></div></div>
       <div class="editor-wrap"><textarea id="sourceEditor" spellcheck="false" aria-label="LaTeX source"></textarea></div>
       <div class="editor-statusbar"><span id="cursorState">Ln 1, Col 1</span><span>UTF-8</span><span>LaTeX</span><span id="autosaveLabel">Autosave on</span></div>
     </main>
@@ -121,6 +126,13 @@
         <label class="check-row"><input id="markerVisible" type="checkbox" checked> Visible to players</label>
         <button type="submit" class="compile-btn">Save location</button><button type="button" id="deleteMarkerBtn" class="danger-btn">Delete location</button>
       </form>
+      <div class="pane-title map-layer-title"><span>MAP LAYERS</span><button id="addMapLayerBtn">＋</button></div>
+      <div class="map-layer-admin-help">Political borders, roads, religions, trade routes, climate, ruins, and other transparent overlays.</div>
+      <div id="mapLayerAdminList" class="map-layer-admin-list"></div>
+      <input id="mapLayerUpload" class="hidden" type="file" accept=".png,.jpg,.jpeg,.webp">
+      <div class="pane-title map-layer-title"><span>DISCOVERY FOG</span><button id="addFogRegionBtn">＋</button></div>
+      <div class="map-layer-admin-help">Add rectangular fog regions quickly, then reveal them from this panel as players explore.</div>
+      <div id="mapFogAdminList" class="map-layer-admin-list"></div>
     </aside>
   </section>
 
@@ -168,6 +180,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/stex/stex.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
-<script src="/static/fantasy-map-effects.js?v=140"></script>
-<script src="/static/admin.js?v=140"></script>
+<script src="/static/fantasy-map-effects.js?v=250"></script>
+<script src="/static/admin.js?v=250"></script>
 </body></html>

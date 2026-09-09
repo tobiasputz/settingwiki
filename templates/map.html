@@ -6,42 +6,26 @@
     <a href="/" class="atlas-back">← Atlas</a>
     <div class="atlas-title"><span class="eyebrow">INTERACTIVE MAP</span><h1>{{ map.name }}</h1></div>
     <div class="atlas-controls">
-      <button data-map-locations title="Show location legend">⌖</button>
-      <button data-map-zoom="out" title="Zoom out">−</button>
-      <span id="zoomLevel">100%</span>
-      <button data-map-zoom="in" title="Zoom in">+</button>
-      <button data-map-reset title="Fit map">⌂</button>
+      {% if map.layers %}<button data-map-layers title="Map layers">◫</button>{% endif %}
+      <button data-map-travel title="Travel between locations">⌁</button>
+      <button data-map-locations title="Show locations">⌖</button>
+      <button data-map-zoom="out" title="Zoom out">−</button><span id="zoomLevel">100%</span><button data-map-zoom="in" title="Zoom in">+</button><button data-map-reset title="Fit map">⌂</button>
     </div>
   </div>
   <div class="atlas-stage" id="atlasStage">
     <div class="atlas-transform" id="atlasTransform">
       <img id="atlasImage" src="/uploads/{{ map.image_path }}" alt="{{ map.name }}" draggable="false">
-      <div class="atlas-map-grid" id="atlasMapGrid"></div>
-      <div id="atlasMarkers" class="atlas-markers"></div>
+      <div id="atlasLayerStack" class="atlas-layer-stack">{% for layer in map.layers %}<img class="atlas-overlay-layer" data-layer-id="{{ layer.id }}" src="/uploads/{{ layer.image_path }}" alt="" draggable="false" style="opacity:{{ layer.opacity }};z-index:{{ 5 + loop.index }}">{% endfor %}</div>
+      <svg id="atlasFog" class="atlas-fog-regions" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{% for fog in map.fog_regions %}{% if fog.points %}<polygon class="fog-region style-{{ fog.style }}" points="{% for pt in fog.points %}{{ pt[0]*100 }},{{ pt[1]*100 }} {% endfor %}"><title>{{ fog.title }}</title></polygon>{% endif %}{% endfor %}</svg>
+      <div class="atlas-map-grid" id="atlasMapGrid"></div><div id="atlasMarkers" class="atlas-markers"></div>
     </div>
-    <canvas id="effectsCanvas" class="atlas-effects-canvas" aria-hidden="true"></canvas>
-    <div class="atlas-atmosphere" aria-hidden="true"></div>
-    <div class="atlas-vignette" aria-hidden="true"></div>
-    <div class="atlas-compass" data-map-compass aria-hidden="true"><span>N</span><i>✦</i></div>
-    <div class="atlas-location-panel" id="atlasLocationPanel" aria-label="Map locations">
-      <div class="atlas-location-head"><strong>Locations</strong><button id="closeLocationPanel" aria-label="Close">×</button></div>
-      <div class="atlas-location-search"><span>⌕</span><input id="atlasLocationSearch" placeholder="Find a place"></div>
-      <div id="atlasLegend" class="atlas-legend"></div>
-      <div class="atlas-location-subhead">Map markers</div><div id="atlasLocationList" class="atlas-location-list"></div>
-    </div>
+    <canvas id="effectsCanvas" class="atlas-effects-canvas" aria-hidden="true"></canvas><div class="atlas-atmosphere" aria-hidden="true"></div><div class="atlas-vignette" aria-hidden="true"></div><div class="atlas-compass" data-map-compass aria-hidden="true"><span>N</span><i>✦</i></div>
+    <div class="atlas-location-panel" id="atlasLocationPanel" aria-label="Map locations"><div class="atlas-location-head"><strong>Locations</strong><button id="closeLocationPanel" aria-label="Close">×</button></div><div class="atlas-location-search"><span>⌕</span><input id="atlasLocationSearch" placeholder="Find a place"></div><div id="atlasLegend" class="atlas-legend"></div><div class="atlas-location-subhead">Map markers</div><div id="atlasLocationList" class="atlas-location-list"></div></div>
+    <div class="atlas-layer-panel" id="atlasLayerPanel"><div class="atlas-location-head"><strong>Map layers</strong><button id="closeLayerPanel">×</button></div><p>Overlay the world with political borders, roads, religion, trade, climate, ruins, and other cartographic views.</p><div id="atlasLayerList">{% for layer in map.layers %}<label class="atlas-layer-toggle"><input type="checkbox" checked data-layer-toggle="{{ layer.id }}"><span></span><div><strong>{{ layer.name }}</strong><small>{{ layer.kind|replace('_',' ') }}</small></div></label>{% endfor %}</div></div>
+    <div class="atlas-travel-panel" id="atlasTravelPanel"><div class="atlas-location-head"><strong>Travel estimate</strong><button id="closeTravelPanel">×</button></div><p>Select two discovered locations. Distance is estimated from the map scale configured by the GM.</p><label>From<select id="travelFrom"><option value="">Choose location</option>{% for m in map.markers %}<option value="{{ m.id }}">{{ m.title }}</option>{% endfor %}</select></label><label>To<select id="travelTo"><option value="">Choose location</option>{% for m in map.markers %}<option value="{{ m.id }}">{{ m.title }}</option>{% endfor %}</select></label><button id="calculateTravel" class="primary-button">Calculate route</button><div id="travelResult" class="travel-result"></div></div>
     <div class="atlas-help">Drag to explore · wheel or pinch to zoom · click a marker for lore</div>
   </div>
-  <aside class="marker-drawer" id="markerDrawer">
-    <button id="closeMarker" aria-label="Close">×</button>
-    <div class="marker-drawer-icon" id="markerDrawerIcon">✦</div>
-    <span class="eyebrow" id="markerKind"></span>
-    <h2 id="markerTitle">Location</h2>
-    <p id="markerBody"></p>
-    <a id="markerLink" class="primary-button" href="#">Read codex entry →</a>
-  </aside>
+  <aside class="marker-drawer" id="markerDrawer"><button id="closeMarker" aria-label="Close">×</button><div class="marker-drawer-icon" id="markerDrawerIcon">✦</div><span class="eyebrow" id="markerKind"></span><h2 id="markerTitle">Location</h2><p id="markerBody"></p><a id="markerLink" class="primary-button" href="#">Read codex entry →</a></aside>
 </main>
 {% endblock %}
-{% block scripts %}
-<script src="/static/fantasy-map-effects.js?v=140"></script>
-<script src="/static/map.js?v=140"></script>
-{% endblock %}
+{% block scripts %}<script src="/static/fantasy-map-effects.js?v=250"></script><script src="/static/map.js?v=250"></script>{% endblock %}

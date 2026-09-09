@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Timeline · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="timeline-shell">
+  <header class="timeline-hero"><span class="eyebrow">{{ calendar_name|upper }}</span><h1>The chronicle</h1><p>History, discoveries, reigns, wars, journeys, and turning points of the setting.</p>{% if current_date %}<div class="campaign-date-marker"><small>CURRENT CAMPAIGN DATE</small><strong>{{ current_date }}</strong></div>{% endif %}</header>
+  <div class="timeline-filterbar"><button class="active" data-timeline-kind="all">All</button>{% for k in events|map(attribute='kind')|unique %}<button data-timeline-kind="{{ k }}">{{ k|replace('_',' ')|title }}</button>{% endfor %}</div>
+  <section class="chronicle" id="chronicle">{% for e in events %}<article class="chronicle-event" data-kind="{{ e.kind }}" id="event-{{ e.id }}"><div class="chronicle-axis"><i></i><span>{{ e.date_label or 'Undated' }}</span></div><div class="chronicle-card">{% if e.image_url %}<div class="chronicle-image" style="background-image:url('{{ e.image_url }}')"></div>{% endif %}<small>{{ e.kind|replace('_',' ')|upper }}</small><h2>{{ e.title }}</h2><p>{{ e.body }}</p>{% if e.page_slug %}<a href="/wiki/{{ e.page_slug }}">Read related lore →</a>{% endif %}</div></article>{% else %}<div class="timeline-empty"><span>⌛</span><h2>No events have been placed on the timeline yet.</h2><p>The GM can add events from Campaign Control without changing the LaTeX source.</p></div>{% endfor %}</section>
+</main>
+<script>document.querySelectorAll('[data-timeline-kind]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-timeline-kind]').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelectorAll('.chronicle-event').forEach(e=>e.hidden=b.dataset.timelineKind!=='all'&&e.dataset.kind!==b.dataset.timelineKind)})</script>
+{% endblock %}

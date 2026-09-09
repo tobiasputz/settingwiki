@@ -1,81 +1,32 @@
 {% extends "base.html" %}
 {% block title %}{{ page.title }} · {{ wiki.title }}{% endblock %}
 {% block body %}
-{% set pres = page.presentation or {} %}
-<div class="reading-shell layout-{{ pres.article_layout or 'standard' }}" data-page-slug="{{ page.slug }}" data-page-title="{{ page.title }}" data-page-chapter="{{ page.chapter or 'Setting' }}" data-page-image="{{ pres.display_toc_image_url or pres.hero_image_url or '' }}">
-  {% if pres.background_image_url %}
-  <div class="lore-page-background" aria-hidden="true" style="--page-bg:url('{{ pres.background_image_url }}');--page-bg-opacity:{{ pres.background_opacity or 0.16 }};--page-bg-x:{{ pres.background_x or 50 }}%;--page-bg-y:{{ pres.background_y or 50 }}%"></div>
-  {% endif %}
-  <aside class="codex-sidebar" data-codex-sidebar>
-    <div class="sidebar-sticky" data-sidebar-scroll>
-      <a class="back-home" href="/">← World overview</a>
-      {% for category in wiki.categories %}
-      <div class="sidebar-group {% if category.title == page.chapter %}active-group{% endif %}" data-sidebar-group="{{ category.slug }}">
-        <button type="button" class="sidebar-label" data-sidebar-toggle aria-expanded="{{ 'true' if category.title == page.chapter else 'false' }}">
-          <span>{{ category.title }}</span><i>⌄</i>
-        </button>
-        <div class="sidebar-links">
-        {% for p in category.pages %}
-          <a href="/wiki/{{ p.slug }}" class="{% if p.slug == page.slug %}active{% endif %}" data-codex-entry data-entry-slug="{{ p.slug }}">
-            <span>{{ p.title }}</span>{% if p.presentation and p.presentation.visibility == 'teaser' %}<small title="Teaser">◇</small>{% endif %}
-          </a>
-        {% endfor %}
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  </aside>
-  <main class="lore-main">
-    <div class="reading-progress" id="readingProgress"></div>
-    <article class="lore-article reveal {% if page.level == 'entity' %}entity-article{% endif %} hero-style-{{ pres.hero_style or 'banner' }}" data-lore-article>
-      {% if pres.hero_image_url and (pres.hero_style or 'banner') != 'minimal' %}
-        {% if pres.hero_style == 'split' or pres.hero_style == 'portrait' %}
-        <header class="article-header article-header-split {% if pres.hero_style == 'portrait' %}article-header-portrait{% endif %}">
-          <div class="article-header-copy"><div class="eyebrow">{{ page.chapter or 'SETTING' }}</div><h1>{{ page.title }}</h1></div>
-          <div class="article-hero-media" style="background-image:url('{{ pres.hero_image_url }}')"></div>
-        </header>
-        {% else %}
-        <header class="article-header article-header-banner" style="--hero-image:url('{{ pres.hero_image_url }}');--hero-x:{{ pres.background_x or 50 }}%;--hero-y:{{ pres.background_y or 50 }}%">
-          <div class="article-header-copy"><div class="eyebrow">{{ page.chapter or 'SETTING' }}</div><h1>{{ page.title }}</h1></div>
-        </header>
-        {% endif %}
-      {% else %}
-      <header class="article-header"><div class="eyebrow">{{ page.chapter or 'SETTING' }}</div><h1>{{ page.title }}</h1></header>
-      {% endif %}
-      <div class="article-actions">
-        <button type="button" class="article-bookmark" data-bookmark-page><span>☆</span> Save to journal</button>
-        <button type="button" class="article-copy-link" data-copy-page-link>⌁ Copy link</button>
-        {% if admin_view %}<a class="article-edit-source" href="#" data-gm-edit-source data-source-file="{{ page.source_file }}" data-source-line="{{ page.source_line }}">✎ Edit this entry</a>{% endif %}
-      </div>
+{% set pres = page.presentation or {} %}{% set style = page.entity_style or {} %}
+<div class="reading-shell layout-{{ pres.article_layout or 'standard' }} dossier-{{ page.dossier_type or 'lore' }}" data-page-slug="{{ page.slug }}" data-page-title="{{ page.title }}" data-page-chapter="{{ page.chapter or 'Setting' }}" data-page-image="{{ pres.display_toc_image_url or pres.hero_image_url or '' }}">
+  {% if pres.background_image_url %}<div class="lore-page-background" aria-hidden="true" style="--page-bg:url('{{ pres.background_image_url }}');--page-bg-opacity:{{ pres.background_opacity or 0.16 }};--page-bg-x:{{ pres.background_x or 50 }}%;--page-bg-y:{{ pres.background_y or 50 }}%"></div>{% endif %}
+  <aside class="codex-sidebar" data-codex-sidebar><div class="sidebar-sticky" data-sidebar-scroll><a class="back-home" href="/">← World overview</a>{% for category in wiki.categories %}<div class="sidebar-group {% if category.title == page.chapter %}active-group{% endif %}" data-sidebar-group="{{ category.slug }}"><button type="button" class="sidebar-label" data-sidebar-toggle aria-expanded="{{ 'true' if category.title == page.chapter else 'false' }}"><span>{{ category.title }}</span><i>⌄</i></button><div class="sidebar-links">{% for p in category.pages %}<a href="/wiki/{{ p.slug }}" class="{% if p.slug == page.slug %}active{% endif %}" data-codex-entry data-entry-slug="{{ p.slug }}"><span>{{ p.title }}</span>{% if p.presentation and p.presentation.visibility == 'teaser' %}<small title="Teaser">◇</small>{% endif %}</a>{% endfor %}</div></div>{% endfor %}</div></aside>
+  <main class="lore-main"><div class="reading-progress" id="readingProgress"></div>
+    <article class="lore-article reveal {% if page.level == 'entity' %}entity-article{% endif %} hero-style-{{ pres.hero_style or 'banner' }}" data-lore-article {% if style.accent %}style="--entity-accent:{{ style.accent }}"{% endif %}>
+      <nav class="smart-breadcrumbs"><a href="/">Codex</a><span>›</span><a href="/#codex">{{ page.chapter or 'Setting' }}</a>{% if map_locations %}<span>›</span><a href="/atlas/{{ map_locations[0].map.slug }}?focus={{ map_locations[0].marker.id }}">⌖ {{ map_locations[0].map.name }}</a>{% endif %}</nav>
+      {% if pres.hero_image_url and (pres.hero_style or 'banner') != 'minimal' %}{% if pres.hero_style in ['split','portrait'] %}<header class="article-header article-header-split {% if pres.hero_style == 'portrait' %}article-header-portrait{% endif %}"><div class="article-header-copy">{% if style.crest_url %}<img class="entity-crest" src="{{ style.crest_url }}" alt="">{% endif %}<div class="eyebrow">{{ (page.dossier_type or page.chapter or 'SETTING')|upper }}</div><h1>{{ page.title }}</h1>{% if style.motif %}<p class="entity-motif">{{ style.motif }}</p>{% endif %}</div><div class="article-hero-media" style="background-image:url('{{ pres.hero_image_url }}')"></div></header>{% else %}<header class="article-header article-header-banner" style="--hero-image:url('{{ pres.hero_image_url }}');--hero-x:{{ pres.background_x or 50 }}%;--hero-y:{{ pres.background_y or 50 }}%"><div class="article-header-copy">{% if style.crest_url %}<img class="entity-crest" src="{{ style.crest_url }}" alt="">{% endif %}<div class="eyebrow">{{ (page.dossier_type or page.chapter or 'SETTING')|upper }}</div><h1>{{ page.title }}</h1>{% if style.motif %}<p class="entity-motif">{{ style.motif }}</p>{% endif %}</div></header>{% endif %}{% else %}<header class="article-header">{% if style.crest_url %}<img class="entity-crest" src="{{ style.crest_url }}" alt="">{% endif %}<div class="eyebrow">{{ (page.dossier_type or page.chapter or 'SETTING')|upper }}</div><h1>{{ page.title }}</h1>{% if style.motif %}<p class="entity-motif">{{ style.motif }}</p>{% endif %}</header>{% endif %}
+      <div class="article-actions"><button type="button" class="article-bookmark" data-bookmark-page><span>☆</span> Save to journal</button><button type="button" class="article-copy-link" data-copy-page-link>⌁ Copy link</button><button type="button" class="article-copy-link" data-share-qr="/wiki/{{ page.slug }}">▦ QR</button>{% if style.ambient_audio_url %}<button type="button" class="article-copy-link" data-ambient-audio="{{ style.ambient_audio_url }}">♪ Ambience</button>{% endif %}{% if admin_view %}<a class="article-edit-source" href="#" data-gm-edit-source data-source-file="{{ page.source_file }}" data-source-line="{{ page.source_line }}">✎ Edit this entry</a>{% endif %}</div>
       <div class="ornament"><span>✦</span></div>
-      {% if not page_locked and page.outline and page.outline|length >= 2 %}
-      <nav class="article-outline" data-article-outline aria-label="On this page">
-        <span class="eyebrow">ON THIS PAGE</span>
-        <div>{% for item in page.outline %}<a href="#{{ item.id }}" data-outline-link="{{ item.id }}" class="outline-level-{{ item.level }}"{% if item.source_file %} data-source-file="{{ item.source_file }}" data-source-line="{{ item.source_line }}"{% endif %}>{{ item.title }}</a>{% endfor %}</div>
-      </nav>
-      {% endif %}
-      {% if page_locked %}
-      <section class="lore-teaser-lock">
-        <div class="teaser-sigil">◇</div><span class="eyebrow">UNDISCOVERED LORE</span><h2>You have heard whispers, but not the whole tale.</h2><p>{{ page.excerpt }}</p><small>The GM can reveal this entry from Codex Studio.</small>
-      </section>
-      {% else %}
-      <div class="lore-prose">{{ page.html|safe }}</div>
-      {% endif %}
+      {% if not page_locked and page.outline and page.outline|length >= 2 %}<nav class="article-outline" data-article-outline aria-label="On this page"><span class="eyebrow">ON THIS PAGE</span><div>{% for item in page.outline %}<a href="#{{ item.id }}" data-outline-link="{{ item.id }}" class="outline-level-{{ item.level }}"{% if item.source_file %} data-source-file="{{ item.source_file }}" data-source-line="{{ item.source_line }}"{% endif %}>{{ item.title }}</a>{% endfor %}</div></nav>{% endif %}
+      {% if page_locked %}<section class="lore-teaser-lock"><div class="teaser-sigil">◇</div><span class="eyebrow">UNDISCOVERED LORE</span><h2>You have heard whispers, but not the whole tale.</h2><p>{{ page.excerpt }}</p><small>The GM controls what the party has discovered.</small></section>{% else %}<div class="lore-prose">{{ page.html|safe }}</div>{% endif %}
 
-      {% if not page_locked and (page.related or page.backlinks) %}
-      <section class="lore-connections">
-        {% if page.related %}<div><span class="eyebrow">RELATED LORE</span><h3>Continue the thread</h3><div class="connection-grid">{% for item in page.related %}<a href="/wiki/{{ item.slug }}"><small>{{ item.chapter or 'Setting' }}</small><strong>{{ item.title }}</strong><span>→</span></a>{% endfor %}</div></div>{% endif %}
-        {% if page.backlinks %}<details class="backlink-panel"><summary>Referenced elsewhere in the codex <span>{{ page.backlinks|length }}</span></summary><div>{% for item in page.backlinks %}<a href="/wiki/{{ item.slug }}">{{ item.title }}</a>{% endfor %}</div></details>{% endif %}
-      </section>
-      {% endif %}
+      {% if not page_locked and page.variants %}<section class="knowledge-variants"><span class="eyebrow">WHAT IS KNOWN</span>{% for v in page.variants %}<article><h3>{{ v.label or 'Accounts differ' }}</h3><p>{{ v.common_text }}</p>{% if admin_view or v.state in ['truth','discovered','public'] %}<div class="variant-truth"><small>{{ 'GM TRUTH' if admin_view else 'DISCOVERED TRUTH' }}</small><p>{{ v.truth_text }}</p></div>{% endif %}</article>{% endfor %}</section>{% endif %}
 
-      <nav class="article-pagination">
-        {% if prev_page %}<a href="/wiki/{{ prev_page.slug }}"><small>PREVIOUS</small><strong>← {{ prev_page.title }}</strong></a>{% else %}<span></span>{% endif %}
-        {% if next_page %}<a class="next" href="/wiki/{{ next_page.slug }}"><small>NEXT</small><strong>{{ next_page.title }} →</strong></a>{% endif %}
-      </nav>
-    </article>
-    <div class="source-whisper">Source: {{ page.source_file }} · line {{ page.source_line }}</div>
-  </main>
-  {% if admin_view %}<a class="gm-edit-fab" href="#" data-gm-edit-source data-source-file="{{ page.source_file }}" data-source-line="{{ page.source_line }}"><span>✎</span><strong>Edit source</strong><small>{{ page.source_file }} · line {{ page.source_line }}</small></a>{% endif %}
+      {% if page.explicit_relationships %}<section class="semantic-relationships"><div class="section-mini-head"><span class="eyebrow">RELATIONSHIPS</span><h3>Connections</h3></div><div class="relationship-grid">{% for r in page.explicit_relationships %}<a href="/wiki/{{ r.other_slug }}"><small>{{ r.label or r.relation }}</small><strong>{{ r.other_title }}</strong><span>→</span></a>{% endfor %}</div></section>{% endif %}
+      {% if map_locations %}<section class="location-dossier"><div class="section-mini-head"><span class="eyebrow">ATLAS</span><h3>Where this lore lives</h3></div>{% for loc in map_locations %}<a class="location-map-chip" href="/atlas/{{ loc.map.slug }}?focus={{ loc.marker.id }}"><span>⌖</span><div><small>{{ loc.map.name }}</small><strong>{{ loc.marker.title }}</strong></div><i>Open map →</i></a>{% endfor %}</section>{% endif %}
+      {% if appearances %}<section class="session-appearances"><div class="section-mini-head"><span class="eyebrow">CAMPAIGN JOURNAL</span><h3>Appeared in sessions</h3></div><div>{% for s in appearances %}<a href="/updates"><small>{% if s.session_number %}SESSION {{ s.session_number }}{% endif %} {{ s.session_date }}</small><strong>{{ s.title }}</strong></a>{% endfor %}</div></section>{% endif %}
+
+      {% if not page_locked and page.gallery and page.gallery|length >= 2 %}<section class="entry-gallery"><div class="section-mini-head"><span class="eyebrow">GALLERY</span><h3>Images from this entry</h3></div><div class="entry-gallery-grid">{% for image in page.gallery %}<button type="button" class="gallery-tile lore-image-zoom"><img src="{{ image.url }}" alt="{{ page.title }} artwork" loading="lazy"></button>{% endfor %}</div></section>{% endif %}
+
+      {% if not page_locked and (page.related or page.backlinks) %}<section class="lore-connections">{% if page.related %}<div><span class="eyebrow">RELATED LORE</span><h3>Continue the thread</h3><div class="connection-grid">{% for item in page.related %}<a href="/wiki/{{ item.slug }}"><small>{{ item.chapter or 'Setting' }}</small><strong>{{ item.title }}</strong><span>→</span></a>{% endfor %}</div></div>{% endif %}{% if page.backlinks %}<details class="backlink-panel"><summary>Referenced elsewhere in the codex <span>{{ page.backlinks|length }}</span></summary><div>{% for item in page.backlinks %}<a href="/wiki/{{ item.slug }}">{{ item.title }}</a>{% endfor %}</div></details>{% endif %}</section>{% endif %}
+
+      <section class="annotation-section"><div class="section-mini-head"><span class="eyebrow">MARGIN NOTES</span><h3>Your notes</h3><p>Select text anywhere above to attach a note.</p></div><div data-annotation-tray class="annotation-tray"><div class="empty-mini">Loading notes…</div></div></section>
+      <nav class="article-pagination">{% if prev_page %}<a href="/wiki/{{ prev_page.slug }}"><small>PREVIOUS</small><strong>← {{ prev_page.title }}</strong></a>{% else %}<span></span>{% endif %}{% if next_page %}<a class="next" href="/wiki/{{ next_page.slug }}"><small>NEXT</small><strong>{{ next_page.title }} →</strong></a>{% endif %}</nav>
+    </article><div class="source-whisper">Source: {{ page.source_file }} · line {{ page.source_line }}</div>
+  </main>{% if admin_view %}<a class="gm-edit-fab" href="#" data-gm-edit-source data-source-file="{{ page.source_file }}" data-source-line="{{ page.source_line }}"><span>✎</span><strong>Edit source</strong><small>{{ page.source_file }} · line {{ page.source_line }}</small></a>{% endif %}
 </div>
 {% endblock %}

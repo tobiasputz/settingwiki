@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Handouts · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="handouts-shell"><header class="compact-page-hero"><span class="eyebrow">IN-WORLD DOCUMENTS</span><h1>The party's handouts</h1><p>Letters, contracts, notices, journals, newspapers, sketches, and other things your characters have actually seen.</p></header>
+<div class="handout-library">{% for h in handouts %}<a href="/handout/{{ h.slug }}" class="handout-cover kind-{{ h.kind }}" {% if h.image_url %}style="--handout-art:url('{{ h.image_url }}')"{% endif %}><div class="handout-cover-art"></div><span>{{ '✉' if h.kind in ['letter','parchment'] else '▧' }}</span><small>{{ h.kind|replace('_',' ')|upper }}</small><h2>{{ h.title }}</h2><p>{{ h.body|striptags|truncate(120) }}</p><i>Open document →</i></a>{% else %}<div class="timeline-empty"><h2>No handouts have been revealed yet.</h2></div>{% endfor %}</div></main>
+{% endblock %}

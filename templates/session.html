@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Session · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="session-player-shell" data-session-pulse="{{ session.id if session else 0 }}" data-session-updated="{{ session.updated_at if session else 0 }}">
+  <section class="session-hero {% if session and session.status == 'live' %}is-live{% endif %}">
+    <div class="session-hero-copy">
+      <span class="eyebrow">{% if session and session.status == 'live' %}<i class="live-dot"></i> LIVE CAMPAIGN SESSION{% else %}CAMPAIGN TABLE{% endif %}</span>
+      {% if session %}<h1>{% if session.session_number %}Session {{ session.session_number }} · {% endif %}{{ session.title }}</h1><p>{{ session.summary or 'Your GM has opened the session screen. New discoveries, handouts, and spotlight lore will appear here.' }}</p>{% else %}<h1>The table is quiet.</h1><p>No session is live right now. Your Codex, discoveries, and campaign history are still available.</p>{% endif %}
+      <div class="session-player-meta">{% if player %}<span>Playing as <strong>{{ player.label }}</strong></span>{% endif %}{% if session and session.session_date %}<span>{{ session.session_date }}</span>{% endif %}{% if session and session.current_location_slug %}<a href="/wiki/{{ session.current_location_slug }}">⌖ Current location</a>{% endif %}</div>
+    </div>
+    {% if session and session.spotlight_map %}<a class="session-map-spotlight" href="/atlas/{{ session.spotlight_map.slug }}" style="--session-map:url('/uploads/{{ session.spotlight_map.image_path }}')"><span>OPEN SPOTLIGHT MAP</span><strong>{{ session.spotlight_map.name }}</strong><i>→</i></a>{% endif %}
+  </section>
+
+  {% if session and session.lore_pages %}
+  <section class="session-section"><div class="section-heading compact"><div><span class="eyebrow">AT THE TABLE</span><h2>Spotlight lore</h2></div><p>People, places, and threads relevant to the current session.</p></div>
+    <div class="session-lore-strip">{% for p in session.lore_pages %}<a href="/wiki/{{ p.slug }}" class="session-lore-card" {% if p.presentation.auto_image_url or p.presentation.hero_image_url %}style="--card-art:url('{{ p.presentation.hero_image_url or p.presentation.auto_image_url }}')"{% endif %}><small>{{ p.chapter or 'Lore' }}</small><strong>{{ p.title }}</strong><p>{{ p.excerpt }}</p><i>Open →</i></a>{% endfor %}</div>
+  </section>{% endif %}
+
+  <section class="session-grid">
+    <div class="session-panel"><div class="panel-title"><span>✦</span><div><small>LIVE FEED</small><h2>New discoveries</h2></div><a href="/updates">All →</a></div><div class="session-feed">{% for u in updates[:8] %}<article><time data-epoch="{{ u.created_at }}"></time><strong>{{ u.title }}</strong><p>{{ u.body }}</p>{% if u.target_type == 'lore' and u.target_key %}<a href="/wiki/{{ u.target_key }}">Open lore →</a>{% endif %}</article>{% else %}<div class="empty-mini">Nothing new has been revealed yet.</div>{% endfor %}</div></div>
+    <div class="session-panel"><div class="panel-title"><span>◇</span><div><small>INVESTIGATION</small><h2>Open mysteries</h2></div><a href="/mysteries">Board →</a></div><div class="session-mystery-list">{% for m in mysteries if m.status == 'open' %}<a href="/mysteries#{{ m.slug }}"><span>?</span><div><strong>{{ m.title }}</strong><small>{{ m.pins|length }} clues pinned</small></div><i>→</i></a>{% else %}<div class="empty-mini">No shared mysteries yet.</div>{% endfor %}</div></div>
+  </section>
+
+  {% if session and session.handouts %}<section class="session-section"><div class="section-heading compact"><div><span class="eyebrow">HANDED TO THE PARTY</span><h2>Session handouts</h2></div></div><div class="handout-mini-grid">{% for h in session.handouts %}<a href="/handout/{{ h.slug }}" class="handout-mini kind-{{ h.kind }}"><span>✉</span><strong>{{ h.title }}</strong><small>Open handout →</small></a>{% endfor %}</div></section>{% endif %}
+
+  {% if session_history %}<section class="session-section session-history-section"><div class="section-heading compact"><div><span class="eyebrow">CAMPAIGN JOURNAL</span><h2>Previous sessions</h2></div><p>Recaps stay connected to the lore that appeared at the table.</p></div><div class="session-history-grid">{% for s in session_history %}<article><small>{% if s.session_number %}SESSION {{ s.session_number }} · {% endif %}{{ s.session_date }}</small><h3>{{ s.title }}</h3><p>{{ s.summary or 'No player-facing recap was recorded.' }}</p><div>{% for l in s.lore[:5] %}<a href="/wiki/{{ l.page_slug }}">{{ l.page_slug|replace('-', ' ')|title }}</a>{% endfor %}</div></article>{% endfor %}</div></section>{% endif %}
+
+  <section class="session-quick-actions"><a href="/">⌂<span><strong>Codex</strong><small>Browse known lore</small></span></a><a href="/timeline">⌛<span><strong>Timeline</strong><small>Campaign history</small></span></a><a href="/calendar">☾<span><strong>{{ calendar.name }}</strong><small>{{ calendar.current_date or 'World calendar' }}</small></span></a><a href="/handouts">✉<span><strong>Handouts</strong><small>Letters & props</small></span></a><a href="/network">⌘<span><strong>Lore Network</strong><small>See connections</small></span></a></section>
+</main>
+{% endblock %}

@@ -1,3 +1,19 @@
+# Loreforge 2.0.0 — living campaign platform
+
+- Added dedicated **GM Session Mode** and **Player Session Mode** with live session state, spotlight lore/maps, discoveries, handouts, recaps, current location, and session history.
+- Added **progressive lore** (hidden / rumor / discovered / public), party or player-specific audiences, temporary reveals, unreliable-knowledge variants, and an editor **Reveal** composer that wraps selected LaTeX prose without changing the canonical PDF.
+- Added campaign **Timeline** and configurable fantasy **World Calendar**, including festivals, moons, seasons, current campaign date, and lore-linked historical events.
+- Added semantic relationships, aliases/redirects, dossiers, heraldry/accent identities, galleries, backlinks, hover previews, and the interactive Lore Network.
+- Added player private/party annotations, GM-only notes, bookmarks, recent-reading trails, and a “what changed” discovery feed.
+- Added **Mystery Boards** with clue cards and editable red-string connections; player boards render those connections while GM-only clues/strings never leak through public endpoints.
+- Added immersive **Handouts** (letters, parchment, newspapers, wanted posters, journals/visions) plus session-linked delivery.
+- Expanded the Atlas with layers, discovery fog, travel estimates, and existing edge-locked animated fantasy atmosphere controls.
+- Added campaign health checks, source snapshots/restore, dynamic LaTeX entry templates, richer campaign-control dashboards, and session-centric GM workflows.
+- Added an installable **PWA** and purpose-built phone/iPad layouts: iOS/iPadOS supports Safari → Share → Add to Home Screen; Android/Chrome supports Install app. Player navigation becomes a touch-friendly bottom tab bar and admin/editor panes become switchable touch views. Offline campaign caching is explicit opt-in and isolated per invitation identity.
+- Kept **personal invitation links** as the default player access model, with revocation/rotation/device limits enforced across Codex, maps, search, media, sessions, and PWA-private content.
+- Made the GM editor toolbar/top bar persistent while editing long files; mobile/tablet editor controls remain sticky.
+- Added regression coverage for v2 privacy boundaries, session routes, PWA/mobile shell, mystery connections, progressive-lore rendering, maps, snapshots, and existing invitation/build behavior.
+
 ## 1.4.0 — personal invitation access + GM source bridge
 
 - Replaced the shared player-password assumption with **invitation-only access by default**. Every player can receive a unique signed bearer link from **Admin → Access**; there is no shared secret to distribute.
