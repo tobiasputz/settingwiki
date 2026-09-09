@@ -1,4 +1,4 @@
-# Loreforge — LaTeX-first interactive campaign wiki
+# Loreforge — LaTeX-first interactive campaign wiki V2
 
 Loreforge turns a normal multi-file LaTeX campaign project into **two synchronized views of the same setting**:
 
