@@ -52,7 +52,7 @@ from .living import (
     export_foundry_journal, create_portable_archive, validate_portable_archive_file, media_usage, replace_media_reference,
 )
 from .campaigns import (
-    list_campaigns, get_campaign, campaign_members, save_campaign, archive_campaign, make_default_campaign,
+    list_campaigns, get_campaign, campaign_members, save_campaign, archive_campaign, delete_campaign, make_default_campaign,
     set_campaign_members, invite_has_campaign, resolve_campaign_id, default_campaign_id,
 )
 from .scheduling import (
@@ -60,11 +60,20 @@ from .scheduling import (
 )
 from .semantic_search import semantic_search
 
+from .v5 import (
+    init_v5_db, list_follows, set_follow, followers_for_target, list_party_notes, save_party_note, delete_party_note,
+    investigation_board, save_investigation_node, delete_investigation_node, save_investigation_edge, delete_investigation_edge,
+    list_objectives, save_objective, delete_objective, character_milestones, save_character_milestone, delete_character_milestone,
+    save_rsvp, session_rsvps, get_preparation, save_preparation, list_prepared_sessions, map_discovery_states, set_map_discovery,
+    campaign_fog_regions, set_campaign_fog, notification_prefs, set_notification_pref, filter_notifications_for_prefs,
+)
+
 settings = load_settings()
 BUILD_LOCK = threading.Lock()
 init_db(settings)
 init_feature_db(settings)
 init_schedule_db(settings)
+init_v5_db(settings)
 seed_project(settings)
 
 app = FastAPI(title="Seeker", docs_url=None, redoc_url=None)
@@ -232,7 +241,7 @@ def ensure_built() -> dict:
     try:
         return load_wiki(settings)
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 4400}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 5000}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -556,7 +565,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 4400
+                    needs_build=int(existing.get("renderer_version") or 0) < 5000
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -729,10 +738,22 @@ def admin_campaign_default_api(request:Request,campaign_id:int):
     except ValueError as exc:raise HTTPException(400,str(exc))
 
 
-@app.delete("/api/admin/campaigns/{campaign_id}")
+@app.post("/api/admin/campaigns/{campaign_id}/archive")
 def admin_campaign_archive_api(request:Request,campaign_id:int):
     require_admin(request)
     try:return archive_campaign(settings,campaign_id)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete("/api/admin/campaigns/{campaign_id}")
+def admin_campaign_delete_api(request:Request,campaign_id:int):
+    require_admin(request)
+    try:
+        delete_campaign(settings,campaign_id)
+        # A deleted table can never remain the signed-session selection.
+        if int(request.session.get("campaign_id") or 0)==int(campaign_id):
+            request.session["campaign_id"]=default_campaign_id(settings)
+        return {"ok":True,"deleted":int(campaign_id)}
     except ValueError as exc:raise HTTPException(400,str(exc))
 
 
@@ -861,10 +882,32 @@ def map_page(request: Request, slug: str):
     wiki = _visible_wiki(request); map_data = get_map(settings, slug, public=True)
     if not map_data: raise HTTPException(404, "Map not found")
     map_data["layers"] = map_layers(settings, int(map_data["id"]), public=True)
-    map_data["fog_regions"] = fog_regions(settings, int(map_data["id"]), public=True)
+    cid=_active_campaign_id(request)
+    # Fog geometry is shared canon, while reveal state is table-specific in V5.
+    all_fog=fog_regions(settings, int(map_data["id"]), public=False)
+    map_data["fog_regions"] = campaign_fog_regions(settings,cid,all_fog,admin=is_gm(request))
+    discovery=map_discovery_states(settings,cid,[int(m.get("id")) for m in map_data.get("markers",[]) if m.get("id") is not None])
+    discovery_session_ids={int(r.get("first_session_id")) for r in discovery.values() if r.get("first_session_id")}
+    discovery_session_labels={}
+    if discovery_session_ids:
+        with connect(settings) as conn:
+            q=','.join('?' for _ in discovery_session_ids)
+            for r in conn.execute(f"SELECT id,session_number,title,session_date FROM campaign_sessions WHERE id IN ({q})",tuple(discovery_session_ids)).fetchall():
+                discovery_session_labels[int(r['id'])]=(f"Session {r['session_number']} · " if r['session_number'] else "")+str(r['title'] or r['session_date'] or 'Session')
+    for marker in map_data.get("markers",[]):
+        drow=discovery.get(int(marker.get("id") or 0)) or {}
+        marker["discovery_state"]=drow.get("state") or "discovered"
+        marker["first_session_id"]=drow.get("first_session_id")
+        marker["discovery_session_label"]=discovery_session_labels.get(int(drow.get("first_session_id") or 0),"")
+    if is_gm(request) and all_fog:
+        fog_ids=[int(r['id']) for r in all_fog]
+        q=','.join('?' for _ in fog_ids)
+        with connect(settings) as conn:
+            overrides={int(r['fog_region_id']):bool(r['revealed']) for r in conn.execute(f"SELECT fog_region_id,revealed FROM campaign_fog_reveals WHERE campaign_id=? AND fog_region_id IN ({q})",(cid,*fog_ids)).fetchall()}
+        for fog in map_data["fog_regions"]:fog["campaign_revealed"]=overrides.get(int(fog['id']),bool(fog.get('revealed')))
     if not is_gm(request):
-        kidx=knowledge_index(settings,_invite_id(request),campaign_id=_active_campaign_id(request))
-        map_data["markers"]=[m for m in map_data.get("markers",[]) if _knowledge_visible_from_index(kidx,"map_marker",f"{map_data['id']}:{m.get('id')}")[0]]
+        kidx=knowledge_index(settings,_invite_id(request),campaign_id=cid)
+        map_data["markers"]=[m for m in map_data.get("markers",[]) if m.get("discovery_state")!="unknown" and _knowledge_visible_from_index(kidx,"map_marker",f"{map_data['id']}:{m.get('id')}")[0]]
     else:
         kidx={}
     map_data["regions"] = map_regions(settings, int(map_data["id"]), admin=is_gm(request))
@@ -874,7 +917,8 @@ def map_page(request: Request, slug: str):
     map_data["history_max"] = max([float(h.get("end_sort") if h.get("end_sort") is not None else h.get("start_sort")) for r in map_data["regions"] for h in r.get("history",[]) if h.get("start_sort") is not None], default=0)
     map_data["world_width"] = float(get_setting(settings,"world_width","1000") or 1000)
     map_data["travel_speed"] = float(get_setting(settings,"travel_speed","40") or 40)
-    return templates.TemplateResponse("map.html", {"request": request, "wiki": wiki, "map": map_data, "maps": list_maps(settings,public=True)})
+    live=next((x for x in list_sessions(settings,campaign_id=cid) if x.get("status")=="live"),None)
+    return templates.TemplateResponse("map.html", {"request": request, "wiki": wiki, "map": map_data, "maps": list_maps(settings,public=True),"gm_view":is_gm(request),"live_session_id":(live or {}).get("id")})
 
 
 @app.get("/api/public/search")
@@ -959,39 +1003,78 @@ def service_worker():
 @app.get("/session", response_class=HTMLResponse)
 def player_session_screen(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
-    wiki = _visible_wiki(request); maps = list_maps(settings, public=True); iid=_invite_id(request); cid=_active_campaign_id(request); live = get_live_session(settings,invite_id=iid,admin=is_gm(request),campaign_id=cid)
-    by_slug = {p["slug"]: p for p in wiki.get("pages", [])}
-    if live:
-        live["lore_pages"] = [by_slug[x["page_slug"]] for x in live.get("lore", []) if x.get("page_slug") in by_slug]
-        live["spotlight_map"] = next((m for m in maps if m.get("slug") == live.get("spotlight_map_slug")), None)
-    invite = current_player_invite(request)
-    notes = []
-    history=[x for x in list_sessions(settings,public=True,invite_id=iid,campaign_id=cid) if x.get("status")=="ended"][-12:]
-    if not is_gm(request):
-        allowed={p.get("slug") for p in wiki.get("pages",[])}
-        if live: live["lore"]=[x for x in live.get("lore",[]) if x.get("page_slug") in allowed]
-        for row in history: row["lore"]=[x for x in row.get("lore",[]) if x.get("page_slug") in allowed]
-    mysteries=list_mysteries(settings, admin=is_gm(request),campaign_id=cid)[:6]
-    if not is_gm(request):
-        allowed={p.get("slug") for p in wiki.get("pages",[])}
-        for mystery in mysteries:
-            mystery["pins"]=[x for x in mystery.get("pins",[]) if not x.get("page_slug") or x.get("page_slug") in allowed]
-            pin_ids={x.get("id") for x in mystery["pins"]}
-            mystery["edges"]=[e for e in mystery.get("edges",[]) if e.get("source_pin") in pin_ids and e.get("target_pin") in pin_ids]
-    can_author = is_gm(request) or (not archive_mode() and bool(current_player_invite(request)) and player_role(request) == "player")
-    session_characters,active_character,character_selection_made=_session_character_context(request,live)
+    wiki=_visible_wiki(request);maps=list_maps(settings,public=True);iid=_invite_id(request);cid=_active_campaign_id(request);gm=is_gm(request)
+    live=get_live_session(settings,invite_id=iid,admin=gm,campaign_id=cid)
+    all_sessions=list_sessions(settings,public=False,invite_id=iid,campaign_id=cid)
+    planned=[dict(x) for x in all_sessions if x.get('status')=='planned']
+    # Planned sessions are visible to members for RSVP, but never expose GM-only notes.
+    for row in planned: row.pop('gm_notes',None)
+    upcoming=planned[0] if planned else None
+    session=live or upcoming
+    by_slug={p['slug']:p for p in wiki.get('pages',[])}
+    if session:
+        session['lore_pages']=[by_slug[x['page_slug']] for x in session.get('lore',[]) if x.get('page_slug') in by_slug]
+        session['spotlight_map']=next((m for m in maps if m.get('slug')==session.get('spotlight_map_slug')),None)
+        # Planned sessions loaded through list_sessions do not carry handouts.
+        if 'handouts' not in session:session['handouts']=[]
+    allowed={p.get('slug') for p in wiki.get('pages',[])}
+    if session and not gm:session['lore']=[x for x in session.get('lore',[]) if x.get('page_slug') in allowed]
+    ended=[x for x in all_sessions if x.get('status')=='ended']
+    history=list(reversed(ended[-12:]))
+    if not gm:
+        for row in history:row['lore']=[x for x in row.get('lore',[]) if x.get('page_slug') in allowed]
+    previous=history[0] if history else None
+    invite=current_player_invite(request)
+    can_author=gm or (not archive_mode() and bool(invite) and player_role(request)=='player')
+    session_characters,active_character,character_selection_made=_session_character_context(request,session)
     journal_character_filter=None
-    if not is_gm(request) and character_selection_made:
-        journal_character_filter=int((active_character or {}).get("id") or 0)
-    party_journals=list_party_journals(settings,iid,admin=is_gm(request),character_id=journal_character_filter,campaign_id=cid)
-    return templates.TemplateResponse("session.html", {
-        "request": request, "wiki": wiki, "maps": maps, "session": live, "player": invite,
-        "updates": recent_updates(settings, iid, 12,admin=is_gm(request),campaign_id=cid), "mysteries": mysteries,
-        "session_history":list(reversed(history)),"calendar":_calendar_config(),
-        "threads":list_threads(settings,admin=is_gm(request),invite_id=iid,campaign_id=cid),"party_journals":party_journals,
-        "gm_view":is_gm(request),"can_author":can_author,"archive_mode":archive_mode(),
-        "session_characters":session_characters,"active_character":active_character,
-        "character_selection_made":character_selection_made,
+    if not gm and character_selection_made:journal_character_filter=int((active_character or {}).get('id') or 0)
+    party_journals=list_party_journals(settings,iid,admin=gm,character_id=journal_character_filter,campaign_id=cid)
+    shared_notes=list_party_notes(settings,cid,int(session['id']) if session else None,120)
+    objectives=list_objectives(settings,cid,include_done=False)
+    follows=list_follows(settings,int(iid),cid) if iid is not None and not gm else []
+    followed_pages=[]
+    for f in follows:
+        if f.get('target_type')=='page' and f.get('target_key') in by_slug:followed_pages.append({**f,'page':by_slug[f['target_key']]})
+    mysteries=list_mysteries(settings,admin=gm,campaign_id=cid)[:12]
+    if not gm:
+        for mystery in mysteries:
+            mystery['pins']=[x for x in mystery.get('pins',[]) if not x.get('page_slug') or x.get('page_slug') in allowed]
+            pin_ids={x.get('id') for x in mystery['pins']};mystery['edges']=[e for e in mystery.get('edges',[]) if e.get('source_pin') in pin_ids and e.get('target_pin') in pin_ids]
+    own_rsvp=None
+    if session and invite:
+        own_rsvp=next((r for r in session_rsvps(settings,int(session['id'])) if int(r.get('invite_id') or -1)==int(invite['id'])),None)
+    notifications=filter_notifications_for_prefs(settings,iid,list_notifications(settings,iid,admin=gm,campaign_id=cid)[:12],admin=gm)
+    return templates.TemplateResponse('session.html',{
+        'request':request,'wiki':wiki,'maps':maps,'session':session,'live_session':live,'upcoming_session':upcoming,'previous_session':previous,
+        'player':invite,'updates':recent_updates(settings,iid,16,admin=gm,campaign_id=cid),'mysteries':mysteries,'session_history':history,
+        'calendar':_calendar_config(),'threads':list_threads(settings,admin=gm,invite_id=iid,campaign_id=cid),'party_journals':party_journals,
+        'party_notes':shared_notes,'objectives':objectives,'follows':follows,'followed_pages':followed_pages,'notifications':notifications,
+        'gm_view':gm,'can_author':can_author,'archive_mode':archive_mode(),'session_characters':session_characters,'active_character':active_character,
+        'character_selection_made':character_selection_made,'own_rsvp':own_rsvp,
+    })
+
+
+@app.get("/recap", response_class=HTMLResponse)
+def player_recap_screen(request:Request):
+    if not player_allowed(request):return player_gate_redirect(request)
+    wiki=_visible_wiki(request);iid=_invite_id(request);cid=_active_campaign_id(request);gm=is_gm(request)
+    sessions=list_sessions(settings,public=False,invite_id=iid,campaign_id=cid)
+    ended=[x for x in sessions if x.get('status')=='ended'];previous=ended[-1] if ended else None
+    allowed={p.get('slug') for p in wiki.get('pages',[])}
+    by_slug={p.get('slug'):p for p in wiki.get('pages',[])}
+    lore=[]
+    if previous:
+        for ref in previous.get('lore',[]):
+            if ref.get('page_slug') in allowed and ref.get('page_slug') in by_slug:lore.append(by_slug[ref['page_slug']])
+    mysteries=list_mysteries(settings,admin=gm,campaign_id=cid)[:10]
+    if not gm:
+        for m in mysteries:m['pins']=[x for x in m.get('pins',[]) if not x.get('page_slug') or x.get('page_slug') in allowed]
+    journals=list_party_journals(settings,iid,admin=gm,campaign_id=cid)[:16]
+    return templates.TemplateResponse('recap.html',{
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=True),'previous':previous,'lore':lore,
+        'updates':recent_updates(settings,iid,16,admin=gm,campaign_id=cid),'objectives':list_objectives(settings,cid,include_done=False),
+        'mysteries':mysteries,'journals':journals,'gm_view':gm,
     })
 
 
@@ -1278,7 +1361,7 @@ def gm_session_screen(request: Request):
     wiki=_visible_wiki(request); maps=list_maps(settings,public=False); cid=_active_campaign_id(request); live=get_live_session(settings,admin=True,campaign_id=cid)
     chars=list_player_characters(settings,admin=True,campaign_id=cid)
     for c in chars:c["arcs"]=character_arcs(settings,int(c["id"]),owner=True)
-    return templates.TemplateResponse("gm_session.html", {"request":request,"wiki":wiki,"maps":maps,"session":live,"sessions":list_sessions(settings,campaign_id=cid),"reveals":list_reveal_blocks_from_wiki(ensure_built()),"mysteries":list_mysteries(settings,admin=True,campaign_id=cid),"handouts":list_handouts(settings,admin=True,campaign_id=cid),"updates":recent_updates(settings,None,20,admin=True,campaign_id=cid),"fronts":list_fronts(settings,admin=True,campaign_id=cid),"characters":chars,"rumors":list_rumors(settings,admin=True,campaign_id=cid)})
+    return templates.TemplateResponse("gm_session.html", {"request":request,"wiki":wiki,"maps":maps,"session":live,"sessions":list_sessions(settings,campaign_id=cid),"reveals":list_reveal_blocks_from_wiki(ensure_built()),"mysteries":list_mysteries(settings,admin=True,campaign_id=cid),"handouts":list_handouts(settings,admin=True,campaign_id=cid),"updates":recent_updates(settings,None,20,admin=True,campaign_id=cid),"fronts":list_fronts(settings,admin=True,campaign_id=cid),"characters":chars,"rumors":list_rumors(settings,admin=True,campaign_id=cid),"prep":(get_preparation(settings,int(live["id"])) if live else None),"objectives":list_objectives(settings,cid,include_done=False),"rsvps":(session_rsvps(settings,int(live["id"])) if live else [])})
 
 
 @app.get("/admin/campaign", response_class=HTMLResponse)
@@ -1315,8 +1398,9 @@ def character_page(request: Request, character_id:int):
     owner=admin_view or (iid is not None and int(char.get("invite_id") or 0)==int(iid))
     char["arcs"]=character_arcs(settings,character_id,owner=owner)
     char["relationships"]=character_relationships(settings,character_id,owner=owner)
+    char["milestones"]=character_milestones(settings,character_id)
     can_edit=admin_view or (owner and player_role(request)=="player" and not archive_mode())
-    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[]),"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view)})
+    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[]),"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view),"character_sessions":list_sessions(settings,public=False,campaign_id=cid)})
 
 @app.get("/api/player/characters")
 def player_characters_api(request:Request):
@@ -1934,6 +2018,17 @@ def admin_update_marker(request: Request,marker_id:int,payload:dict=Body(...)): 
 @app.delete("/api/admin/markers/{marker_id}")
 def admin_delete_marker(request: Request,marker_id:int): require_admin(request); delete_marker(settings,marker_id); return {"ok":True}
 
+def _notify_page_followers(campaign_id:int, page_slug:str, title:str, body:str, *, kind:str='follow') -> None:
+    slug=str(page_slug or '').split('::',1)[0].strip()
+    if not slug:return
+    audience=followers_for_target(settings,int(campaign_id),'page',slug)
+    if not audience:return
+    create_notification(settings,{
+        'campaign_id':int(campaign_id),'title':str(title or 'Followed lore changed'),'body':str(body or ''),
+        'target_type':'page','target_key':slug,'kind':kind,'audience':audience,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Seeker campaign-runtime APIs
 # ---------------------------------------------------------------------------
@@ -1973,6 +2068,8 @@ def admin_save_session(request: Request,payload:dict=Body(...)):
         capture_session_state(settings,int(row["id"]),"before")
     if row.get("status")=="ended" and (not before or before.get("status")!="ended"):
         capture_session_state(settings,int(row["id"]),"after")
+    if row.get("status")=="planned" and (not before or before.get("status")!="planned" or before.get("session_date")!=row.get("session_date") or before.get("title")!=row.get("title")):
+        create_notification(settings,{"campaign_id":int(row["campaign_id"]),"title":"Session planned · "+str(row.get("title") or "Next session"),"body":str(row.get("session_date") or "A date has been proposed."),"target_type":"session","target_key":str(row["id"]),"kind":"session","audience":[]})
     return row
 
 
@@ -1988,7 +2085,10 @@ def admin_session_lore(request:Request,session_id:int,payload:dict=Body(...)):
 
 @app.post("/api/admin/session-updates")
 def admin_session_update(request:Request,payload:dict=Body(...)):
-    require_gm(request);return add_session_update(settings,_campaign_payload(request,payload))
+    require_gm(request);p=_campaign_payload(request,payload);row=add_session_update(settings,p)
+    if str(row.get("visibility") or "players")!="gm" and str(row.get("target_type") or "") in {"page","lore"}:
+        _notify_page_followers(_active_campaign_id(request),str(row.get("target_key") or ""),str(row.get("title") or "Followed lore changed"),str(row.get("body") or "A followed entry was updated."))
+    return row
 
 
 @app.post("/api/admin/timeline")
@@ -2015,7 +2115,10 @@ def admin_timeline_era_delete(request:Request,era_id:int):
 
 @app.post("/api/admin/relationships")
 def admin_relationship_save(request:Request,payload:dict=Body(...)):
-    require_gm(request);return save_relationship(settings,payload)
+    require_gm(request);row=save_relationship(settings,payload);cid=_active_campaign_id(request)
+    for slug in {str(row.get("source_slug") or ""),str(row.get("target_slug") or "")}:
+        if slug:_notify_page_followers(cid,slug,"A connection changed","A relationship involving this followed entry was updated.")
+    return row
 
 
 @app.delete("/api/admin/relationships/{relationship_id}")
@@ -2032,6 +2135,7 @@ def admin_reveal_save(request:Request,payload:dict=Body(...)):
     if row.get("state") in {"rumor","discovered","public"}:
         title=str(payload.get("title") or payload.get("target_key") or "Lore discovered")
         add_session_update(settings,{"campaign_id":_active_campaign_id(request),"session_id":payload.get("session_id"),"title":title,"body":str(payload.get("update_body") or "New lore has been revealed."),"target_type":payload.get("target_type") or "lore","target_key":payload.get("target_key") or "","visibility":"players","audience":payload.get("audience") or []})
+        _notify_page_followers(_active_campaign_id(request),str(payload.get("target_key") or ""),title,str(payload.get("update_body") or "New information about a followed entry has been revealed."))
     return row
 
 
@@ -2092,7 +2196,10 @@ def admin_mystery_delete(request:Request,mystery_id:int):
 
 @app.post("/api/admin/handouts")
 def admin_handout_save(request:Request,payload:dict=Body(...)):
-    require_gm(request);return save_handout(settings,_campaign_payload(request,payload))
+    require_gm(request);row=save_handout(settings,_campaign_payload(request,payload))
+    if str(row.get("visibility") or "players")!="gm":
+        create_notification(settings,{"campaign_id":_active_campaign_id(request),"title":"New handout · "+str(row.get("title") or "Handout"),"body":"A new letter, relic, or handout is available.","target_type":"handout","target_key":str(row.get("id") or ""),"kind":"handout","audience":[]})
+    return row
 
 
 @app.delete("/api/admin/handouts/{handout_id}")
@@ -2631,13 +2738,24 @@ def admin_notification_create(request:Request,payload:dict=Body(...)):
 @app.get("/api/public/notifications")
 def public_notifications(request:Request,since:float=0):
     if not player_allowed(request):raise HTTPException(401)
-    return list_notifications(settings,_invite_id(request),admin=is_gm(request),since=since,campaign_id=_active_campaign_id(request))
+    rows=list_notifications(settings,_invite_id(request),admin=is_gm(request),since=since,campaign_id=_active_campaign_id(request))
+    iid=_invite_id(request)
+    return rows if is_gm(request) or iid is None else filter_notifications_for_prefs(settings,int(iid),rows)
 @app.post("/api/public/notifications/{nid}/read")
 def public_notification_read(request:Request,nid:int):
     if not player_allowed(request):raise HTTPException(401)
     iid=_invite_id(request)
     if iid is not None:mark_notification_read(settings,nid,iid)
     return {"ok":True}
+
+@app.post("/api/v5/notifications/read-all")
+def public_notifications_read_all(request:Request):
+    if not player_allowed(request):raise HTTPException(401)
+    iid=_invite_id(request)
+    if iid is None:return {"ok":True,"count":0}
+    rows=list_notifications(settings,int(iid),admin=False,since=0,campaign_id=_active_campaign_id(request))
+    for row in rows:mark_notification_read(settings,int(row["id"]),int(iid))
+    return {"ok":True,"count":len(rows)}
 
 
 @app.post("/api/player/characters/{character_id}/relationships")
@@ -2759,3 +2877,197 @@ def admin_invitation_role(request:Request,invite_id:int,payload:dict=Body(...)):
         if cur.rowcount!=1:raise HTTPException(404)
         conn.execute('DELETE FROM player_devices WHERE invite_id=?',(int(invite_id),))
     return next((x for x in list_player_invites(settings) if int(x['id'])==invite_id),{})
+
+# ---------------------------------------------------------------------------
+# Seeker V5 · player session companion
+# ---------------------------------------------------------------------------
+
+@app.get('/investigation', response_class=HTMLResponse)
+def investigation_page(request:Request):
+    if not player_allowed(request): return player_gate_redirect(request)
+    invite=current_player_invite(request)
+    if not invite: raise HTTPException(403,'A personal player invitation is required for a private investigation board.')
+    wiki=_visible_wiki(request);cid=_active_campaign_id(request)
+    board=investigation_board(settings,cid,int(invite['id']))
+    return templates.TemplateResponse('investigation.html',{'request':request,'wiki':wiki,'maps':list_maps(settings,public=True),'board':board,'player':invite})
+
+
+@app.get('/api/v5/follows')
+def v5_follows(request:Request):
+    if not player_allowed(request): raise HTTPException(401)
+    invite=current_player_invite(request)
+    if not invite:return []
+    return list_follows(settings,int(invite['id']),_active_campaign_id(request))
+
+
+@app.post('/api/v5/follows')
+def v5_follow_save(request:Request,payload:dict=Body(...)):
+    require_player_author(request);invite=current_player_invite(request)
+    if not invite:raise HTTPException(403)
+    try:enabled=set_follow(settings,int(invite['id']),_active_campaign_id(request),str(payload.get('target_type') or 'page'),str(payload.get('target_key') or ''),bool(payload.get('enabled',True)),str(payload.get('label') or ''))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+    return {'ok':True,'enabled':enabled}
+
+
+@app.get('/api/v5/party-notes')
+def v5_party_notes(request:Request,session_id:int|None=None):
+    if not player_allowed(request):raise HTTPException(401)
+    cid=_active_campaign_id(request)
+    return list_party_notes(settings,cid,session_id,150)
+
+
+@app.post('/api/v5/party-notes')
+def v5_party_note_save(request:Request,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    if not is_gm(request):require_player_author(request)
+    invite=current_player_invite(request);iid=int(invite['id']) if invite else None
+    try:return save_party_note(settings,_active_campaign_id(request),payload.get('session_id'),iid,_player_label(request),payload.get('body',''),payload.get('id'),admin=is_gm(request))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v5/party-notes/{note_id}')
+def v5_party_note_delete(request:Request,note_id:int):
+    if not player_allowed(request):raise HTTPException(401)
+    if not is_gm(request):require_player_author(request)
+    try:delete_party_note(settings,note_id,_invite_id(request),admin=is_gm(request))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    return {'ok':True}
+
+
+@app.get('/api/v5/investigation')
+def v5_investigation_get(request:Request):
+    if not player_allowed(request):raise HTTPException(401)
+    invite=current_player_invite(request)
+    if not invite:raise HTTPException(403)
+    return investigation_board(settings,_active_campaign_id(request),int(invite['id']))
+
+
+@app.post('/api/v5/investigation/nodes')
+def v5_investigation_node_save(request:Request,payload:dict=Body(...)):
+    require_player_author(request);invite=current_player_invite(request)
+    try:return save_investigation_node(settings,_active_campaign_id(request),int(invite['id']),payload)
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v5/investigation/nodes/{node_id}')
+def v5_investigation_node_delete(request:Request,node_id:int):
+    require_player_author(request);invite=current_player_invite(request);delete_investigation_node(settings,node_id,_active_campaign_id(request),int(invite['id']));return {'ok':True}
+
+
+@app.post('/api/v5/investigation/edges')
+def v5_investigation_edge_save(request:Request,payload:dict=Body(...)):
+    require_player_author(request);invite=current_player_invite(request)
+    try:return save_investigation_edge(settings,_active_campaign_id(request),int(invite['id']),payload)
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v5/investigation/edges/{edge_id}')
+def v5_investigation_edge_delete(request:Request,edge_id:int):
+    require_player_author(request);invite=current_player_invite(request);delete_investigation_edge(settings,edge_id,_active_campaign_id(request),int(invite['id']));return {'ok':True}
+
+
+@app.get('/api/v5/objectives')
+def v5_objectives_get(request:Request):
+    if not player_allowed(request):raise HTTPException(401)
+    return list_objectives(settings,_active_campaign_id(request))
+
+
+@app.post('/api/v5/objectives')
+def v5_objective_save(request:Request,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    if not is_gm(request):require_player_author(request)
+    try:return save_objective(settings,_active_campaign_id(request),payload,_invite_id(request),_player_label(request),admin=is_gm(request))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v5/objectives/{objective_id}')
+def v5_objective_delete(request:Request,objective_id:int):
+    if not is_gm(request):require_player_author(request)
+    try:delete_objective(settings,objective_id,_invite_id(request),admin=is_gm(request))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    return {'ok':True}
+
+
+@app.post('/api/v5/characters/{character_id}/milestones')
+def v5_character_milestone_save(request:Request,character_id:int,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    if not is_gm(request):require_player_author(request)
+    char=_character_owned(request,character_id)
+    return save_character_milestone(settings,char,str(payload.get('label') or 'Milestone'),str(payload.get('note') or ''),payload.get('session_id'))
+
+
+@app.delete('/api/v5/characters/{character_id}/milestones/{milestone_id}')
+def v5_character_milestone_delete(request:Request,character_id:int,milestone_id:int):
+    if not is_gm(request):require_player_author(request)
+    _character_owned(request,character_id);delete_character_milestone(settings,milestone_id,character_id);return {'ok':True}
+
+
+@app.post('/api/v5/sessions/{session_id}/rsvp')
+def v5_session_rsvp(request:Request,session_id:int,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    invite=current_player_invite(request)
+    if not invite:raise HTTPException(403,'A personal invitation is required to RSVP.')
+    try:return save_rsvp(settings,session_id,int(invite['id']),str(payload.get('status') or 'maybe'),str(payload.get('note') or ''))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.get('/api/v5/sessions/{session_id}/rsvps')
+def v5_session_rsvps(request:Request,session_id:int):
+    require_gm(request);return session_rsvps(settings,session_id)
+
+
+@app.get('/gm/prep',response_class=HTMLResponse)
+def gm_prep_page(request:Request,session_id:int|None=None):
+    require_gm(request);cid=_active_campaign_id(request);wiki=_visible_wiki(request);sessions=list_prepared_sessions(settings,cid)
+    selected=None
+    if session_id:selected=next((s for s in sessions if int(s['id'])==int(session_id)),None)
+    if selected is None:selected=next((s for s in sessions if s.get('status') in {'live','planned'}),None)
+    prep=get_preparation(settings,int(selected['id'])) if selected else None
+    chars=list_player_characters(settings,admin=True,campaign_id=cid)
+    for c in chars:c['arcs']=character_arcs(settings,int(c['id']),owner=True)
+    return templates.TemplateResponse('gm_prep.html',{
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=False),'sessions':sessions,'selected_session':selected,'prep':prep,
+        'mysteries':list_mysteries(settings,admin=True,campaign_id=cid),'handouts':list_handouts(settings,admin=True,campaign_id=cid),
+        'fronts':list_fronts(settings,admin=True,campaign_id=cid),'characters':chars,'objectives':list_objectives(settings,cid),
+    })
+
+
+@app.get('/api/v5/gm/prep/{session_id}')
+def v5_gm_prep_get(request:Request,session_id:int):
+    require_gm(request);return get_preparation(settings,session_id)
+
+
+@app.put('/api/v5/gm/prep/{session_id}')
+def v5_gm_prep_save(request:Request,session_id:int,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_preparation(settings,session_id,_active_campaign_id(request),payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.post('/api/v5/gm/map-markers/{marker_id}/discovery')
+def v5_map_discovery_save(request:Request,marker_id:int,payload:dict=Body(...)):
+    require_gm(request)
+    try:return set_map_discovery(settings,_active_campaign_id(request),marker_id,str(payload.get('state') or 'discovered'),payload.get('session_id'))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.post('/api/v5/gm/map-fog/{fog_id}')
+def v5_map_fog_save(request:Request,fog_id:int,payload:dict=Body(...)):
+    require_gm(request);set_campaign_fog(settings,_active_campaign_id(request),fog_id,bool(payload.get('revealed')));return {'ok':True}
+
+
+@app.get('/api/v5/notification-prefs')
+def v5_notification_prefs_get(request:Request):
+    if not player_allowed(request):raise HTTPException(401)
+    invite=current_player_invite(request)
+    return notification_prefs(settings,int(invite['id'])) if invite else {}
+
+
+@app.put('/api/v5/notification-prefs/{kind}')
+def v5_notification_pref_save(request:Request,kind:str,payload:dict=Body(...)):
+    require_player_author(request);invite=current_player_invite(request);return set_notification_pref(settings,int(invite['id']),kind,bool(payload.get('enabled',True)))

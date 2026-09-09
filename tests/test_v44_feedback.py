@@ -142,6 +142,6 @@ def test_v44_feedback_ui_assets_are_shipped_and_click_paths_are_resilient():
     assert 'lastTouchScroll' in schedule and 'scrollY-origin.scrollY' in schedule and 'elapsed<650' in schedule
     assert "dragon_lair:'◈'" in admin and "lighthouse:'✺'" in admin and 'value="sacred_grove"' in admin_tpl
     assert 'max="1.6"' in admin_tpl and 'sourceBoost' in effects
-    assert 'shAttacks' in chars and 'shResources' in chars and 'shDisplaySymbol' in chars
+    assert 'external_sheet_url' in chars and 'foundry_actor_url' in chars and 'shAttacks' not in chars
     assert 'All Tables' in base and 'table-sensitive' in base
     assert "'/schedule','/tables'" in sw

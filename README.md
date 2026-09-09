@@ -1,11 +1,25 @@
-# Seeker — LaTeX-first interactive campaign wiki
+# Seeker — interactive setting & session companion
 
 Seeker turns a normal multi-file LaTeX campaign project into **two synchronized views of the same setting**:
 
 1. an Overleaf-style GM authoring workspace with a source tree, LaTeX editor, autosave, revision history, build log and live PDF preview; and
 2. a polished player-facing interactive setting wiki with full-text + local semantic search, automatic chapter/section navigation and interactive maps.
 
-It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX project is already the canonical campaign document and manually re-uploading a PDF has become annoying.
+It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX project is already the canonical setting document, while Seeker becomes the shared companion players and GMs actually use between and during sessions.
+
+## Seeker 5.0: the session companion
+
+Seeker V5 is built around one division of responsibility: **Seeker remembers the campaign; Foundry and Pathbuilder handle the rules engine.** Character pages therefore focus on identity, story, goals, portraits, relationships, arcs, milestones and links to the real mechanical sheet rather than maintaining a second PF2e build in parallel.
+
+The centerpiece is **Session Mode** (`/session`). During in-person play it acts as a desktop/tablet command center; on iPad it uses a dedicated two-column layout; on phones it becomes a touch-first tabbed companion. It brings together the current character identity, collaborative party notes, private character notes, objectives, mysteries, handouts, followed lore, recent discoveries, recap context and Atlas shortcuts without forcing players to bounce through the whole site.
+
+GMs prepare through **Session Prep** (`/gm/prep`). A planned session can have an opening, ordered scene/beat checklist, secrets and revelations, contingencies, scratch notes and pinned references to Codex lore, objectives, character arcs, mysteries, fronts, handouts and maps. The prepared runbook follows the session into the GM live console, so prep is not stranded in a separate notebook.
+
+V5 also adds a private player **Investigation Board**, campaign objectives, lore follows/watches and notification preferences, a data-grounded **Previously on…** briefing, narrative character milestones, session RSVP, and campaign-specific Atlas knowledge/fog. Session scheduling remains player-global: availability is filled once per player and reused across every campaign in which that player has a current character.
+
+Multi-campaign management now supports true permanent deletion of non-default campaigns. Deletion removes table-specific state while preserving shared setting canon, player identities and global availability. The default campaign is intentionally protected.
+
+The free local semantic Codex search from V4 remains available and spoiler-safe; it does not require an API key or hosted AI service. Optional OpenAI-compatible answer generation can still be configured separately if desired.
 
 ## What it does
 
@@ -37,7 +51,7 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 
 Seeker 4.4 is a table-use polish release built from the first round of player feedback. **Relationships** are now searchable/filterable rather than an endless list, touch scheduling favors scrolling over painting, comments and characters have permission-aware deletion, GMs can maintain player character sheets, and the campaign selector includes a clear **All Tables** view. Atlas authoring has a much larger marker vocabulary and its atmospheric renderer compensates for high-resolution/4K map sources.
 
-Character sheets are now designed to be genuinely player-owned dossiers rather than fixed profiles. Alongside ancestry/class/level and biography, players can maintain combat stats, attacks/actions, focus, spell statistics, defenses, skills, feats, inventory, spells, resources, proficiencies, currency/bulk, appearance, personality, bonds, arcs, lore relationships and arbitrary custom sections. They can also choose sheet themes, accent/secondary colors, a personal sigil, subtitle and information density. GMs retain edit/delete access for table administration.
+V4.4 briefly introduced a rules-heavy character builder. V5 intentionally retires that visible workflow in favor of lighter narrative dossiers plus Pathbuilder/Foundry links, while retaining old stored sheet data so upgrades are non-destructive. GMs retain edit/delete access for table administration.
 
 Search now includes **local semantic retrieval with zero API cost**. Seeker builds a compact in-process index from the Codex a player is actually allowed to see and combines lexical scoring, generic concept expansion and relationships learned from terms that co-occur in the setting. A question like “who rules the northern realm?” can therefore find an entry that says “King Vael holds the crown” even when the exact wording differs. Because the source set is the already spoiler-filtered Codex, semantic retrieval cannot surface hidden pages. The index cache is bounded to keep Railway memory predictable. Optional OpenAI-compatible answer generation is still supported through `SEEKER_AI_API_KEY` / `SEEKER_AI_MODEL`, but is not required for semantic finding.
 

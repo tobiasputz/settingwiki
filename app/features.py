@@ -254,6 +254,8 @@ CREATE TABLE IF NOT EXISTS player_characters (
     quote TEXT NOT NULL DEFAULT '',
     banner_path TEXT NOT NULL DEFAULT '',
     sheet_json TEXT NOT NULL DEFAULT '{}',
+    external_sheet_url TEXT NOT NULL DEFAULT '',
+    foundry_actor_url TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     FOREIGN KEY(invite_id) REFERENCES player_invites(id) ON DELETE CASCADE
@@ -303,6 +305,8 @@ def init_feature_db(settings: Settings) -> None:
             "quote": "TEXT NOT NULL DEFAULT ''",
             "banner_path": "TEXT NOT NULL DEFAULT ''",
             "sheet_json": "TEXT NOT NULL DEFAULT '{}'",
+            "external_sheet_url": "TEXT NOT NULL DEFAULT ''",
+            "foundry_actor_url": "TEXT NOT NULL DEFAULT ''",
         }
         for col, ddl in character_add.items():
             if col not in character_cols:
@@ -333,6 +337,12 @@ def init_feature_db(settings: Settings) -> None:
     # campaign_id to all party/session-owned state in one transaction.
     from .campaigns import init_campaign_db
     init_campaign_db(settings)
+    # V4.3/V5 player-session state is chained here as well so integrations that
+    # historically initialize the feature DB receive a complete Seeker schema.
+    from .scheduling import init_schedule_db
+    init_schedule_db(settings)
+    from .v5 import init_v5_db
+    init_v5_db(settings)
 
 
 
@@ -967,14 +977,16 @@ def save_player_character(settings: Settings, p: dict, *, invite_id: int|None, a
     sheet_json=json.dumps(sheet,separators=(",",":"),ensure_ascii=False)
     level_raw=val("level",None)
     level=int(level_raw) if str(level_raw or "").isdigit() else None
-    vals=(campaign_id,owner,name,str(val("pronouns") or "")[:80],str(val("ancestry") or "")[:120],str(val("class_name") or "")[:120],level,status,str(val("summary") or "")[:5000],str(val("biography") or "")[:30000],str(val("goals") or "")[:10000],str(val("player_notes") or "")[:15000],vis,theme,theme_style,str(val("quote") or "")[:500],str(val("banner_path") or "")[:500],sheet_json,now)
+    external_sheet_url=str(val("external_sheet_url") or "")[:1500]
+    foundry_actor_url=str(val("foundry_actor_url") or "")[:1500]
+    vals=(campaign_id,owner,name,str(val("pronouns") or "")[:80],str(val("ancestry") or "")[:120],str(val("class_name") or "")[:120],level,status,str(val("summary") or "")[:5000],str(val("biography") or "")[:30000],str(val("goals") or "")[:10000],str(val("player_notes") or "")[:15000],vis,theme,theme_style,str(val("quote") or "")[:500],str(val("banner_path") or "")[:500],sheet_json,external_sheet_url,foundry_actor_url,now)
     with connect(settings) as conn:
         if rid:
-            conn.execute("UPDATE player_characters SET campaign_id=?,invite_id=?,name=?,pronouns=?,ancestry=?,class_name=?,level=?,status=?,summary=?,biography=?,goals=?,player_notes=?,visibility=?,theme_color=?,theme_style=?,quote=?,banner_path=?,sheet_json=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
+            conn.execute("UPDATE player_characters SET campaign_id=?,invite_id=?,name=?,pronouns=?,ancestry=?,class_name=?,level=?,status=?,summary=?,biography=?,goals=?,player_notes=?,visibility=?,theme_color=?,theme_style=?,quote=?,banner_path=?,sheet_json=?,external_sheet_url=?,foundry_actor_url=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
         else:
             base=_slug(name); slug=base; n=2
             while conn.execute("SELECT 1 FROM player_characters WHERE slug=?",(slug,)).fetchone(): slug=f"{base}-{n}"; n+=1
-            out=conn.execute("INSERT INTO player_characters(campaign_id,invite_id,name,slug,pronouns,ancestry,class_name,level,status,summary,biography,goals,player_notes,visibility,theme_color,theme_style,quote,banner_path,sheet_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",vals[:3]+(slug,)+vals[3:-1]+(now,now)).lastrowid
+            out=conn.execute("INSERT INTO player_characters(campaign_id,invite_id,name,slug,pronouns,ancestry,class_name,level,status,summary,biography,goals,player_notes,visibility,theme_color,theme_style,quote,banner_path,sheet_json,external_sheet_url,foundry_actor_url,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",vals[:3]+(slug,)+vals[3:-1]+(now,now)).lastrowid
     return get_player_character(settings,out,invite_id=owner,admin=True) or {}
 
 def delete_player_character(settings: Settings, character_id: int, *, invite_id: int|None, admin: bool=False) -> list[str]:

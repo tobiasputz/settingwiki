@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Investigation Board · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="investigation-shell" data-investigation-root>
+  <header class="investigation-hero"><div><span class="eyebrow">PRIVATE PLAYER WORKSPACE</span><h1>Your investigation board</h1><p>Pin lore, jot theories, and draw your own connections. Nothing here becomes canon unless you choose to share it elsewhere.</p></div><div class="investigation-actions"><button data-add-theory>＋ Theory</button><button data-add-lore>⌘ Pin lore</button><button data-connect-mode>⌁ Connect</button></div></header>
+  <section class="investigation-board" id="investigationBoard">
+    <svg id="investigationEdges" class="investigation-edges" aria-hidden="true"></svg>
+    <div id="investigationNodes" class="investigation-nodes"></div>
+    <div class="investigation-empty" id="investigationEmpty"><span>◇</span><strong>Start with a clue, person, place, or theory.</strong><small>Drag cards around. Select Connect, then tap two cards to draw a line.</small></div>
+  </section>
+  <aside class="investigation-tip"><strong>Tip</strong><span>This board is yours alone for {{ campaign_context(request).active_campaign.name }}. A different campaign gets a different theory board.</span></aside>
+</main>
+<script>window.SEEKER_INVESTIGATION={{ board|tojson }};window.SEEKER_VISIBLE_PAGES={{ wiki.pages|tojson }};</script>
+{% endblock %}
+{% block scripts %}<script src="/static/investigation.js?v=5000"></script>{% endblock %}
