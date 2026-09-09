@@ -1,3 +1,9 @@
+# Loreforge 3.0.1 — Campaign Studio startup regression fix
+
+- Restored the Campaign Studio `refreshStatus()`, `refreshFiles()`, and `renderFileTree()` helpers that were accidentally dropped during the tabbed-editor refactor. Their absence threw during Studio startup and prevented later initialization, including Access controls.
+- Reconnected project status, PDF readiness, project-health messaging, file filtering/selection, and the main-file selector to the restored refresh flow.
+- Added regression coverage so the Studio bootstrap helpers cannot silently disappear again.
+
 # Loreforge 3.0.0 — Living world, player agency & campaign memory
 
 - Added a formal **Lore vs. State** architecture. Canonical setting prose remains in LaTeX; mutable campaign state (where people are, what factions are doing, what players know, and what is currently unresolved) lives in Loreforge metadata instead of polluting the manuscript.
