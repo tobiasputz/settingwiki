@@ -33,6 +33,14 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Personal player invitations.** Player access is invitation-only by default. **Admin → Access** creates one signed link per player; each link can be copied, expired, revoked, restored, rotated, device-limited, or have its remembered devices reset independently. Legacy shared-password and public modes remain available, while the editor continues to use `ADMIN_PASSWORD`.
 - **Read → edit source bridge.** When you browse the player Codex while logged in as GM, a persistent **Edit source** control opens the exact LaTeX file/line in Campaign Studio. On long Person-of-Note pages it follows the section currently being read, and the editor offers **Back to entry** after the correction.
 
+## Seeker 4.3: session planning across campaigns
+
+Seeker now includes a dedicated **Session Planner** at `/schedule`. Availability is attached to the invited player identity rather than to a character or campaign: a player marks each date once as **Available**, **If necessary**, or **Unavailable**, and that single calendar automatically follows every current character they have assigned to a campaign.
+
+The GM planner uses the active campaign’s character roster to determine who belongs at that table, deduplicates players who have multiple PCs, and highlights the earliest fully green date. If no all-green date exists, it separately surfaces dates that work only because one or more players selected **If necessary**. Unanswered dates remain unknown and never produce a false “everyone is free” result. Players can paint/drag dates and use quick fills; writes are batched and there is no schedule polling.
+
+Character creation now includes an explicit campaign selector. Choosing an active campaign for one of your own characters automatically grants that invitation access to the table, matching the intended flow: **GM creates campaign → player creates/assigns character → player fills availability once → GM checks the campaign planner**. GM revocation still wins: a character whose invitation no longer has campaign access is not counted in scheduling.
+
 ## Seeker 4.2: one setting, multiple campaigns
 
 Seeker can now host several active campaigns inside the same world. The **Codex, Atlas and setting history remain shared**, while table-specific state stays isolated. A player who plays Aster in one campaign and Bram in another sees the correct character shelf, session history, journals, mysteries, handouts, threads and spoiler knowledge after switching tables.

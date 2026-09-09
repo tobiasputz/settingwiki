@@ -763,7 +763,7 @@ def build_wiki(settings: Settings) -> dict:
         bucket["presentation"]["navigation_art_is_auto"] = bool(auto_navigation_art and auto_cover and not bucket["presentation"].get("toc_image_url"))
 
     payload = {
-        "renderer_version": 4200,
+        "renderer_version": 4300,
         "title": get_setting(settings, "site_title", "") or analysis["title"],
         "tagline": get_setting(settings, "tagline", "Follow the people, places, histories, and secrets of the world."),
         "author": analysis["author"],

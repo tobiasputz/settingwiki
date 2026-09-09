@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Session Planner · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="schedule-shell" data-schedule-root data-gm="{{ '1' if gm_view else '0' }}">
+  <header class="schedule-hero">
+    <div>
+      <span class="eyebrow">SESSION PLANNER</span>
+      {% if gm_view %}
+      <h1>Find the next night everyone can make.</h1>
+      <p>Seeker combines each player’s single availability calendar with the characters assigned to <strong>{{ active_campaign.name }}</strong>.</p>
+      {% else %}
+      <h1>Mark it once. Seeker carries it to every table.</h1>
+      <p>Your availability belongs to you, not to a character. If you play in two campaigns, the same dates automatically count for both.</p>
+      {% endif %}
+    </div>
+    {% if not gm_view %}
+    <div class="schedule-campaign-chips">
+      {% for c in player_campaigns %}<span style="--campaign-accent:{{ c.accent }}"><i></i><strong>{{ c.name }}</strong><small>{{ c.characters }}</small></span>{% else %}<span class="schedule-no-campaign"><strong>No campaign character yet</strong><small>Create a character and assign it to a table first.</small></span>{% endfor %}
+    </div>
+    {% endif %}
+  </header>
+
+  {% if gm_view %}
+  <section class="schedule-gm-summary">
+    <article class="schedule-next-card" id="scheduleNextCard"><span class="schedule-orb">✦</span><div><small>NEXT SESSION</small><h2>Checking the table…</h2><p>Reading player availability.</p></div></article>
+    <div class="schedule-candidates" id="scheduleCandidates"></div>
+  </section>
+  {% endif %}
+
+  <section class="schedule-planner-card">
+    <header class="schedule-calendar-head">
+      <div>
+        <button type="button" class="schedule-nav-btn" data-month-prev aria-label="Previous month">←</button>
+        <div><small>{{ active_campaign.name|upper if gm_view else 'YOUR AVAILABILITY' }}</small><h2 id="scheduleMonthTitle">Month</h2></div>
+        <button type="button" class="schedule-nav-btn" data-month-next aria-label="Next month">→</button>
+        <button type="button" class="schedule-today-btn" data-month-today>Today</button>
+      </div>
+      {% if not gm_view %}
+      <div class="schedule-save-state" id="scheduleSaveState"><i></i><span>Saved</span></div>
+      {% endif %}
+    </header>
+
+    {% if not gm_view %}
+    <div class="availability-tools">
+      <div class="availability-palette" role="group" aria-label="Availability paint mode">
+        <button type="button" class="active available" data-paint="available"><span>✓</span><strong>Available</strong><small>I can make it</small></button>
+        <button type="button" class="if-needed" data-paint="if_needed"><span>~</span><strong>If necessary</strong><small>I can rearrange</small></button>
+        <button type="button" class="unavailable" data-paint="unavailable"><span>×</span><strong>Unavailable</strong><small>Not possible</small></button>
+        <button type="button" class="clear" data-paint=""><span>○</span><strong>Clear</strong><small>Not answered</small></button>
+      </div>
+      <div class="availability-quickfill">
+        <span>QUICK FILL</span>
+        <button type="button" data-quick="weekends">Weekends ✓</button>
+        <button type="button" data-quick="weekdays-off">Weekdays ×</button>
+        <button type="button" data-quick="all-available">Whole month ✓</button>
+        <button type="button" data-quick="clear">Clear month</button>
+      </div>
+      <p class="schedule-paint-hint">Choose a state, then click or drag across dates. Changes save automatically.</p>
+    </div>
+    {% else %}
+    <div class="schedule-gm-legend"><span class="all-available"><i></i>Everyone available</span><span class="if-needed"><i></i>Works if necessary</span><span class="blocked"><i></i>Someone unavailable</span><span class="waiting"><i></i>Waiting for answers</span></div>
+    {% endif %}
+
+    <div class="schedule-weekdays"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+    <div class="schedule-calendar" id="scheduleCalendar" aria-live="polite"></div>
+  </section>
+
+  {% if gm_view %}
+  <section class="schedule-gm-grid">
+    <article class="schedule-detail-card">
+      <header><div><small>DATE BREAKDOWN</small><h2 id="scheduleDetailTitle">Select a date</h2></div></header>
+      <div id="scheduleDayDetail" class="schedule-day-detail"><div class="empty-mini">Click any day to see who can make it.</div></div>
+    </article>
+    <article class="schedule-roster-card">
+      <header><div><small>{{ active_campaign.name|upper }}</small><h2>Scheduling roster</h2></div><a href="/characters">Characters →</a></header>
+      <p>One player counts once even if they have several characters in this campaign. Retired, dead, and inactive characters do not keep someone on the scheduling roster.</p>
+      <div id="scheduleRoster"></div>
+    </article>
+  </section>
+  {% else %}
+  <section class="schedule-explain-grid">
+    <article><span>1</span><div><strong>One calendar per player</strong><p>You never repeat availability for another character or campaign.</p></div></article>
+    <article><span>2</span><div><strong>Characters decide the table</strong><p>Assign a character to the correct campaign and Seeker knows which GM summary should include you.</p></div></article>
+    <article><span>3</span><div><strong>No false positives</strong><p>Blank dates stay “unknown”; Seeker only calls a date viable after everyone has answered.</p></div></article>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}
+{% block scripts %}<script src="/static/schedule.js?v=4300"></script>{% endblock %}

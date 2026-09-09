@@ -55,11 +55,15 @@ from .campaigns import (
     list_campaigns, get_campaign, campaign_members, save_campaign, archive_campaign, make_default_campaign,
     set_campaign_members, invite_has_campaign, resolve_campaign_id, default_campaign_id,
 )
+from .scheduling import (
+    init_schedule_db, list_player_availability, save_player_availability, player_campaigns, campaign_schedule,
+)
 
 settings = load_settings()
 BUILD_LOCK = threading.Lock()
 init_db(settings)
 init_feature_db(settings)
+init_schedule_db(settings)
 seed_project(settings)
 
 app = FastAPI(title="Seeker", docs_url=None, redoc_url=None)
@@ -227,7 +231,7 @@ def ensure_built() -> dict:
     try:
         return load_wiki(settings)
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 4200}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 4300}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -551,7 +555,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 4200
+                    needs_build=int(existing.get("renderer_version") or 0) < 4300
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -1011,6 +1015,53 @@ def player_session_character(request:Request,payload:dict=Body(...)):
     return {"ok":True,"character":{"id":cid,"name":char.get("name"),"portrait_url":char.get("portrait_url","")},"session_id":session_key}
 
 
+@app.get("/schedule", response_class=HTMLResponse)
+def schedule_page(request: Request):
+    if not player_allowed(request):
+        return player_gate_redirect(request)
+    gm_view=is_gm(request); invite=current_player_invite(request)
+    if not gm_view and not invite:
+        raise HTTPException(403,"A personal player invitation is required to save availability.")
+    wiki=_visible_wiki(request); maps=list_maps(settings,public=True); ctx=_campaign_context(request)
+    return templates.TemplateResponse("schedule.html", {
+        "request":request,"wiki":wiki,"maps":maps,"gm_view":gm_view,"player":invite,
+        "active_campaign":ctx["active_campaign"],
+        "player_campaigns":player_campaigns(settings,int(invite["id"])) if invite else [],
+    })
+
+
+@app.get("/api/schedule/me")
+def schedule_me_api(request: Request,start:str,end:str):
+    if not player_allowed(request): raise HTTPException(401)
+    invite=current_player_invite(request)
+    if not invite: raise HTTPException(403,"A personal player invitation is required.")
+    try: rows=list_player_availability(settings,int(invite["id"]),start,end)
+    except ValueError as exc: raise HTTPException(400,str(exc))
+    return {"availability":rows,"campaigns":player_campaigns(settings,int(invite["id"]))}
+
+
+@app.post("/api/schedule/me")
+def schedule_me_save_api(request: Request,payload:dict=Body(...)):
+    require_player_author(request)
+    invite=current_player_invite(request)
+    if not invite: raise HTTPException(403,"A personal player invitation is required.")
+    try: rows=save_player_availability(settings,int(invite["id"]),payload.get("changes") or [])
+    except ValueError as exc: raise HTTPException(400,str(exc))
+    return {"ok":True,"saved":rows}
+
+
+@app.get("/api/gm/schedule")
+def gm_schedule_api(request: Request,start:str,end:str,campaign_id:int|None=None):
+    require_gm(request)
+    cid=resolve_campaign_id(settings,campaign_id if campaign_id is not None else _active_campaign_id(request))
+    campaign=get_campaign(settings,cid)
+    if not campaign: raise HTTPException(404,"Campaign not found.")
+    try: out=campaign_schedule(settings,cid,start,end)
+    except ValueError as exc: raise HTTPException(400,str(exc))
+    out["campaign"]=campaign
+    return out
+
+
 @app.get("/timeline", response_class=HTMLResponse)
 def timeline_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
@@ -1239,7 +1290,7 @@ def characters_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
     wiki=_visible_wiki(request); maps=list_maps(settings,public=True); iid=_invite_id(request); admin_view=is_gm(request)
     cid=_active_campaign_id(request); chars=list_player_characters(settings,invite_id=iid,admin=admin_view,campaign_id=cid)
-    return templates.TemplateResponse("characters.html",{"request":request,"wiki":wiki,"maps":maps,"characters":chars,"player":current_player_invite(request),"admin_view":admin_view})
+    return templates.TemplateResponse("characters.html",{"request":request,"wiki":wiki,"maps":maps,"characters":chars,"player":current_player_invite(request),"admin_view":admin_view,"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view)})
 
 @app.get("/characters/{character_id}", response_class=HTMLResponse)
 def character_page(request: Request, character_id:int):
@@ -1251,7 +1302,7 @@ def character_page(request: Request, character_id:int):
     char["arcs"]=character_arcs(settings,character_id,owner=owner)
     char["relationships"]=character_relationships(settings,character_id,owner=owner)
     can_edit=admin_view or (owner and player_role(request)=="player" and not archive_mode())
-    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[])})
+    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[]),"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view)})
 
 @app.get("/api/player/characters")
 def player_characters_api(request:Request):
@@ -2082,7 +2133,7 @@ def admin_snapshot_restore(request:Request,snapshot_id:int):
     if not row or not Path(row["path"]).exists(): raise HTTPException(404,"Snapshot not found")
     # Safety net: keep the current state as a new downloadable checkpoint first.
     backup=create_snapshot(settings,f"Automatic backup before restoring {row['label']}")
-    result=restore_snapshot(settings,row["path"]);init_db(settings);init_feature_db(settings);build_wiki(settings)
+    result=restore_snapshot(settings,row["path"]);init_db(settings);init_feature_db(settings);init_schedule_db(settings);build_wiki(settings)
     result["backup"]=backup;return result
 
 

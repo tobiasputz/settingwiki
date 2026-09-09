@@ -1,3 +1,15 @@
+# Seeker 4.3.0 — session planner
+
+- Added a **player-global availability calendar**. Each invited player fills availability once using three explicit states: Available, If necessary, and Unavailable. Blank dates remain unknown rather than being optimistically treated as free.
+- Added a fast paint-style calendar UI with click/drag entry, month navigation, automatic saving, and quick-fill actions for weekends, weekdays, the whole month, or clearing a month.
+- Connected scheduling to **character campaign assignment** instead of duplicating calendars per table. A player with characters in two campaigns automatically contributes the same availability to both campaign planners, and a player with two characters in one campaign is counted only once.
+- Players may now choose any active campaign directly in the character editor. Assigning their own character to a new active campaign automatically grants that invitation table access; GMs can still explicitly revoke campaign membership.
+- Added a GM Session Planner that shows the earliest date where every current player is available, the earliest fully-answered date that works only “if necessary,” candidate dates, per-day attendance breakdowns, and the campaign scheduling roster.
+- The scheduling roster is derived from non-retired player characters plus current campaign access. Retired, dead, and inactive characters do not keep a player in scheduling calculations, and manually revoked campaign access is respected.
+- Availability rows are indexed and saved in batches; the planner does no background polling, so adding scheduling does not create recurring Railway load.
+- Added Session Planner entry points to player navigation, mobile More, Session quick actions, GM tools, and Worldcraft campaign cards.
+- Bumped application/PWA assets to **v4300** and added regression coverage for global cross-campaign availability, green/soft/blocked/unknown date classification, duplicate-character deduplication, character-driven campaign joining, and player/GM HTTP flows.
+
 # Seeker 4.2.0 — multi-campaign setting support
 
 - Added first-class **Campaigns** so one Seeker setting can host several simultaneous tables without duplicating the Codex or Atlas.

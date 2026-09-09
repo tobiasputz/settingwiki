@@ -874,7 +874,13 @@ def save_player_character(settings: Settings, p: dict, *, invite_id: int|None, a
         owner=int(current["invite_id"])
     campaign_id=resolve_campaign_id(settings,p.get('campaign_id') if p.get('campaign_id') is not None else ((current or {}).get('campaign_id')))
     if not admin and not invite_has_campaign(settings,invite_id,campaign_id):
-        raise PermissionError("You are not a member of that campaign.")
+        # A player joins a table by assigning one of their own characters to it.
+        # This exposes only active campaign names in the character editor; no
+        # campaign-owned state becomes visible until this explicit choice.
+        from .campaigns import get_campaign
+        chosen=get_campaign(settings,campaign_id)
+        if not chosen or str(chosen.get("status") or "") != "active":
+            raise PermissionError("That campaign is not available for player characters.")
     ensure_campaign_membership(settings,campaign_id,owner)
     name=str(p.get("name") or "Unnamed hero").strip()[:160]
     vis=str(p.get("visibility") or "party"); vis=vis if vis in {"party","private"} else "party"
