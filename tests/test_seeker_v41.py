@@ -87,3 +87,53 @@ def test_seeker_brand_is_player_facing_and_legacy_name_is_only_internal_compatib
     assert 'Loreforge' not in templates
     assert 'Chronicle' in base and '<summary>Discover ' in base and 'Worldcraft' in base and 'World State' in base
     assert '/static/seeker-icon.svg' in base
+
+
+def test_entity_provenance_union_orders_without_sqlite_compound_select_error(tmp_path: Path):
+    from app.features import save_session, set_session_lore, add_session_update
+    from app.living import entity_provenance
+
+    s=setup_all(tmp_path)
+    later=save_session(s,{"session_number":7,"title":"Later","session_date":"2026-09-09","status":"ended"})
+    undated=save_session(s,{"session_number":None,"title":"Unnumbered","session_date":"2026-09-10","status":"ended"})
+    earlier=save_session(s,{"session_number":2,"title":"Earlier","session_date":"2026-09-01","status":"ended"})
+
+    # Exercise both halves of the UNION and make one session appear in both so
+    # the query must also deduplicate provenance rows.
+    set_session_lore(s,later["id"],"test-page",enabled=True)
+    set_session_lore(s,earlier["id"],"test-page",enabled=True)
+    add_session_update(s,{"session_id":later["id"],"title":"Reveal","target_key":"test-page"})
+    add_session_update(s,{"session_id":undated["id"],"title":"Reveal","target_key":"test-page"})
+
+    rows=entity_provenance(s,"test-page")
+    assert [r["title"] for r in rows] == ["Earlier","Later","Unnumbered"]
+    assert len(rows) == 3
+
+
+def test_codex_article_route_survives_session_provenance_query(tmp_path: Path, monkeypatch):
+    from fastapi.testclient import TestClient
+    import app.main as main
+    from app.features import save_session, set_session_lore, add_session_update
+    from app.storage import set_setting
+
+    s=setup_all(tmp_path)
+    set_setting(s,"player_access_mode","public")
+    session=save_session(s,{"session_number":3,"title":"A Session","session_date":"2026-09-09","status":"ended"})
+    set_session_lore(s,session["id"],"test-page",enabled=True)
+    add_session_update(s,{"session_id":session["id"],"title":"A reveal","target_key":"test-page"})
+
+    page={
+        "slug":"test-page","title":"Test Page","chapter":"World","level":"section",
+        "html":"<p>Hello</p>","plain_text":"Hello","excerpt":"Hello",
+        "presentation":{"visibility":"public"},"related":[],"backlinks":[],"outline":[],
+        "source_file":"main.tex","source_line":1,
+    }
+    wiki={"title":"Seeker","tagline":"","pages":[page],"categories":[{"title":"World","slug":"world","presentation":{},"pages":[page]}]}
+    monkeypatch.setattr(main,"settings",s)
+    monkeypatch.setattr(main,"ensure_built",lambda:wiki)
+    main._visible_wiki_cached.cache_clear()
+
+    with TestClient(main.app) as client:
+        response=client.get("/wiki/test-page")
+    assert response.status_code == 200
+    assert "Test Page" in response.text and "A Session" in response.text

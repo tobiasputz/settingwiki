@@ -1,3 +1,9 @@
+# Seeker 4.1.1 — Codex navigation hotfix
+
+- Fixed a SQLite compound-query regression in article provenance lookup that caused `/wiki/<slug>` pages to return HTTP 500 after the v4.1 backend optimization.
+- Kept the optimized single-query provenance lookup, but now applies the `COALESCE(session_number, ...)` ordering outside the UNION where SQLite permits expression ordering.
+- Added a regression test covering lore references, session updates, deduplication, and unnumbered-session sorting.
+
 # Seeker 4.1.0 — final identity & release hardening
 
 - Renamed the product identity to **Seeker** across the player UI, GM tools, PWA metadata, documentation, local launch scripts and user-facing download names. Legacy `loreforge-*` LaTeX directives, browser-storage keys, database/archive identifiers and environment-variable fallbacks remain supported deliberately so an upgrade does not lose campaigns, notes, offline state or saved preferences.

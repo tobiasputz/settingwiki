@@ -878,16 +878,22 @@ def save_character_arc(settings:Settings,character_id:int,p:dict)->dict:
 
 
 def entity_provenance(settings:Settings,page_slug:str)->list[dict]:
-    # One UNION replaces the old N+1 pattern where every matching session update
-    # caused another SQLite connection and session lookup during article renders.
+    # One compound query replaces the old N+1 pattern where every matching
+    # session update caused another SQLite connection and session lookup during
+    # article renders. SQLite only permits compound SELECT ORDER BY terms that
+    # directly match result columns, so wrap the UNION before applying the
+    # COALESCE sort expression.
     sql='''
-        SELECT DISTINCT s.id,s.session_number,s.title,s.session_date,s.status
-        FROM campaign_sessions s JOIN session_lore l ON l.session_id=s.id
-        WHERE l.page_slug=?
-        UNION
-        SELECT DISTINCT s.id,s.session_number,s.title,s.session_date,s.status
-        FROM campaign_sessions s JOIN session_updates u ON u.session_id=s.id
-        WHERE u.target_key=? AND u.session_id IS NOT NULL
+        SELECT id,session_number,title,session_date,status
+        FROM (
+            SELECT DISTINCT s.id,s.session_number,s.title,s.session_date,s.status
+            FROM campaign_sessions s JOIN session_lore l ON l.session_id=s.id
+            WHERE l.page_slug=?
+            UNION
+            SELECT DISTINCT s.id,s.session_number,s.title,s.session_date,s.status
+            FROM campaign_sessions s JOIN session_updates u ON u.session_id=s.id
+            WHERE u.target_key=? AND u.session_id IS NOT NULL
+        ) AS provenance_sessions
         ORDER BY COALESCE(session_number,999999),session_date,id
     '''
     return _rows(settings,sql,(page_slug,page_slug))
