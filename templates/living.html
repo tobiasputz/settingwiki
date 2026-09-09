@@ -32,8 +32,9 @@
   </section>
 
   <section class="living-pane" data-living-pane="journal">
-    <div class="living-pane-head"><div><span class="eyebrow">YOUR MEMORY</span><h2>Session journal</h2><p>Your notes can stay private or be shared with the party. The GM can read party notes but does not need to maintain them for you.</p></div>{% if can_author %}<button class="primary-button" data-new-journal>＋ Journal entry</button>{% endif %}</div>
-    <div class="journal-grid" id="journalGrid">{% for j in journals %}<article data-journal-id="{{ j.id }}"><small>{{ 'PRIVATE' if j.visibility=='private' else 'PARTY JOURNAL' }}{% if j.session_id %} · SESSION {{ j.session_id }}{% endif %}</small><h3>{{ j.title }}</h3><p>{{ j.body }}</p>{% if can_author %}<button data-edit-journal="{{ j.id }}">Edit</button>{% endif %}</article>{% else %}<div class="living-empty"><span>✎</span><h3>No journal entries yet</h3><p>Write down the thing everyone will otherwise forget by next week.</p></div>{% endfor %}</div>
+    <div class="living-pane-head"><div><span class="eyebrow">YOUR MEMORY</span><h2>Session journal</h2><p>Attach notes to a character when they belong to that hero, or leave them player-wide. At the live table Loreforge automatically filters your private notes to the character you entered as.</p></div>{% if can_author %}<button class="primary-button" data-new-journal>＋ Journal entry</button>{% endif %}</div>
+    {% if journal_characters %}<div class="journal-filter" aria-label="Filter journal by character"><button class="active" data-journal-filter="all">All notes</button><button data-journal-filter="general">Player-wide</button>{% for c in journal_characters %}<button data-journal-filter="{{ c.id }}">♟ {{ c.name }}</button>{% endfor %}</div>{% endif %}
+    <div class="journal-grid" id="journalGrid">{% for j in journals %}<article data-journal-id="{{ j.id }}" data-journal-character="{{ j.character_id or 'general' }}"><small>{{ 'PRIVATE' if j.visibility=='private' else 'PARTY JOURNAL' }}{% if j.character_name %} · ♟ {{ j.character_name }}{% else %} · PLAYER-WIDE{% endif %}{% if j.session_id %} · SESSION {{ j.session_number or j.session_id }}{% if j.session_title %} · {{ j.session_title }}{% endif %}{% endif %}</small><h3>{{ j.title }}</h3><p>{{ j.body }}</p>{% if can_author %}<button data-edit-journal="{{ j.id }}">Edit</button>{% endif %}</article>{% else %}<div class="living-empty"><span>✎</span><h3>No journal entries yet</h3><p>Write down the thing everyone will otherwise forget by next week.</p></div>{% endfor %}</div>
   </section>
 
   <section class="living-pane" data-living-pane="characters">
@@ -64,6 +65,6 @@
 </main>
 <div class="modal-backdrop hidden" id="livingModal"><div class="modal living-modal"><button class="modal-close" data-living-close>×</button><div id="livingModalContent"></div></div></div>
 <div class="toast-stack" id="toastStack"></div>
-<script>window.LF_LIVING={{ {"threads":threads,"journals":journals,"characters":characters,"submissions":submissions,"gm":gm_view,"pages":wiki.pages,"can_author":can_author}|tojson }};</script>
+<script>window.LF_LIVING={{ {"threads":threads,"journals":journals,"characters":journal_characters,"submissions":submissions,"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":none,"session_id":none,"session_context":false,"sessions":journal_sessions}|tojson }};</script>
 {% endblock %}
-{% block scripts %}<script src="/static/living.js?v=3002"></script>{% endblock %}
+{% block scripts %}<script src="/static/living.js?v=4000"></script>{% endblock %}

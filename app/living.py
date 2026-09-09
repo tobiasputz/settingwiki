@@ -170,14 +170,15 @@ CREATE TABLE IF NOT EXISTS thread_links (
 CREATE TABLE IF NOT EXISTS player_journals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     invite_id INTEGER NOT NULL,
+    character_id INTEGER,
     session_id INTEGER,
     title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '',
     visibility TEXT NOT NULL DEFAULT 'private',
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
-    UNIQUE(invite_id,session_id,title),
-    FOREIGN KEY(invite_id) REFERENCES player_invites(id) ON DELETE CASCADE
+    FOREIGN KEY(invite_id) REFERENCES player_invites(id) ON DELETE CASCADE,
+    FOREIGN KEY(character_id) REFERENCES player_characters(id) ON DELETE SET NULL
 );
 CREATE TABLE IF NOT EXISTS gm_inbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -288,6 +289,30 @@ CREATE TABLE IF NOT EXISTS character_arcs (
 def init_living_db(settings: Settings) -> None:
     with connect(settings) as conn:
         conn.executescript(LIVING_SCHEMA)
+        # v4: session journals can belong to one of a player's characters.
+        # Rebuild the v3 table once so its old uniqueness constraint cannot make
+        # two characters collide on the same session/title combination.
+        journal_cols = {r[1] for r in conn.execute("PRAGMA table_info(player_journals)").fetchall()}
+        if "character_id" not in journal_cols:
+            conn.execute("ALTER TABLE player_journals RENAME TO player_journals_v3")
+            conn.execute("""CREATE TABLE player_journals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invite_id INTEGER NOT NULL,
+                character_id INTEGER,
+                session_id INTEGER,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                visibility TEXT NOT NULL DEFAULT 'private',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                FOREIGN KEY(invite_id) REFERENCES player_invites(id) ON DELETE CASCADE,
+                FOREIGN KEY(character_id) REFERENCES player_characters(id) ON DELETE SET NULL
+            )""")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_player_journals_owner_character ON player_journals(invite_id,character_id,updated_at DESC)")
+            conn.execute("""INSERT INTO player_journals(id,invite_id,character_id,session_id,title,body,visibility,created_at,updated_at)
+                            SELECT id,invite_id,NULL,session_id,title,body,visibility,created_at,updated_at FROM player_journals_v3""")
+            conn.execute("DROP TABLE player_journals_v3")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_player_journals_owner_character ON player_journals(invite_id,character_id,updated_at DESC)")
 
 
 def _rows(settings: Settings, sql: str, params: tuple = ()) -> list[dict]:
@@ -582,23 +607,66 @@ def delete_thread_link(settings:Settings,thread_id:int,target_type:str,target_ke
 
 
 
-def list_journals(settings:Settings,invite_id:int,*,admin:bool=False)->list[dict]:
-    rows=_rows(settings,'SELECT * FROM player_journals WHERE invite_id=? ORDER BY COALESCE(session_id,999999) DESC,updated_at DESC',(int(invite_id),))
-    return rows
+def _journal_rows_with_character(settings:Settings,sql:str,params:tuple=())->list[dict]:
+    return _rows(settings,
+        "SELECT j.*,i.label AS player_label,c.name AS character_name,c.slug AS character_slug, "
+        "s.session_number AS session_number,s.title AS session_title,s.session_date AS session_date "
+        "FROM player_journals j LEFT JOIN player_invites i ON i.id=j.invite_id "
+        "LEFT JOIN player_characters c ON c.id=j.character_id "
+        "LEFT JOIN campaign_sessions s ON s.id=j.session_id " + sql, params)
 
-def list_party_journals(settings:Settings,invite_id:int|None=None,*,admin:bool=False)->list[dict]:
+
+def list_journals(settings:Settings,invite_id:int,*,admin:bool=False,character_id:int|None=None)->list[dict]:
+    where="WHERE j.invite_id=?";params=[int(invite_id)]
+    if character_id is not None:
+        if int(character_id)==0:
+            where+=" AND j.character_id IS NULL"
+        else:
+            where+=" AND (j.character_id=? OR j.character_id IS NULL)";params.append(int(character_id))
+    return _journal_rows_with_character(settings,where+" ORDER BY COALESCE(j.session_id,999999) DESC,j.updated_at DESC",tuple(params))
+
+
+def list_party_journals(settings:Settings,invite_id:int|None=None,*,admin:bool=False,character_id:int|None=None)->list[dict]:
     if admin:
-        return _rows(settings,"SELECT j.*,i.label AS player_label FROM player_journals j LEFT JOIN player_invites i ON i.id=j.invite_id ORDER BY j.updated_at DESC")
-    return _rows(settings,"SELECT j.*,i.label AS player_label FROM player_journals j LEFT JOIN player_invites i ON i.id=j.invite_id WHERE j.visibility='party' OR j.invite_id=? ORDER BY j.updated_at DESC",(int(invite_id or -1),))
-
+        return _journal_rows_with_character(settings,"ORDER BY j.updated_at DESC")
+    iid=int(invite_id or -1)
+    # Party-shared notes from other players stay visible. A player's own
+    # character-scoped notes are filtered to the character they entered the
+    # session as; unassigned legacy/player-wide notes remain available.
+    where="WHERE (j.visibility='party' OR j.invite_id=?)";params=[iid]
+    if character_id is not None:
+        if int(character_id)==0:
+            where+=" AND (j.invite_id!=? OR j.character_id IS NULL)";params.append(iid)
+        else:
+            where+=" AND (j.invite_id!=? OR j.character_id IS NULL OR j.character_id=?)";params.extend([iid,int(character_id)])
+    return _journal_rows_with_character(settings,where+" ORDER BY j.updated_at DESC",tuple(params))
 
 
 def save_journal(settings:Settings,p:dict,invite_id:int)->dict:
-    now=time.time();jid=p.get('id');vals=(int(invite_id),p.get('session_id'),str(p.get('title') or 'Session journal'),str(p.get('body') or ''),str(p.get('visibility') or 'private'),now)
+    now=time.time();jid=p.get('id')
+    character_id=p.get('character_id')
+    if character_id in ('',0,'0'): character_id=None
+    if character_id is not None:
+        try: character_id=int(character_id)
+        except (TypeError,ValueError): raise ValueError('Invalid character.')
+        owner=_row(settings,'SELECT id FROM player_characters WHERE id=? AND invite_id=?',(character_id,int(invite_id)))
+        if not owner: raise PermissionError('You can only attach notes to your own character.')
+    visibility=str(p.get('visibility') or 'private')
+    if visibility not in {'private','party'}: visibility='private'
+    session_id=p.get('session_id')
+    if session_id in ('',0,'0'): session_id=None
+    title=str(p.get('title') or 'Session journal')
+    body=str(p.get('body') or '')
     with connect(settings) as conn:
-        if jid:conn.execute('UPDATE player_journals SET session_id=?,title=?,body=?,visibility=?,updated_at=? WHERE id=? AND invite_id=?',(p.get('session_id'),vals[2],vals[3],vals[4],now,int(jid),int(invite_id)));out=int(jid)
-        else:out=conn.execute('INSERT INTO player_journals(invite_id,session_id,title,body,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',vals[:-1]+(now,now)).lastrowid
-    return _row(settings,'SELECT * FROM player_journals WHERE id=?',(out,)) or {}
+        if jid:
+            current=conn.execute('SELECT invite_id FROM player_journals WHERE id=?',(int(jid),)).fetchone()
+            if not current: raise ValueError('Journal entry not found.')
+            if int(current['invite_id'])!=int(invite_id): raise PermissionError('You can only edit your own journal entries.')
+            conn.execute('UPDATE player_journals SET character_id=?,session_id=?,title=?,body=?,visibility=?,updated_at=? WHERE id=? AND invite_id=?',(character_id,session_id,title,body,visibility,now,int(jid),int(invite_id)));out=int(jid)
+        else:
+            out=conn.execute('INSERT INTO player_journals(invite_id,character_id,session_id,title,body,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',(int(invite_id),character_id,session_id,title,body,visibility,now,now)).lastrowid
+    rows=_journal_rows_with_character(settings,'WHERE j.id=?',(out,))
+    return rows[0] if rows else {}
 
 
 def inbox_items(settings:Settings)->list[dict]:return _rows(settings,'SELECT * FROM gm_inbox ORDER BY status="inbox" DESC,created_at DESC')

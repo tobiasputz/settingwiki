@@ -1,10 +1,15 @@
 (()=>{
   const overlay=document.getElementById('searchOverlay'), input=document.getElementById('globalSearch'), results=document.getElementById('searchResults');
   let searchItems=[],searchIndex=-1;
-  const open=()=>{if(!overlay)return;overlay.classList.add('open');overlay.setAttribute('aria-hidden','false');setTimeout(()=>input?.focus(),40)};
+  const searchLanding=()=>{
+    if(!results)return;let recent=[];try{recent=JSON.parse(localStorage.getItem('loreforge.player.recent')||'[]').slice(0,5)}catch{}
+    results.innerHTML=`<div class="palette-home"><div class="palette-home-section"><small class="palette-home-label">Quick jumps</small><div class="palette-quick-grid"><a href="/session">✦ Session</a><a href="/campaign">◇ Campaign</a><a href="/characters">♟ Characters</a><a href="/mysteries">? Mysteries</a></div></div>${recent.length?`<div class="palette-home-section"><small class="palette-home-label">Recently viewed</small><div class="palette-recent-list">${recent.map(x=>`<a href="${escapeHtml(x.href||('/wiki/'+x.slug))}"><strong>${escapeHtml(x.title||'Lore')}</strong><small>${escapeHtml(x.chapter||'Setting')}</small></a>`).join('')}</div></div>`:''}</div>`;
+  };
+  const open=()=>{if(!overlay)return;overlay.classList.add('open');overlay.setAttribute('aria-hidden','false');if(!input?.value.trim())searchLanding();setTimeout(()=>input?.focus(),40)};
   const close=()=>{overlay?.classList.remove('open');overlay?.setAttribute('aria-hidden','true');searchIndex=-1};
   document.querySelectorAll('[data-open-search]').forEach(b=>b.addEventListener('click',open));
   overlay?.addEventListener('click',e=>{if(e.target===overlay)close()});
+  document.addEventListener('click',e=>{const menus=[...document.querySelectorAll('[data-nav-menu][open]')];menus.forEach(m=>{if(!m.contains(e.target))m.removeAttribute('open')});const opened=e.target.closest('[data-nav-menu]');if(opened)menus.forEach(m=>{if(m!==opened)m.removeAttribute('open')})});
   document.addEventListener('keydown',e=>{
     if((e.key==='/'||((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'))&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){e.preventDefault();open()}
     if(e.key==='Escape')close();
@@ -16,7 +21,7 @@
       if(e.key==='Enter'&&searchIndex>=0)location.href=anchors[searchIndex].href;
     }
   });
-  let timer; input?.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(async()=>{const q=input.value.trim();searchIndex=-1;if(!q){results.innerHTML='<div class="search-hint">Type a place, person, faction, item, or phrase.</div>';return} const data=await fetch('/api/public/search?q='+encodeURIComponent(q)).then(r=>r.json());searchItems=data;results.innerHTML=data.length?data.map(x=>`<a class="search-result" href="${escapeHtml(x.href||('/wiki/'+x.slug))}"><small>${escapeHtml(x.chapter||'Setting')}<span class="search-type">${escapeHtml(x.type||'lore')}</span></small><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.excerpt||'')}</p></a>`).join(''):'<div class="search-hint">No matching lore found.</div>'},160)});
+  let timer; input?.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(async()=>{const q=input.value.trim();searchIndex=-1;if(!q){searchLanding();return} const data=await fetch('/api/public/search?q='+encodeURIComponent(q)).then(r=>r.json());searchItems=data;results.innerHTML=data.length?data.map(x=>`<a class="search-result" href="${escapeHtml(x.href||('/wiki/'+x.slug))}"><small>${escapeHtml(x.chapter||'Setting')}<span class="search-type">${escapeHtml(x.type||'lore')}</span></small><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.excerpt||'')}</p></a>`).join(''):'<div class="search-hint">No matching lore found.</div>'},160)});
 
   // Reading progress.
   const progress=document.getElementById('readingProgress'); if(progress){const update=()=>{const h=document.documentElement.scrollHeight-innerHeight;progress.style.width=(h?scrollY/h*100:0)+'%'};addEventListener('scroll',update,{passive:true});update()}

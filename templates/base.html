@@ -13,7 +13,8 @@
   <link rel="icon" href="/static/loreforge-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Loreforge' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=3002">
+  <link rel="stylesheet" href="/static/wiki.css?v=4000">
+  <link rel="stylesheet" href="/static/tour.css?v=4000">
   {% block head %}{% endblock %}
 </head>
 <body data-admin-view="{{ 'true' if request.session.get('admin') or request.session.get('co_gm') else 'false' }}" data-player-access-key="{{ wiki.player_access_key if wiki else '' }}">
@@ -23,20 +24,30 @@
       <span class="brand-mark">✦</span>
       <span><strong>{{ wiki.title if wiki else 'Loreforge' }}</strong><small>{{ wiki.player_label if wiki and wiki.player_label else 'Campaign Atlas' }}</small></span>
     </a>
-    <nav class="site-nav">
-      <a href="/">Codex</a>
-      <a href="/session" class="nav-session">Session{% if wiki and wiki.live_session and wiki.live_session.status == 'live' %}<i class="live-dot"></i>{% endif %}</a>
-      <a href="/timeline">History</a>
-      <a href="/calendar">Calendar</a>
-      <a href="/characters">Characters</a>
-      <a href="/campaign">Campaign</a>
-      <a href="/mysteries">Mysteries</a>
-      <a href="/network">Lore Network</a>
-      <a href="/structures">Families & Orders</a>
-      {% if maps|default([]) %}<a href="/#atlas">Atlas</a>{% endif %}
-      <button class="notification-open" data-open-notifications aria-label="Notifications">✦<i id="notificationCount"></i></button>
-      <button class="search-open" data-open-search aria-label="Open command palette">⌕ <span>Search</span><kbd>⌘K</kbd></button>
-      {% if request.session.get('admin') or request.session.get('co_gm') %}{% if request.session.get('admin') %}<a href="/admin" class="gm-nav-link">Studio</a>{% endif %}<a href="/admin/campaign" class="gm-nav-link">World</a><a href="/admin/living" class="gm-nav-link">Living</a><a href="/gm/session" class="gm-nav-link">GM Session</a>{% elif wiki and wiki.player_label %}<button type="button" class="nav-signout" data-player-logout title="Sign out of this campaign">Sign out</button>{% endif %}
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a href="/" data-tour-target="codex">Codex</a>
+      <a href="/session" class="nav-session" data-tour-target="session">Session{% if wiki and wiki.live_session and wiki.live_session.status == 'live' %}<i class="live-dot"></i>{% endif %}</a>
+      <a href="/campaign" data-tour-target="campaign">Campaign</a>
+      <a href="/characters" data-tour-target="characters">Characters</a>
+      {% if maps|default([]) %}<a href="/#atlas" data-tour-target="atlas">Atlas</a>{% endif %}
+      <details class="nav-menu" data-nav-menu data-tour-target="explore">
+        <summary>Explore <span>⌄</span></summary>
+        <div class="nav-menu-popover">
+          <a href="/timeline"><span>⌛</span><div><strong>History</strong><small>World chronicle</small></div></a>
+          <a href="/calendar"><span>☾</span><div><strong>Calendar</strong><small>Campaign date & cycles</small></div></a>
+          <a href="/mysteries"><span>◇</span><div><strong>Mysteries</strong><small>Clues & theories</small></div></a>
+          <a href="/network"><span>⌘</span><div><strong>Lore Network</strong><small>Connections</small></div></a>
+          <a href="/structures"><span>♜</span><div><strong>Families & Orders</strong><small>People & factions</small></div></a>
+          <a href="/handouts"><span>✉</span><div><strong>Handouts</strong><small>Letters & props</small></div></a>
+          <a href="/updates"><span>✦</span><div><strong>What's new</strong><small>Recent discoveries</small></div></a>
+          <button type="button" data-start-tour><span>?</span><div><strong>Quick tour</strong><small>Show me around</small></div></button>
+        </div>
+      </details>
+      <button class="notification-open" data-open-notifications aria-label="Notifications" data-tour-target="notifications">✦<i id="notificationCount"></i></button>
+      <button class="search-open" data-open-search aria-label="Open command palette" data-tour-target="search">⌕ <span>Search</span><kbd>⌘K</kbd></button>
+      {% if request.session.get('admin') or request.session.get('co_gm') %}
+      <details class="nav-menu gm-nav-menu" data-nav-menu data-tour-target="gm-tools"><summary>GM <span>⌄</span></summary><div class="nav-menu-popover gm-menu-popover"><a href="/gm/session"><span>✦</span><div><strong>GM Session</strong><small>Run tonight's table</small></div></a>{% if request.session.get('admin') %}<a href="/admin"><span>✎</span><div><strong>Studio</strong><small>Edit the source</small></div></a>{% endif %}<a href="/admin/campaign"><span>⚙</span><div><strong>World</strong><small>Campaign control</small></div></a><a href="/admin/living"><span>◔</span><div><strong>Living</strong><small>World state</small></div></a></div></details>
+      {% elif wiki and wiki.player_label %}<button type="button" class="nav-signout" data-player-logout title="Sign out of this campaign">Sign out</button>{% endif %}
     </nav>
   </header>
 
@@ -51,7 +62,7 @@
   </nav>
   <div class="mobile-more-sheet" id="mobileMoreSheet" aria-hidden="true">
     <div class="mobile-sheet-handle"></div>
-    <a href="/characters">♟ Characters</a><a href="/timeline">⌛ History</a><a href="/mysteries">◇ Mysteries</a><a href="/network">⌘ Lore Network</a><a href="/structures">♜ Families & Orders</a><a href="/handouts">✉ Handouts</a><a href="/updates">✦ What's new</a><a href="/calendar">☾ Calendar</a><a href="/#atlas">⌖ Atlas</a><button type="button" class="mobile-sheet-action" data-offline-toggle>⇩ Offline cache: off</button>
+    <a href="/characters">♟ Characters</a><a href="/timeline">⌛ History</a><a href="/mysteries">◇ Mysteries</a><a href="/network">⌘ Lore Network</a><a href="/structures">♜ Families & Orders</a><a href="/handouts">✉ Handouts</a><a href="/updates">✦ What's new</a><a href="/calendar">☾ Calendar</a><a href="/#atlas">⌖ Atlas</a><button type="button" class="mobile-sheet-action" data-start-tour>❔ Quick tour</button><button type="button" class="mobile-sheet-action" data-offline-toggle>⇩ Offline cache: off</button>
     {% if request.session.get('admin') or request.session.get('co_gm') %}<hr><a href="/gm/session">⚙ GM Session</a>{% if request.session.get('admin') %}<a href="/admin">✎ Campaign Studio</a>{% endif %}<a href="/admin/campaign">✦ World Builder</a><a href="/admin/living">◔ Living Campaign</a>{% elif wiki and wiki.player_label %}<hr><button type="button" class="mobile-sheet-action danger" data-player-logout>↪ Sign out of {{ wiki.player_label }}</button>{% endif %}
   </div>
 
@@ -73,7 +84,8 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=3002"></script>
+  <script src="/static/wiki.js?v=4000"></script>
+  <script src="/static/tour.js?v=4000"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

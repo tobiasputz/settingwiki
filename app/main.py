@@ -687,7 +687,39 @@ def player_session_screen(request: Request):
             pin_ids={x.get("id") for x in mystery["pins"]}
             mystery["edges"]=[e for e in mystery.get("edges",[]) if e.get("source_pin") in pin_ids and e.get("target_pin") in pin_ids]
     can_author = is_gm(request) or (not archive_mode() and bool(current_player_invite(request)) and player_role(request) == "player")
-    return templates.TemplateResponse("session.html", {"request": request, "wiki": wiki, "maps": maps, "session": live, "player": invite, "updates": recent_updates(settings, iid, 12,admin=is_gm(request)), "mysteries": mysteries,"session_history":list(reversed(history)),"calendar":_calendar_config(),"threads":list_threads(settings,admin=is_gm(request),invite_id=iid),"party_journals":list_party_journals(settings,iid,admin=is_gm(request)),"gm_view":is_gm(request),"can_author":can_author,"archive_mode":archive_mode()})
+    session_characters,active_character,character_selection_made=_session_character_context(request,live)
+    journal_character_filter=None
+    if not is_gm(request) and character_selection_made:
+        journal_character_filter=int((active_character or {}).get("id") or 0)
+    party_journals=list_party_journals(settings,iid,admin=is_gm(request),character_id=journal_character_filter)
+    return templates.TemplateResponse("session.html", {
+        "request": request, "wiki": wiki, "maps": maps, "session": live, "player": invite,
+        "updates": recent_updates(settings, iid, 12,admin=is_gm(request)), "mysteries": mysteries,
+        "session_history":list(reversed(history)),"calendar":_calendar_config(),
+        "threads":list_threads(settings,admin=is_gm(request),invite_id=iid),"party_journals":party_journals,
+        "gm_view":is_gm(request),"can_author":can_author,"archive_mode":archive_mode(),
+        "session_characters":session_characters,"active_character":active_character,
+        "character_selection_made":character_selection_made,
+    })
+
+
+@app.post("/api/player/session-character")
+def player_session_character(request:Request,payload:dict=Body(...)):
+    if not player_allowed(request): raise HTTPException(401)
+    if is_gm(request): raise HTTPException(403,"GM view does not use a player character identity.")
+    iid=_invite_id(request)
+    if iid is None: raise HTTPException(403,"A personal invitation is required to choose a session character.")
+    live=get_live_session(settings,invite_id=iid,admin=False);session_key=int((live or {}).get("id") or 0)
+    requested=payload.get("character_id")
+    if requested in (None,"",0,"0"):
+        request.session["session_character_id"]=0;request.session["session_character_session_id"]=session_key
+        return {"ok":True,"character":None,"session_id":session_key}
+    try: cid=int(requested)
+    except (TypeError,ValueError): raise HTTPException(400,"Invalid character.")
+    char=get_player_character(settings,cid,invite_id=iid,admin=False)
+    if not char or int(char.get("invite_id") or -1)!=int(iid): raise HTTPException(403,"You can only enter a session as one of your own characters.")
+    request.session["session_character_id"]=cid;request.session["session_character_session_id"]=session_key
+    return {"ok":True,"character":{"id":cid,"name":char.get("name"),"portrait_url":char.get("portrait_url","")},"session_id":session_key}
 
 
 @app.get("/timeline", response_class=HTMLResponse)
@@ -1799,6 +1831,35 @@ def _character_owned(request: Request, character_id: int) -> dict:
     return char
 
 
+def _own_player_characters(request: Request) -> list[dict]:
+    iid=_invite_id(request)
+    if iid is None or is_gm(request): return []
+    rows=list_player_characters(settings,invite_id=iid,admin=False)
+    own=[c for c in rows if int(c.get("invite_id") or -1)==int(iid)]
+    return sorted(own,key=lambda c:(str(c.get("status") or "active")!="active",str(c.get("name") or "").lower()))
+
+
+def _session_character_context(request: Request, live: dict|None) -> tuple[list[dict],dict|None,bool]:
+    """Return own characters, selected character, and whether identity was chosen for this session.
+
+    The choice is stored in the signed login session and keyed to the live campaign
+    session, so a new tabletop session asks multi-character players again instead
+    of silently reusing last week's identity.
+    """
+    chars=_own_player_characters(request)
+    if not chars: return [],None,False
+    session_key=int((live or {}).get("id") or 0)
+    selected_for=int(request.session.get("session_character_session_id") or -1)==session_key
+    selected_id=int(request.session.get("session_character_id") or 0) if selected_for else 0
+    active=next((c for c in chars if int(c.get("id") or -1)==selected_id),None)
+    if len(chars)==1 and not selected_for:
+        active=chars[0];selected_for=True
+        request.session["session_character_id"]=int(active["id"]);request.session["session_character_session_id"]=session_key
+    elif selected_id and active is None:
+        request.session.pop("session_character_id",None);request.session.pop("session_character_session_id",None);selected_for=False
+    return chars,active,selected_for
+
+
 @app.get("/campaign", response_class=HTMLResponse)
 def living_campaign_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
@@ -1815,6 +1876,8 @@ def living_campaign_page(request: Request):
         "rumors":list_rumors(settings,admin=gm),"journals":([] if iid is None else list_journals(settings,iid,admin=gm)),
         "characters":chars,"notifications":list_notifications(settings,iid,admin=gm),"runtime_states":runtime_states(settings,admin=gm),
         "submissions":list_submissions(settings,invite_id=iid,admin=gm),"calendar":_calendar_config(),"can_author":can_author,"archive_mode":archive_mode(),
+        "journal_characters":[c for c in chars if iid is not None and int(c.get("invite_id") or -1)==int(iid)],
+        "journal_sessions":list_sessions(settings,public=not gm,invite_id=iid),
     })
 
 
@@ -2006,7 +2069,16 @@ def player_journal_save(request:Request,payload:dict=Body(...)):
     require_player_author(request)
     iid=_invite_id(request)
     if iid is None:raise HTTPException(403,"A personal invitation is required for journals.")
-    return save_journal(settings,payload,iid)
+    payload=dict(payload)
+    # Session note forms inherit the character identity chosen for the current
+    # live session unless the client explicitly chose a different/general scope.
+    if "character_id" not in payload:
+        live=get_live_session(settings,invite_id=iid,admin=False);session_key=int((live or {}).get("id") or 0)
+        if int(request.session.get("session_character_session_id") or -1)==session_key:
+            payload["character_id"]=int(request.session.get("session_character_id") or 0) or None
+    try:return save_journal(settings,payload,iid)
+    except PermissionError as e:raise HTTPException(403,str(e))
+    except ValueError as e:raise HTTPException(400,str(e))
 
 
 @app.post("/api/admin/inbox")

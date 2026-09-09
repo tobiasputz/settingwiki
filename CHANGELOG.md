@@ -1,3 +1,15 @@
+# Loreforge 4.0.0 — player-first sessions & quality of life
+
+- Added **session character identity**. Players with multiple PCs can enter each live session as a specific character, switch deliberately, or remain player-wide. The selected identity is remembered for that live session only, so the next session can prompt again when appropriate.
+- Made **player journals character-scoped**. A note attached to one character is hidden when that same player enters as another character; player-wide notes remain available separately. Existing v3 journals migrate safely as player-wide notes. Party-shared notes from other players remain visible according to their normal visibility rules.
+- Added character ownership validation to journal writes so a player cannot attach a private note to somebody else's character by crafting an API request.
+- Improved journal usability with **draft autosave/recovery**, character filters, readable session labels, and a session picker that uses session number/title instead of raw database IDs.
+- Reworked the desktop header into a calmer player-first navigation: core destinations remain one click away, secondary lore tools live under **Explore**, and GM-only destinations live under one **GM** menu instead of filling the top bar. Mobile navigation keeps its dedicated touch layout.
+- Added a **role-aware Quick Tour** for players and GMs. It launches on first use, adapts to the current screen/role, supports keyboard navigation, and can be replayed any time from Explore, mobile More, or GM toolbars.
+- Improved the global search palette with **quick jumps** and a **recently viewed lore** section before the player starts typing, reducing navigation friction at the table.
+- Bumped all application/PWA asset caches to v4000 so existing installations fetch the v4 JavaScript/CSS instead of retaining older cached UI code.
+- Added regression coverage for character-scoped journal isolation, cross-player ownership checks, v3 journal migration, session identity switching, v4 assets, and cache-version consistency.
+
 # Loreforge 3.0.2 — Studio stale-cache recovery
 
 - Fixed the upgrade path that could keep serving the broken v3.0.0 Campaign Studio JavaScript even after the v3.0.1 source fix was deployed. The PWA service worker had cached all `/static/*` assets cache-first while the HTML continued to request `admin.js?v=3000`, so an existing browser could remain pinned to the old file indefinitely.

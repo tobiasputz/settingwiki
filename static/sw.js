@@ -1,9 +1,9 @@
-const STATIC='loreforge-static-v3002';
-const PRIVATE='loreforge-private-v3002';
-const META='loreforge-offline-meta-v3000';
+const STATIC='loreforge-static-v4000';
+const PRIVATE='loreforge-private-v4000';
+const META='loreforge-offline-meta-v4000';
 const ENABLE_KEY='/__loreforge_offline_enabled__';
-const SHELL=['/static/wiki.css?v=3002','/static/wiki.js?v=3002','/static/loreforge-icon.svg','/static/icon-192.png','/static/icon-512.png'];
-const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/archive'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
+const SHELL=['/static/wiki.css?v=4000','/static/wiki.js?v=4000','/static/tour.css?v=4000','/static/tour.js?v=4000','/static/loreforge-icon.svg','/static/icon-192.png','/static/icon-512.png'];
+const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/structures','/archive'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
 const privateAsset=u=>u.pathname.startsWith('/project-asset/')||u.pathname.startsWith('/uploads/');
 async function offlineEnabled(){const c=await caches.open(META);return !!(await c.match(ENABLE_KEY))}
 async function enableOffline(){const c=await caches.open(META);await c.put(ENABLE_KEY,new Response('1'));return true}

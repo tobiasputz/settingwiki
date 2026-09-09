@@ -33,6 +33,19 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Personal player invitations.** Player access is invitation-only by default. **Admin → Access** creates one signed link per player; each link can be copied, expired, revoked, restored, rotated, device-limited, or have its remembered devices reset independently. Legacy shared-password and public modes remain available, while the editor continues to use `ADMIN_PASSWORD`.
 - **Read → edit source bridge.** When you browse the player Codex while logged in as GM, a persistent **Edit source** control opens the exact LaTeX file/line in Campaign Studio. On long Person-of-Note pages it follows the section currently being read, and the editor offers **Back to entry** after the correction.
 
+## Loreforge 4: player-first sessions + table QoL
+
+Loreforge 4 focuses on reducing the little bits of friction that interrupt actual play. The main player destinations stay obvious, session bookkeeping understands which PC somebody is playing, and first-time users no longer have to discover the interface by trial and error.
+
+- **Enter a session as a character:** if an invited player owns multiple PCs, Player Session asks which one they are playing tonight. A player can also explicitly enter without a character scope. The choice is tied to the current live session rather than becoming a permanent account setting.
+- **Character-scoped session journals:** private/party journal entries can belong to a specific PC. Switching from one of your characters to another hides the first character's personal notes while retaining explicitly player-wide notes. Older journals are migrated as player-wide so upgrades do not lose or misassign existing writing.
+- **Safer ownership boundaries:** the backend validates character ownership on journal writes rather than trusting browser-submitted IDs.
+- **Faster note-taking:** unfinished new journal entries are locally draft-saved and restored; campaign journals can be filtered by character; session references display useful session numbers/titles rather than opaque IDs.
+- **Calmer desktop navigation:** the permanent bar keeps Codex, Session, Campaign, Characters and Atlas prominent. History, Calendar, Mysteries, Lore Network, Families & Orders, Handouts and release notes move into **Explore**; Studio/World/Living/GM Session move into a compact **GM** menu for authorized users.
+- **Quick Tour for everyone:** a short role-aware onboarding tour runs once on first use and can be replayed from the UI whenever somebody needs a refresher. Player steps emphasize Session, Characters, Campaign, Search and discovery; GM steps emphasize the authoring/session-control workflow.
+- **Useful search before typing:** opening Search immediately offers common destinations plus recently viewed lore, making it useful as a command palette during a session instead of only as full-text search.
+- **PWA-safe upgrade:** v4 uses fresh static/cache versions and retains network-first static fetching so installed/home-screen clients do not get pinned to obsolete JavaScript after deployment.
+
 ## Loreforge 3: living world + player agency
 
 Loreforge 3 deliberately separates **authored lore** from **campaign state**. Your `.tex` files remain the durable setting manuscript; fast-changing table state lives in the database where it can evolve session by session without turning a 300+ page book into application metadata.
