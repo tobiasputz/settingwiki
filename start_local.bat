@@ -8,8 +8,8 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo Starting Loreforge at http://127.0.0.1:8000
-if "%ADMIN_PASSWORD%"=="" echo Local editor password: loreforge
+echo Starting Seeker at http://127.0.0.1:8000
+if "%ADMIN_PASSWORD%"=="" echo Local editor password: seeker
  echo Press Ctrl+C to stop the server.
 echo.
 docker compose up --build

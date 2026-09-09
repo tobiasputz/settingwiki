@@ -1,26 +1,26 @@
 {% extends "base.html" %}
-{% block title %}Campaign · {{ wiki.title }}{% endblock %}
+{% block title %}Chronicle · {{ wiki.title }}{% endblock %}
 {% block body %}
 <main class="living-shell">
   <section class="living-hero">
-    <div><span class="eyebrow">LIVING CAMPAIGN</span><h1>Your campaign desk</h1><p>Keep track of what matters at the table: plot threads, journals, rumors, character arcs, discoveries, and the changing world.</p></div>
-    <div class="living-hero-actions">{% if gm_view %}<a class="primary-button" href="/admin/living">GM world state →</a>{% endif %}{% if can_author %}<button class="ghost-button" data-living-new-thread>＋ Add plot thread</button>{% elif archive_mode %}<span class="living-readonly-chip">Archived · read only</span>{% endif %}</div>
+    <div><span class="eyebrow">THE CHRONICLE</span><h1>Your table memory</h1><p>Keep the things that survive between sessions: open threads, journals, rumors, character arcs, discoveries, and the world as your party currently knows it.</p></div>
+    <div class="living-hero-actions">{% if gm_view %}<a class="primary-button" href="/admin/living">GM World State →</a>{% endif %}{% if can_author %}<button class="ghost-button" data-living-new-thread>＋ Add plot thread</button>{% elif archive_mode %}<span class="living-readonly-chip">Archived · read only</span>{% endif %}</div>
   </section>
 
   {% if notifications %}<section class="living-notice-strip" id="livingNotifications">{% for n in notifications[:5] %}<article data-notification-id="{{ n.id }}" class="kind-{{ n.kind }}"><span>✦</span><div><small>{{ n.kind|replace('_',' ')|upper }}</small><strong>{{ n.title }}</strong><p>{{ n.body }}</p></div><button data-dismiss-notice="{{ n.id }}">×</button></article>{% endfor %}</section>{% endif %}
 
-  <nav class="living-tabs" aria-label="Campaign desk sections">
+  <nav class="living-tabs" aria-label="Chronicle sections">
     <button class="active" data-living-tab="threads">Threads <i>{{ threads|selectattr('status','equalto','open')|list|length }}</i></button>
     <button data-living-tab="journal">Journal</button>
     <button data-living-tab="characters">Characters <i>{{ characters|length }}</i></button>
     <button data-living-tab="rumors">Rumors</button>
     <button data-living-tab="world">World pulse</button>
-    <button data-living-tab="assistant">Ask Loreforge</button>
+    <button data-living-tab="assistant">Ask Seeker</button>
     <button data-living-tab="contribute">Contribute</button>
   </nav>
 
   <section class="living-pane active" data-living-pane="threads" id="threads">
-    <div class="living-pane-head"><div><span class="eyebrow">PLAYER-MAINTAINED</span><h2>Plot threads & quests</h2><p>These belong to the table, not just the GM. Add clues, update status, connect lore, and keep your own campaign memory alive.</p></div>{% if can_author %}<button class="primary-button" data-living-new-thread>＋ New thread</button>{% endif %}</div>
+    <div class="living-pane-head"><div><span class="eyebrow">PLAYER-MAINTAINED</span><h2>Threads worth following</h2><p>Keep the leads, promises, suspicions and unfinished business your table actually cares about. Add clues, connect lore and carry them from session to session.</p></div>{% if can_author %}<button class="primary-button" data-living-new-thread>＋ New thread</button>{% endif %}</div>
     <div class="thread-board" id="threadBoard">
       {% for t in threads %}<article class="thread-card priority-{{ t.priority }} status-{{ t.status }}" data-thread-id="{{ t.id }}">
         <header><div><small>{{ t.priority|upper }} · {{ t.status|upper }}</small><h3>{{ t.title }}</h3></div><button data-thread-edit="{{ t.id }}">•••</button></header><p>{{ t.summary or 'No summary yet. Add what the party currently thinks is going on.' }}</p>
@@ -32,7 +32,7 @@
   </section>
 
   <section class="living-pane" data-living-pane="journal">
-    <div class="living-pane-head"><div><span class="eyebrow">YOUR MEMORY</span><h2>Session journal</h2><p>Attach notes to a character when they belong to that hero, or leave them player-wide. At the live table Loreforge automatically filters your private notes to the character you entered as.</p></div>{% if can_author %}<button class="primary-button" data-new-journal>＋ Journal entry</button>{% endif %}</div>
+    <div class="living-pane-head"><div><span class="eyebrow">YOUR MEMORY</span><h2>Session journal</h2><p>Attach notes to a character when they belong to that hero, or leave them player-wide. At the live table Seeker automatically filters your private notes to the character you entered as.</p></div>{% if can_author %}<button class="primary-button" data-new-journal>＋ Journal entry</button>{% endif %}</div>
     {% if journal_characters %}<div class="journal-filter" aria-label="Filter journal by character"><button class="active" data-journal-filter="all">All notes</button><button data-journal-filter="general">Player-wide</button>{% for c in journal_characters %}<button data-journal-filter="{{ c.id }}">♟ {{ c.name }}</button>{% endfor %}</div>{% endif %}
     <div class="journal-grid" id="journalGrid">{% for j in journals %}<article data-journal-id="{{ j.id }}" data-journal-character="{{ j.character_id or 'general' }}"><small>{{ 'PRIVATE' if j.visibility=='private' else 'PARTY JOURNAL' }}{% if j.character_name %} · ♟ {{ j.character_name }}{% else %} · PLAYER-WIDE{% endif %}{% if j.session_id %} · SESSION {{ j.session_number or j.session_id }}{% if j.session_title %} · {{ j.session_title }}{% endif %}{% endif %}</small><h3>{{ j.title }}</h3><p>{{ j.body }}</p>{% if can_author %}<button data-edit-journal="{{ j.id }}">Edit</button>{% endif %}</article>{% else %}<div class="living-empty"><span>✎</span><h3>No journal entries yet</h3><p>Write down the thing everyone will otherwise forget by next week.</p></div>{% endfor %}</div>
   </section>
@@ -54,8 +54,8 @@
   </section>
 
   <section class="living-pane" data-living-pane="assistant">
-    <div class="living-pane-head"><div><span class="eyebrow">SPOILER-AWARE</span><h2>Ask the campaign</h2><p>Loreforge only searches lore your current invitation is allowed to see. If an AI provider is configured, the same spoiler-filtered context is used.</p></div></div>
-    <div class="assistant-box"><textarea id="assistantQuestion" placeholder="What do we currently know about the Sunstone?"></textarea><button id="askLoreforge" class="primary-button">Ask Loreforge</button><div id="assistantAnswer" class="assistant-answer"><span>✦</span><p>Ask about people, places, history, factions, or what the party currently knows.</p></div></div>
+    <div class="living-pane-head"><div><span class="eyebrow">SPOILER-AWARE</span><h2>Ask Seeker</h2><p>Seeker only searches lore your current invitation is allowed to see. If an AI provider is configured, the same spoiler-filtered context is used.</p></div></div>
+    <div class="assistant-box"><textarea id="assistantQuestion" placeholder="What do we currently know about the Sunstone?"></textarea><button id="askSeeker" class="primary-button">Ask Seeker</button><div id="assistantAnswer" class="assistant-answer"><span>✦</span><p>Ask about people, places, history, factions, or what the party currently knows.</p></div></div>
   </section>
 
   <section class="living-pane" data-living-pane="contribute">
@@ -67,4 +67,4 @@
 <div class="toast-stack" id="toastStack"></div>
 <script>window.LF_LIVING={{ {"threads":threads,"journals":journals,"characters":journal_characters,"submissions":submissions,"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":none,"session_id":none,"session_context":false,"sessions":journal_sessions}|tojson }};</script>
 {% endblock %}
-{% block scripts %}<script src="/static/living.js?v=4000"></script>{% endblock %}
+{% block scripts %}<script src="/static/living.js?v=4100"></script>{% endblock %}

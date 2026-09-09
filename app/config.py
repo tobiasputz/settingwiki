@@ -59,7 +59,7 @@ def load_settings() -> Settings:
             generated = True
     if generated:
         print("\n" + "=" * 72)
-        print("LOREFORGE FIRST-RUN ADMIN PASSWORD:", admin_password)
+        print("SEEKER FIRST-RUN ADMIN PASSWORD:", admin_password)
         print("Set ADMIN_PASSWORD in Railway Variables to choose your own password.")
         print("=" * 72 + "\n", flush=True)
 

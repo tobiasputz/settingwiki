@@ -1,17 +1,23 @@
-const STATIC='loreforge-static-v4000';
-const PRIVATE='loreforge-private-v4000';
-const META='loreforge-offline-meta-v4000';
-const ENABLE_KEY='/__loreforge_offline_enabled__';
-const SHELL=['/static/wiki.css?v=4000','/static/wiki.js?v=4000','/static/tour.css?v=4000','/static/tour.js?v=4000','/static/loreforge-icon.svg','/static/icon-192.png','/static/icon-512.png'];
+const STATIC='seeker-static-v4100';
+const PRIVATE='seeker-private-v4100';
+const META='seeker-offline-meta-v4100';
+const ENABLE_KEY='/__seeker_offline_enabled__';
+const SHELL=['/static/wiki.css?v=4100','/static/wiki.js?v=4100','/static/tour.css?v=4100','/static/tour.js?v=4100','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png'];
 const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/structures','/archive'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
 const privateAsset=u=>u.pathname.startsWith('/project-asset/')||u.pathname.startsWith('/uploads/');
 async function offlineEnabled(){const c=await caches.open(META);return !!(await c.match(ENABLE_KEY))}
 async function enableOffline(){const c=await caches.open(META);await c.put(ENABLE_KEY,new Response('1'));return true}
 async function disableOffline(){await caches.delete(PRIVATE);const c=await caches.open(META);await c.delete(ENABLE_KEY);return true}
 self.addEventListener('install',e=>e.waitUntil(caches.open(STATIC).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
-self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>(k.startsWith('loreforge-static-')&&k!==STATIC)||(k.startsWith('loreforge-private-')&&k!==PRIVATE)||(k.startsWith('loreforge-offline-meta-')&&k!==META)).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
+self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>{
+  const oldSeeker=(k.startsWith('seeker-static-')&&k!==STATIC)||(k.startsWith('seeker-private-')&&k!==PRIVATE)||(k.startsWith('seeker-offline-meta-')&&k!==META);
+  const oldLoreforge=k.startsWith('loreforge-static-')||k.startsWith('loreforge-private-')||k.startsWith('loreforge-offline-meta-');
+  return oldSeeker||oldLoreforge;
+}).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{
   const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin)return;
+  // Deployed static files are network-first so an old service worker can never
+  // pin a stale JS bundle after an upgrade. The versioned cache is only fallback.
   if(u.pathname.startsWith('/static/')){e.respondWith(fetch(e.request).then(r=>{if(r.ok){const copy=r.clone();caches.open(STATIC).then(c=>c.put(e.request,copy))}return r}).catch(()=>caches.match(e.request)));return}
   if(privatePage(u)||privateAsset(u)){
     e.respondWith((async()=>{
@@ -19,8 +25,7 @@ self.addEventListener('fetch',e=>{
       try{
         const r=await fetch(e.request);
         // Invitation-protected campaign data is cached only by explicit player
-        // opt-in. Never persist redirects/login gates/error responses. Assets are
-        // cached only as the player actually visits pages that request them.
+        // opt-in. Never persist redirects/login gates/error responses.
         const type=r.headers.get('content-type')||'';
         const cacheablePage=privatePage(u)&&type.includes('text/html');
         const cacheableAsset=privateAsset(u)&&(type.startsWith('image/')||type.startsWith('audio/')||type==='application/pdf');

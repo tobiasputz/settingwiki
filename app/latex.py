@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import html
 import json
+import functools
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -141,7 +143,7 @@ def expand_project(settings: Settings, main_file: str | None = None) -> list[Sou
                 if inc:
                     walk(inc)
                 else:
-                    out.append(SourceLine(rel, line_no, f"% [Loreforge: unresolved include {match.group(1)}]"))
+                    out.append(SourceLine(rel, line_no, f"% [Seeker: unresolved include {match.group(1)}]"))
                 cursor = match.end()
             if found:
                 after = clean[cursor:]
@@ -592,10 +594,10 @@ def build_wiki(settings: Settings) -> dict:
     in_document = False
     saw_document = False
     for src in lines:
-        # Preserve Loreforge's web-only image placement comment until the
+        # Preserve Seeker's web-only image placement comment until the
         # fragment renderer consumes it. Ordinary LaTeX comments are still
         # stripped here so they never become player-visible prose.
-        if re.match(r"^\s*%\s*loreforge-(?:image|panel-start|panel-end|reveal-start|reveal-end)\b", src.text, flags=re.IGNORECASE):
+        if re.match(r"^\s*%\s*(?:loreforge|seeker)-(?:image|panel-start|panel-end|reveal-start|reveal-end)\b", src.text, flags=re.IGNORECASE):
             line = src.text
         else:
             line = strip_comments(src.text)
@@ -761,8 +763,9 @@ def build_wiki(settings: Settings) -> dict:
         bucket["presentation"]["navigation_art_is_auto"] = bool(auto_navigation_art and auto_cover and not bucket["presentation"].get("toc_image_url"))
 
     payload = {
+        "renderer_version": 4100,
         "title": get_setting(settings, "site_title", "") or analysis["title"],
-        "tagline": get_setting(settings, "tagline", "Explore the people, places, histories, and mysteries of the campaign."),
+        "tagline": get_setting(settings, "tagline", "Follow the people, places, histories, and secrets of the world."),
         "author": analysis["author"],
         "generated_at": time.time(),
         "main_file": analysis["main_file"],
@@ -771,8 +774,20 @@ def build_wiki(settings: Settings) -> dict:
         "analysis": analysis,
     }
     settings.build_dir.mkdir(parents=True, exist_ok=True)
-    (settings.build_dir / "wiki_index.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (settings.build_dir / "wiki_index.json").write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     return payload
+
+
+@functools.lru_cache(maxsize=1)
+def _load_wiki_file_cached(path_text: str, mtime_ns: int, size: int) -> dict:
+    """Parse a generated Codex index once per on-disk version.
+
+    The generated index can be several megabytes for a mature campaign. v4 read
+    and JSON-decoded it on every page request and search keystroke. Keying this
+    single-entry cache by file signature removes that repeated allocation while
+    still noticing every rebuild immediately.
+    """
+    return json.loads(Path(path_text).read_text(encoding="utf-8"))
 
 
 def load_wiki(settings: Settings) -> dict:
@@ -780,7 +795,8 @@ def load_wiki(settings: Settings) -> dict:
     if not path.exists():
         return build_wiki(settings)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        stat = path.stat()
+        return _load_wiki_file_cached(str(path), int(stat.st_mtime_ns), int(stat.st_size))
     except Exception:
         return build_wiki(settings)
 
@@ -1168,20 +1184,20 @@ def _parse_scene_directive(value: str) -> dict:
 
 
 def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "", analysis: dict | None = None, _allow_panels: bool = True) -> tuple[str, str]:
-    # Loreforge image/panel directives are comments so they remain completely invisible
+    # Seeker image/panel directives are comments so they remain completely invisible
     # to TeX/Overleaf while giving the responsive wiki explicit layout intent.
-    # Example: % loreforge-image: layout=right width=38 frame=ornate parallax=true
+    # Example: % seeker-image: layout=right width=38 frame=ornate parallax=true
     # Scene panels are web-only wrappers around normal LaTeX prose. They let the
     # GM put a selected passage over atmospheric artwork without changing the PDF.
     tokens: dict[str, str] = {}
     if _allow_panels:
         # Progressive lore blocks use comments so the canonical PDF source is
         # unchanged. Example:
-        #   % loreforge-reveal-start: key=corvina-truth rumor="Something is off."
+        #   % seeker-reveal-start: key=corvina-truth rumor="Something is off."
         #   Secret paragraph visible after the GM reveals it.
-        #   % loreforge-reveal-end
+        #   % seeker-reveal-end
         reveal_re = re.compile(
-            r"(?ms)^[ \t]*%\s*loreforge-reveal-start\s*:\s*([^\r\n]+)\r?\n(.*?)^[ \t]*%\s*loreforge-reveal-end\s*$"
+            r"(?ms)^[ \t]*%\s*(?:loreforge|seeker)-reveal-start\s*:\s*([^\r\n]+)\r?\n(.*?)^[ \t]*%\s*(?:loreforge|seeker)-reveal-end\s*$"
         )
         def reveal_sub(m: re.Match) -> str:
             try:
@@ -1204,7 +1220,7 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
         raw = reveal_re.sub(reveal_sub, raw)
 
         panel_re = re.compile(
-            r"(?ms)^[ \t]*%\s*loreforge-panel-start\s*:\s*([^\r\n]+)\r?\n(.*?)^[ \t]*%\s*loreforge-panel-end\s*$"
+            r"(?ms)^[ \t]*%\s*(?:loreforge|seeker)-panel-start\s*:\s*([^\r\n]+)\r?\n(.*?)^[ \t]*%\s*(?:loreforge|seeker)-panel-end\s*$"
         )
         def panel_sub(m: re.Match) -> str:
             opts = _parse_scene_directive(m.group(1))
@@ -1233,7 +1249,7 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
         token = f"@@LOREFORGE_IMGDIR_{len(directive_values)}@@"
         directive_values[token] = _parse_image_directive(m.group(1))
         return token
-    raw = re.sub(r"(?mi)^[ \t]*%\s*loreforge-image\s*:\s*([^\r\n]+)$", protect_directive, raw)
+    raw = re.sub(r"(?mi)^[ \t]*%\s*(?:loreforge|seeker)-image\s*:\s*([^\r\n]+)$", protect_directive, raw)
 
     # Remove ordinary comments and document-only commands while preserving content arguments.
     raw = "\n".join(strip_comments(x) for x in raw.splitlines())
@@ -1383,7 +1399,7 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
     )
 
     # The user's legacy \image{width}{path} helper now behaves like a native
-    # Loreforge image on the wiki while remaining untouched for TeX itself.
+    # Seeker image on the wiki while remaining untouched for TeX itself.
     def render_custom_image(a: list[str]) -> str:
         width_raw, ref = a[0].strip(), a[1].strip()
         url = asset_url(settings, ref)
@@ -1424,7 +1440,7 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
         url = asset_url(settings, ref)
         token = f"@@LOREFORGE_IMAGE_{len(tokens)}@@"
 
-        # A protected Loreforge comment immediately before an image overrides
+        # A protected Seeker comment immediately before an image overrides
         # heuristic web placement without changing the PDF source semantics.
         prefix = source_before_images[:m.start()]
         directive = {}
@@ -1590,7 +1606,7 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
 
     # Heuristic custom macros. Preserve up to eight balanced arguments instead
     # of relying on `[^{}]*`, so nested formatting in campaign-specific commands
-    # survives even when Loreforge does not know that command's exact semantics.
+    # survives even when Seeker does not know that command's exact semantics.
     analysis_macros = {x["name"]: x for x in (analysis or analyze_project(settings)).get("custom_macros", [])}
     for name, info in analysis_macros.items():
         argc = int(info.get("args", 0) or 0)
@@ -1716,7 +1732,7 @@ def _observed_latex_engine(log: str) -> str:
     """Best-effort engine actually seen in TeX/latexmk output.
 
     This is intentionally based on engine banners rather than latexmk's selected
-    mode. It lets Build Doctor distinguish "Loreforge chose XeLaTeX" from a
+    mode. It lets Build Doctor distinguish "Seeker chose XeLaTeX" from a
     project-local latexmk configuration that somehow launched pdfTeX anyway.
     """
     observations: list[tuple[int, str]] = []
@@ -1771,8 +1787,8 @@ def _latex_failure_suggestions(log: str, effective_engine: str = "") -> list[str
     if re.search(r"File ended while scanning use of|Runaway argument", log):
         suggestions.append("TeX detected an unfinished argument/environment. Check for a missing }, \\end{...}, or unmatched custom macro near the first reported source line.")
 
-    if re.search(r"Loreforge stopped this build stage after \d+s", log):
-        suggestions.append("The LaTeX pipeline hit its time allowance, not a TeX syntax error. Loreforge now gives large XeLaTeX projects a longer adaptive build window and can finish a fresh XDV with xdvipdfmx as a separate stage.")
+    if re.search(r"Seeker stopped this build stage after \d+s", log):
+        suggestions.append("The LaTeX pipeline hit its time allowance, not a TeX syntax error. Seeker now gives large XeLaTeX projects a longer adaptive build window and can finish a fresh XDV with xdvipdfmx as a separate stage.")
     if re.search(r"xdvipdfmx(?::fatal:|[^\n]*(?:error|failed))|No output PDF file written|XDV -> PDF stage", log, re.IGNORECASE):
         suggestions.append("XeLaTeX finished typesetting but PDF conversion failed. The blocking excerpt now shows xdvipdfmx's own message; this is usually an image/font embedding problem rather than a .tex syntax problem.")
 
@@ -1780,15 +1796,15 @@ def _latex_failure_suggestions(log: str, effective_engine: str = "") -> list[str
     effective = (effective_engine or "").lower()
     if effective in {"xelatex", "lualatex"} and observed == "pdflatex":
         suggestions.append(
-            f"Loreforge selected {effective}, but the TeX log shows pdfTeX actually ran. A project-local latexmkrc/.latexmkrc or custom build rule may be overriding the engine; remove that override or make it use {effective}."
+            f"Seeker selected {effective}, but the TeX log shows pdfTeX actually ran. A project-local latexmkrc/.latexmkrc or custom build rule may be overriding the engine; remove that override or make it use {effective}."
         )
     elif _fontspec_pdftex_failure(log):
         if effective in {"xelatex", "lualatex"}:
             suggestions.append(
-                f"The log contains an explicit fontspec/pdfTeX incompatibility even though Loreforge selected {effective}. This usually means a nested/custom build rule is invoking pdfLaTeX; inspect any latexmkrc/.latexmkrc or custom build command in the project."
+                f"The log contains an explicit fontspec/pdfTeX incompatibility even though Seeker selected {effective}. This usually means a nested/custom build rule is invoking pdfLaTeX; inspect any latexmkrc/.latexmkrc or custom build command in the project."
             )
         else:
-            suggestions.append("This project uses fontspec, which cannot run under pdfLaTeX. Loreforge normally auto-switches such projects to XeLaTeX; set LATEX_ENGINE=auto (recommended) or xelatex if you have explicitly overridden the engine.")
+            suggestions.append("This project uses fontspec, which cannot run under pdfLaTeX. Seeker normally auto-switches such projects to XeLaTeX; set LATEX_ENGINE=auto (recommended) or xelatex if you have explicitly overridden the engine.")
     else:
         # Only call this a missing-font problem when the log actually says the
         # requested font cannot be found. A generic fontspec package error is not
@@ -1797,11 +1813,11 @@ def _latex_failure_suggestions(log: str, effective_engine: str = "") -> list[str
         if not font_match:
             font_match = re.search(r"font(?:spec)?[^\n]{0,120}[\"`']([^\"`']+)[\"`'][^\n]{0,180}(?:cannot be found|not found)", log, re.IGNORECASE)
         if font_match:
-            suggestions.append(f"A requested font ({font_match.group(1)}) is unavailable. Loreforge includes TeX Gyre and EB Garamond in the Docker image; other project fonts can be supplied as .otf/.ttf files and referenced by file/path in fontspec.")
+            suggestions.append(f"A requested font ({font_match.group(1)}) is unavailable. Seeker includes TeX Gyre and EB Garamond in the Docker image; other project fonts can be supplied as .otf/.ttf files and referenced by file/path in fontspec.")
     if ("Nothing to do" in log or "All targets" in log) and "gave an error" in log:
-        suggestions.append("latexmk had cached a previous failed run. Loreforge automatically clears its dependency state and retries in this build.")
+        suggestions.append("latexmk had cached a previous failed run. Seeker automatically clears its dependency state and retries in this build.")
     if not suggestions:
-        suggestions.append("No specific TeX diagnosis was detected. Use FIRST BLOCKING ERROR above; Loreforge has appended the underlying engine .log when available.")
+        suggestions.append("No specific TeX diagnosis was detected. Use FIRST BLOCKING ERROR above; Seeker has appended the underlying engine .log when available.")
     return suggestions[:5]
 
 
@@ -1927,14 +1943,14 @@ def _geometry_consolidation_fix(rel: str, lines: list[str]) -> dict | None:
         original = decl["expected"].strip()
         edits.append({
             "path": rel, "line": decl["line"], "expected": decl["expected"],
-            "replacement": f"{indent}% Loreforge consolidated duplicate geometry declaration: {original}",
+            "replacement": f"{indent}% Seeker consolidated duplicate geometry declaration: {original}",
         })
     label = "Consolidate geometry settings"
     if merged:
         label += f" ({merged})"
     return {
         "path": rel, "line": first["line"], "label": label,
-        "reason": "geometry was loaded repeatedly with options; Loreforge keeps one package load and applies merged options with later values winning.",
+        "reason": "geometry was loaded repeatedly with options; Seeker keeps one package load and applies merged options with later values winning.",
         "edits": edits,
     }
 
@@ -2046,7 +2062,7 @@ def _extract_failure_excerpt(log: str, *, before: int = 3, after: int = 10) -> s
     strong = [
         re.compile(r"^.+\.(?:tex|sty|cls|bib):\d+:\s*(?:LaTeX|Package|Class|Font|Undefined|Missing|Extra|Runaway|Emergency|Fatal|Incomplete|File ended|Paragraph ended|Illegal|Misplaced|Use of).*", re.I),
         re.compile(r"^!\s+.+"),
-        re.compile(r"(?:Emergency stop|Fatal error occurred|Runaway argument|File ended while scanning use of|Incomplete \\if|Undefined control sequence|Missing number, treated as zero|There's no line here to end|Option clash for package|LaTeX Error: File .* not found|Loreforge stopped this build stage after \d+s|xdvipdfmx:fatal:|No output PDF file written|Image inclusion failed)", re.I),
+        re.compile(r"(?:Emergency stop|Fatal error occurred|Runaway argument|File ended while scanning use of|Incomplete \\if|Undefined control sequence|Missing number, treated as zero|There's no line here to end|Option clash for package|LaTeX Error: File .* not found|Seeker stopped this build stage after \d+s|xdvipdfmx:fatal:|No output PDF file written|Image inclusion failed)", re.I),
     ]
     # Search each diagnostic/engine section in chronological order, skipping
     # latexmk's generic collected-error summary where possible.
@@ -2101,7 +2117,7 @@ def _pdf_file_looks_valid(path: Path) -> bool:
 def _log_confirms_final_pdf(log: str, pdf_name: str, *, pdf_changed: bool = False) -> bool:
     """Return True when the *terminal* build state proves the PDF succeeded.
 
-    A single Loreforge compile can contain several latexmk/engine passes. Earlier
+    A single Seeker compile can contain several latexmk/engine passes. Earlier
     passes may legitimately contain ``gave an error`` or even a collected error
     summary, while a later pass succeeds and ends with xdvipdfmx writing the PDF
     followed by ``All targets (main.pdf) are up-to-date``.  Older versions looked
@@ -2141,6 +2157,7 @@ def _log_confirms_final_pdf(log: str, pdf_name: str, *, pdf_changed: bool = Fals
         "xdvipdfmx:fatal:",
         "no output pdf file written",
         "loreforge stopped this build stage after",
+        "seeker stopped this build stage after",
     )
     last_fatal = -1
     for marker in fatal_markers:
@@ -2175,7 +2192,7 @@ def _remove_legacy_duplicate_preview(source_pdf: Path, preview_pdf: Path) -> int
 def _publish_pdf_preview_alias(source_pdf: Path, preview_pdf: Path) -> tuple[bool, str]:
     """Expose the compiled PDF at the stable preview path without duplicating it.
 
-    Large campaign books can be hundreds of megabytes. Older Loreforge versions
+    Large campaign books can be hundreds of megabytes. Older Seeker versions
     copied ``project/main.pdf`` to ``build/campaign.pdf`` after every successful
     build, consuming the same persistent Railway volume twice. If that copy ran
     out of space, the TeX build was incorrectly reported as failed even though
@@ -2237,7 +2254,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
 
     A failed latexmk run can leave ``.fdb_latexmk`` recording the engine as failed.
     A later invocation may then say both "Nothing to do" and "pdflatex: gave an
-    error" without rerunning TeX. Loreforge detects that state, removes only
+    error" without rerunning TeX. Seeker detects that state, removes only
     generated dependency/auxiliary files, and retries automatically. If latexmk
     still fails without useful diagnostics, the underlying engine is invoked once
     directly so the editor receives the real TeX error rather than a one-line
@@ -2266,7 +2283,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
     reclaimed_preview_bytes = _remove_legacy_duplicate_preview(pdf, settings.build_dir / "campaign.pdf")
     if reclaimed_preview_bytes:
         recovery_steps.append(
-            f"Reclaimed {reclaimed_preview_bytes / (1024 * 1024):.1f} MB by removing Loreforge's obsolete duplicate PDF preview before compiling."
+            f"Reclaimed {reclaimed_preview_bytes / (1024 * 1024):.1f} MB by removing Seeker's obsolete duplicate PDF preview before compiling."
         )
     if engine_recovery:
         recovery_steps.append(engine_recovery)
@@ -2312,17 +2329,46 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
 
     def run(cmd: list[str], timeout: int | None = None) -> tuple[int, str]:
         actual_timeout = timeout or compile_timeout
+        # Never PIPE an unbounded TeX log into Python memory. A malformed source
+        # can emit enormous repetitive output before timeout, which used to make
+        # the web process grow with the entire log. Stream to a temporary file and
+        # retain only a bounded tail for Build Doctor diagnostics.
         try:
-            proc = subprocess.run(
-                cmd, cwd=main.parent, text=True, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, timeout=actual_timeout, env=env,
-            )
-            return proc.returncode, proc.stdout or ""
-        except subprocess.TimeoutExpired as exc:
-            output = exc.stdout or ""
-            if isinstance(output, bytes):
-                output = output.decode("utf-8", errors="replace")
-            return 124, str(output) + f"\nLoreforge stopped this build stage after {actual_timeout}s."
+            max_log_bytes = max(512_000, int(os.getenv("SEEKER_BUILD_LOG_TAIL_BYTES", "4194304")))
+        except (TypeError, ValueError):
+            max_log_bytes = 4_194_304
+        with tempfile.TemporaryFile(mode="w+b") as log_file:
+            timed_out = False
+            proc = None
+            try:
+                proc = subprocess.run(
+                    cmd, cwd=main.parent, text=True, stdout=log_file,
+                    stderr=subprocess.STDOUT, timeout=actual_timeout, env=env,
+                )
+                code = int(proc.returncode)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                code = 124
+            # Test doubles and unusual subprocess wrappers may still expose a
+            # captured stdout attribute. Prefer it when present; real subprocess
+            # calls using a file handle return None.
+            direct = getattr(proc, "stdout", None) if proc is not None else None
+            if direct:
+                if isinstance(direct, bytes):
+                    direct = direct.decode("utf-8", errors="replace")
+                output = str(direct)
+                if len(output.encode("utf-8", errors="ignore")) > max_log_bytes:
+                    output = "[Earlier build output truncated to protect memory.]\n" + output[-max_log_bytes:]
+            else:
+                log_file.flush(); size = log_file.tell()
+                start = max(0, size - max_log_bytes)
+                log_file.seek(start)
+                output = log_file.read().decode("utf-8", errors="replace")
+                if start:
+                    output = "[Earlier build output truncated to protect memory.]\n" + output
+            if timed_out:
+                output += f"\nSeeker stopped this build stage after {actual_timeout}s."
+            return code, output
 
     def reconcile_successful_pdf(return_code: int, current_log: str) -> int:
         """Normalize a false-negative wrapper exit when the terminal PDF is proven good.
@@ -2341,7 +2387,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
         if _log_confirms_final_pdf(current_log, pdf.name, pdf_changed=changed_now):
             message = (
                 "latexmk returned a non-zero wrapper status even though the final PDF was successfully produced/verified; "
-                "Loreforge accepted the confirmed PDF from the terminal successful pass instead of reporting a false compile failure."
+                "Seeker accepted the confirmed PDF from the terminal successful pass instead of reporting a false compile failure."
             )
             if message not in recovery_steps:
                 recovery_steps.append(message)
@@ -2371,7 +2417,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
             recovery_steps.append("Detected latexmk's cached failed-build state and removed: " + (", ".join(removed) if removed else "dependency cache"))
             retry_command = [latexmk, mode, "-gg", "-interaction=nonstopmode", "-file-line-error", shell, main.name]
             retry_code, retry_log = run(retry_command)
-            log += "\n\n[Loreforge Build Doctor]\n" + recovery_steps[-1] + "\n\n[Clean retry]\n" + retry_log
+            log += "\n\n[Seeker Build Doctor]\n" + recovery_steps[-1] + "\n\n[Clean retry]\n" + retry_log
             code = retry_code
             command = retry_command
 
@@ -2394,18 +2440,18 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
                         converter_command,
                         timeout=max(settings.latex_timeout, 180),
                     )
-                    log += "\n\n[Loreforge XDV -> PDF stage]\n" + converter_log
+                    log += "\n\n[Seeker XDV -> PDF stage]\n" + converter_log
                     if converter_code == 0 and pdf.exists():
                         code = 0
                         recovery_steps.append(
-                            "XeLaTeX completed the document as XDV; Loreforge finished the XDV-to-PDF conversion in a separate stage."
+                            "XeLaTeX completed the document as XDV; Seeker finished the XDV-to-PDF conversion in a separate stage."
                         )
                     else:
                         recovery_steps.append(
                             "XeLaTeX produced a complete XDV, but the XDV-to-PDF conversion failed; the converter diagnostic is shown as the blocking error."
                         )
                 else:
-                    log += "\n\n[Loreforge XDV -> PDF stage]\nxdvipdfmx is not installed; cannot convert the generated XDV to PDF."
+                    log += "\n\n[Seeker XDV -> PDF stage]\nxdvipdfmx is not installed; cannot convert the generated XDV to PDF."
 
         # latexmk can occasionally retain a non-zero wrapper status even after
         # xdvipdfmx has written the final PDF and latexmk itself says the target
@@ -2421,17 +2467,17 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
                 direct_command = [binary, "-halt-on-error", "-interaction=nonstopmode", "-file-line-error", shell, main.name]
                 direct_code, direct_log = run(direct_command)
                 recovery_steps.append(f"Ran {engine} directly once to recover detailed source diagnostics from latexmk.")
-                log += "\n\n[Loreforge direct-engine diagnostic pass]\n" + direct_log
+                log += "\n\n[Seeker direct-engine diagnostic pass]\n" + direct_log
                 # If direct TeX succeeds, let latexmk finish references/bibliography.
                 if direct_code == 0:
                     final_code, final_log = run([latexmk, mode, "-g", "-interaction=nonstopmode", "-file-line-error", shell, main.name])
-                    log += "\n\n[Loreforge final latexmk pass]\n" + final_log
+                    log += "\n\n[Seeker final latexmk pass]\n" + final_log
                     code = reconcile_successful_pdf(final_code, log)
     else:
         binary = shutil.which(engine)
         command = [engine]
         if not binary:
-            return BuildResult(False, main_rel, None, 0, command, "LaTeX engine is not installed.", [{"message": f"{engine} not installed"}], suggestions=[f"Install {engine} or use the Loreforge Docker image."], effective_engine=engine)
+            return BuildResult(False, main_rel, None, 0, command, "LaTeX engine is not installed.", [{"message": f"{engine} not installed"}], suggestions=[f"Install {engine} or use the Seeker Docker image."], effective_engine=engine)
         command = [binary, "-interaction=nonstopmode", "-file-line-error", shell, main.name]
         code, first_log = run(command)
         second_code, second_log = run(command) if code == 0 else (code, "")
@@ -2480,7 +2526,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
                 recovery_steps.append("Published the PDF preview through a zero-copy hard link; no duplicate PDF bytes were written.")
         else:
             recovery_steps.append(
-                "The PDF compiled successfully, but Loreforge could not create the optional build/campaign.pdf alias ("
+                "The PDF compiled successfully, but Seeker could not create the optional build/campaign.pdf alias ("
                 + alias_detail
                 + "). The preview is being served directly from the compiled project PDF instead."
             )
@@ -2489,7 +2535,7 @@ def compile_pdf(settings: Settings, main_file: str | None = None, *, clean: bool
     suggestions = [] if build_ok else _latex_failure_suggestions(log, engine)
     failure_excerpt = "" if build_ok else (_extract_failure_excerpt(pipeline_log) or _extract_failure_excerpt(log))
     if partial_pdf:
-        suggestions.insert(0, "XeLaTeX produced a fresh PDF despite source errors. Loreforge is showing that recoverable preview, but fix the listed source errors before treating it as the final document.")
+        suggestions.insert(0, "XeLaTeX produced a fresh PDF despite source errors. Seeker is showing that recoverable preview, but fix the listed source errors before treating it as the final document.")
     try:
         settings.build_dir.mkdir(parents=True, exist_ok=True)
         (settings.build_dir / "latex.log").write_text(log[-260000:], encoding="utf-8", errors="replace")

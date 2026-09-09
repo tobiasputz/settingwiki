@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Lore Network · {{ wiki.title }}{% endblock %}
+{% block title %}Lore Web · {{ wiki.title }}{% endblock %}
 {% block body %}
 <main class="network-page network-v21">
   <section class="network-toolbar">
@@ -9,7 +9,7 @@
   {% if network.history_min is not none %}<section class="network-history-bar" id="networkHistoryBar"><button type="button" id="networkHistoryNow" title="Show present-day relationships">Present</button><label><span>Historical year</span><input id="networkHistoryRange" type="range" min="{{ network.history_min }}" max="{{ network.history_max }}" step="1" value="{{ network.history_max }}"><strong id="networkHistoryLabel">{{ network.history_max|round|int }}</strong></label><button type="button" id="networkHistoryPlay">▶</button></section>{% endif %}
   <section class="network-stage" id="networkStage">
     <svg id="loreNetwork" role="img" aria-label="Interactive network of connected codex entries"><defs><filter id="nodeGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><g id="networkViewport"><g id="networkEdges"></g><g id="networkNodes"></g></g></svg>
-    <div class="network-empty hidden" id="networkEmpty"><strong>No connections in this view</strong><p>Try Story links or All references, or add explicit relationships in Campaign Control.</p></div>
+    <div class="network-empty hidden" id="networkEmpty"><strong>No connections in this view</strong><p>Try Story links or All references, or add explicit relationships in Worldcraft.</p></div>
     <div class="network-legend"><span><i class="semantic"></i>Curated relationship</span><span><i></i>Codex reference</span></div>
     <div class="network-hint">Drag to pan · wheel/pinch to zoom · tap a node to inspect · double-click to open</div>
   </section>
@@ -17,4 +17,4 @@
 </main>
 <script id="networkData" type="application/json">{{ network|tojson }}</script>
 {% endblock %}
-{% block scripts %}<script src="/static/network.js?v=4000"></script>{% endblock %}
+{% block scripts %}<script src="/static/network.js?v=4100"></script>{% endblock %}

@@ -191,7 +191,7 @@ def test_editor_reveal_composer_and_player_mystery_strings_are_shipped():
     admin_js=(root/'static'/'admin.js').read_text(encoding='utf-8')
     mysteries=(root/'templates'/'mysteries.html').read_text(encoding='utf-8')
     assert 'insertRevealBtn' in admin_html
-    assert 'function showRevealPanel' in admin_js and 'loreforge-reveal-start' in admin_js
+    assert 'function showRevealPanel' in admin_js and 'seeker-reveal-start' in admin_js
     assert 'mystery-strings' in mysteries and 'edge.source_x' in mysteries
 
 
@@ -254,7 +254,7 @@ A city.
     assert '@media(max-width:1180px)' in admin_css and 'admin-mode-dock' in admin_css
     assert 'editorTabStrip' in (Path(__file__).resolve().parents[1]/'templates'/'admin.html').read_text(encoding='utf-8')
     assert 'tabs:[]' in admin_js and '/characters' in base
-    assert 'History Builder' in campaign and 'World Builder' in campaign and 'cc-party' in campaign
+    assert 'History Builder' in campaign and 'Worldcraft' in campaign and 'cc-party' in campaign
 
 
 def test_private_character_assets_and_search_follow_invite_visibility(tmp_path: Path, monkeypatch):

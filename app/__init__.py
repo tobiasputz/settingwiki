@@ -1,1 +1,1 @@
-"""Loreforge application package."""
+"""Seeker application package."""

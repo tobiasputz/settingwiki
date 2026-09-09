@@ -1,10 +1,10 @@
 services:
-  loreforge:
+  seeker:
     build: .
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-loreforge}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-seeker}
       PLAYER_PASSWORD: ${PLAYER_PASSWORD:-}
       LATEX_ENGINE: ${LATEX_ENGINE:-auto}
       LATEX_TIMEOUT: ${LATEX_TIMEOUT:-60}

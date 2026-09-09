@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS session_lore (
     PRIMARY KEY(session_id,page_slug,role),
     FOREIGN KEY(session_id) REFERENCES campaign_sessions(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_session_lore_page ON session_lore(page_slug, session_id);
 CREATE TABLE IF NOT EXISTS session_updates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER,
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS lore_relationships (
     label TEXT NOT NULL DEFAULT '',
     visibility TEXT NOT NULL DEFAULT 'players',
     created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
     UNIQUE(source_slug,target_slug,relation)
 );
 CREATE TABLE IF NOT EXISTS lore_reveals (
@@ -159,7 +161,8 @@ CREATE TABLE IF NOT EXISTS handouts (
 );
 CREATE TABLE IF NOT EXISTS page_aliases (
     alias TEXT PRIMARY KEY COLLATE NOCASE,
-    page_slug TEXT NOT NULL
+    page_slug TEXT NOT NULL,
+    updated_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS entity_styles (
     page_slug TEXT PRIMARY KEY,
@@ -284,6 +287,27 @@ def init_feature_db(settings: Settings) -> None:
         for col, ddl in timeline_add.items():
             if col not in timeline_cols:
                 conn.execute(f"ALTER TABLE timeline_events ADD COLUMN {col} {ddl}")
+        relationship_cols = {r[1] for r in conn.execute("PRAGMA table_info(lore_relationships)").fetchall()}
+        if "updated_at" not in relationship_cols:
+            conn.execute("ALTER TABLE lore_relationships ADD COLUMN updated_at REAL NOT NULL DEFAULT 0")
+        alias_cols = {r[1] for r in conn.execute("PRAGMA table_info(page_aliases)").fetchall()}
+        if "updated_at" not in alias_cols:
+            conn.execute("ALTER TABLE page_aliases ADD COLUMN updated_at REAL NOT NULL DEFAULT 0")
+        # Hot-path indexes for live table polling and Codex article lookups.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_campaign_sessions_live ON campaign_sessions(status,updated_at DESC,id DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_session_updates_visibility_created ON session_updates(visibility,created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_session_updates_target_session ON session_updates(target_key,session_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lore_reveals_updated ON lore_reveals(updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_handouts_visibility_updated ON handouts(visibility,updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lore_relationships_source ON lore_relationships(source_slug)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lore_relationships_target ON lore_relationships(target_slug)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lore_variants_page ON lore_variants(page_slug)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_character_images_character ON character_images(character_id,sort_order,id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mystery_pins_board ON mystery_pins(mystery_id,id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mystery_edges_board ON mystery_edges(mystery_id,id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entity_styles_updated ON entity_styles(updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lore_relationships_updated ON lore_relationships(updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_page_aliases_updated ON page_aliases(updated_at DESC)")
 
     # v3 extends the feature database with living-campaign state. Keep this
     # initialization chained here so older integrations/tests that have always
@@ -329,24 +353,73 @@ def _audience_allows(row: dict, invite_id: int | None) -> bool:
 
 
 def list_sessions(settings: Settings, *, public: bool = False, invite_id: int | None = None) -> list[dict]:
-    rows = _rows(settings, "SELECT * FROM campaign_sessions ORDER BY COALESCE(session_number,999999), session_date, id")
-    if public:
-        rows = [r for r in rows if r["status"] in {"live", "ended"}]
-    for r in rows:
-        r["lore"] = _rows(settings, "SELECT * FROM session_lore WHERE session_id=? ORDER BY sort_order,page_slug", (r["id"],))
-        updates = _rows(settings, "SELECT * FROM session_updates WHERE session_id=? AND visibility!='gm' ORDER BY created_at DESC", (r["id"],))
-        r["updates"] = [u for u in updates if (not public or _audience_allows(u, invite_id))]
-    return rows
+    """Load session history in three bulk queries rather than 2N+1 queries."""
+    with connect(settings) as conn:
+        session_rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM campaign_sessions ORDER BY COALESCE(session_number,999999), session_date, id"
+        ).fetchall()]
+        if public:
+            session_rows = [r for r in session_rows if r["status"] in {"live", "ended"}]
+        if not session_rows:
+            return []
+        ids = [int(r["id"]) for r in session_rows]
+        placeholders = ",".join("?" for _ in ids)
+        lore_rows = [dict(r) for r in conn.execute(
+            f"SELECT * FROM session_lore WHERE session_id IN ({placeholders}) ORDER BY session_id,sort_order,page_slug", ids
+        ).fetchall()]
+        update_rows = [dict(r) for r in conn.execute(
+            f"SELECT * FROM session_updates WHERE session_id IN ({placeholders}) AND visibility!='gm' ORDER BY session_id,created_at DESC", ids
+        ).fetchall()]
+    lore_by: dict[int,list[dict]] = {sid: [] for sid in ids}
+    updates_by: dict[int,list[dict]] = {sid: [] for sid in ids}
+    for row in lore_rows:
+        lore_by.setdefault(int(row["session_id"]), []).append(row)
+    for row in update_rows:
+        if not public or _audience_allows(row, invite_id):
+            updates_by.setdefault(int(row["session_id"]), []).append(row)
+    for row in session_rows:
+        sid = int(row["id"]); row["lore"] = lore_by.get(sid, []); row["updates"] = updates_by.get(sid, [])
+    return session_rows
 
+
+
+def session_appearances_for_page(settings: Settings, page_slug: str, *, public: bool = False) -> list[dict]:
+    """Return only sessions that reference one Codex page.
+
+    Article rendering used to load the complete session history, every linked lore
+    row and every player update just to answer this tiny question. This indexed
+    join keeps Codex navigation essentially constant as the campaign grows.
+    """
+    sql = """
+        SELECT s.*
+        FROM campaign_sessions AS s
+        JOIN session_lore AS sl ON sl.session_id=s.id
+        WHERE sl.page_slug=?
+    """
+    params: list[Any] = [str(page_slug)]
+    if public:
+        sql += " AND s.status IN ('live','ended')"
+    sql += " GROUP BY s.id ORDER BY COALESCE(s.session_number,999999),s.session_date,s.id"
+    with connect(settings) as conn:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 def get_live_session(settings: Settings, *, invite_id: int | None = None, admin: bool = False) -> dict | None:
-    row = _row(settings, "SELECT * FROM campaign_sessions WHERE status='live' ORDER BY updated_at DESC,id DESC LIMIT 1")
-    if not row:
-        return None
-    row["lore"] = _rows(settings, "SELECT * FROM session_lore WHERE session_id=? ORDER BY sort_order,page_slug", (row["id"],))
-    updates = _rows(settings, "SELECT * FROM session_updates WHERE session_id=? AND visibility!='gm' ORDER BY created_at DESC", (row["id"],))
+    """Load the live-session payload using one SQLite connection."""
+    with connect(settings) as conn:
+        found = conn.execute("SELECT * FROM campaign_sessions WHERE status='live' ORDER BY updated_at DESC,id DESC LIMIT 1").fetchone()
+        if not found:
+            return None
+        row = dict(found); sid = int(row["id"])
+        row["lore"] = [dict(r) for r in conn.execute(
+            "SELECT * FROM session_lore WHERE session_id=? ORDER BY sort_order,page_slug", (sid,)
+        ).fetchall()]
+        updates = [dict(r) for r in conn.execute(
+            "SELECT * FROM session_updates WHERE session_id=? AND visibility!='gm' ORDER BY created_at DESC", (sid,)
+        ).fetchall()]
+        handouts = [dict(r) for r in conn.execute(
+            "SELECT * FROM handouts WHERE session_id=? AND visibility!='gm' ORDER BY created_at DESC", (sid,)
+        ).fetchall()]
     row["updates"] = updates if admin else [u for u in updates if _audience_allows(u, invite_id)]
-    handouts = _rows(settings, "SELECT * FROM handouts WHERE session_id=? AND visibility!='gm' ORDER BY created_at DESC", (row["id"],))
     if not admin:
         now=time.time(); handouts=[h for h in handouts if not h.get("expires_at") or float(h["expires_at"])>now]
     row["handouts"] = handouts
@@ -450,8 +523,8 @@ def save_relationship(settings: Settings,p:dict)->dict:
     now=time.time(); rid=p.get("id"); vals=(str(p.get("source_slug") or ""),str(p.get("target_slug") or ""),str(p.get("relation") or "related to"),str(p.get("label") or ""),str(p.get("visibility") or "players"))
     if not vals[0] or not vals[1] or vals[0]==vals[1]: raise ValueError("Choose two different Codex entries.")
     with connect(settings) as conn:
-        if rid: conn.execute("UPDATE lore_relationships SET source_slug=?,target_slug=?,relation=?,label=?,visibility=? WHERE id=?",vals+(int(rid),)); out=int(rid)
-        else: out=conn.execute("INSERT INTO lore_relationships(source_slug,target_slug,relation,label,visibility,created_at) VALUES(?,?,?,?,?,?)",vals+(now,)).lastrowid
+        if rid: conn.execute("UPDATE lore_relationships SET source_slug=?,target_slug=?,relation=?,label=?,visibility=?,updated_at=? WHERE id=?",vals+(now,int(rid))); out=int(rid)
+        else: out=conn.execute("INSERT INTO lore_relationships(source_slug,target_slug,relation,label,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",vals+(now,now)).lastrowid
     return _row(settings,"SELECT * FROM lore_relationships WHERE id=?",(out,)) or {}
 
 
@@ -467,7 +540,8 @@ def aliases(settings: Settings) -> dict[str,str]:
 def save_alias(settings: Settings, alias: str, slug: str) -> None:
     alias=str(alias or "").strip()
     if not alias: raise ValueError("Alias cannot be empty")
-    with connect(settings) as conn: conn.execute("INSERT INTO page_aliases(alias,page_slug) VALUES(?,?) ON CONFLICT(alias) DO UPDATE SET page_slug=excluded.page_slug",(alias,slug))
+    now=time.time()
+    with connect(settings) as conn: conn.execute("INSERT INTO page_aliases(alias,page_slug,updated_at) VALUES(?,?,?) ON CONFLICT(alias) DO UPDATE SET page_slug=excluded.page_slug,updated_at=excluded.updated_at",(alias,slug,now))
 
 
 def entity_style(settings: Settings, slug: str) -> dict:
@@ -597,26 +671,28 @@ def list_bookmarks(settings:Settings,invite_id:int)->list[str]:
 
 # --- Mysteries / handouts ---------------------------------------------------
 def list_mysteries(settings:Settings,*,admin=False)->list[dict]:
-    rows=_rows(settings,"SELECT * FROM mysteries ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'solved' THEN 1 ELSE 2 END,updated_at DESC")
-    rows=[r for r in rows if _visible(r["visibility"],admin)]
+    """Load investigation boards in three queries regardless of board count."""
+    with connect(settings) as conn:
+        rows=[dict(r) for r in conn.execute("SELECT * FROM mysteries ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'solved' THEN 1 ELSE 2 END,updated_at DESC").fetchall()]
+        rows=[r for r in rows if _visible(r["visibility"],admin)]
+        if not rows:return []
+        ids=[int(r["id"]) for r in rows];ph=','.join('?' for _ in ids)
+        pin_rows=[dict(x) for x in conn.execute(f"SELECT * FROM mystery_pins WHERE mystery_id IN ({ph}) ORDER BY mystery_id,id",ids).fetchall()]
+        edge_rows=[dict(x) for x in conn.execute(f"SELECT * FROM mystery_edges WHERE mystery_id IN ({ph}) ORDER BY mystery_id,id",ids).fetchall()]
+    pins_by={mid:[] for mid in ids};edges_by={mid:[] for mid in ids}
+    for pin in pin_rows:
+        if _visible(pin["visibility"],admin):pins_by.setdefault(int(pin["mystery_id"]),[]).append(pin)
+    for edge in edge_rows:
+        if _visible(edge["visibility"],admin):edges_by.setdefault(int(edge["mystery_id"]),[]).append(edge)
     for r in rows:
-        pins=[x for x in _rows(settings,"SELECT * FROM mystery_pins WHERE mystery_id=? ORDER BY id",(r["id"],)) if _visible(x["visibility"],admin)]
-        pin_by_id={int(x["id"]):x for x in pins}
-        edges=[]
-        for edge in _rows(settings,"SELECT * FROM mystery_edges WHERE mystery_id=? ORDER BY id",(r["id"],)):
-            if not _visible(edge["visibility"],admin):
-                continue
-            source=pin_by_id.get(int(edge["source_pin"])); target=pin_by_id.get(int(edge["target_pin"]))
-            # Never leak the position/existence of a GM-only clue through an otherwise
-            # player-visible string on the investigation board.
-            if not source or not target:
-                continue
+        mid=int(r["id"]);pins=pins_by.get(mid,[]);pin_by_id={int(x["id"]):x for x in pins};edges=[]
+        for edge in edges_by.get(mid,[]):
+            source=pin_by_id.get(int(edge["source_pin"]));target=pin_by_id.get(int(edge["target_pin"]))
+            if not source or not target:continue
             edge["source_x"],edge["source_y"]=float(source["x"]),float(source["y"])
             edge["target_x"],edge["target_y"]=float(target["x"]),float(target["y"])
-            edge["source_label"],edge["target_label"]=source["label"],target["label"]
-            edges.append(edge)
-        r["pins"]=pins
-        r["edges"]=edges
+            edge["source_label"],edge["target_label"]=source["label"],target["label"];edges.append(edge)
+        r["pins"]=pins;r["edges"]=edges
     return rows
 
 
@@ -720,30 +796,44 @@ def travel_between_markers(marker_a:dict,marker_b:dict,world_width:float=1000.0,
 
 
 # --- Player-owned characters ------------------------------------------------
-def _character_payload(settings: Settings, row: dict) -> dict:
+def _character_payload(settings: Settings, row: dict, images: list[dict] | None = None) -> dict:
     out=dict(row)
     out["portrait_url"] = ("/uploads/" + out["portrait_path"]) if out.get("portrait_path") else ""
-    imgs=_rows(settings,"SELECT * FROM character_images WHERE character_id=? ORDER BY sort_order,id",(int(out["id"]),))
-    for img in imgs: img["url"]="/uploads/"+img["image_path"]
+    if images is None:
+        images=_rows(settings,"SELECT * FROM character_images WHERE character_id=? ORDER BY sort_order,id",(int(out["id"]),))
+    imgs=[dict(x) for x in images]
+    for img in imgs:img["url"]="/uploads/"+img["image_path"]
     out["images"]=imgs
     return out
 
 
 def list_player_characters(settings: Settings, *, invite_id: int|None=None, admin: bool=False) -> list[dict]:
-    if admin:
-        rows=_rows(settings,"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id ORDER BY c.updated_at DESC,c.id DESC")
-    elif invite_id is None:
-        rows=_rows(settings,"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.visibility='party' ORDER BY c.updated_at DESC,c.id DESC")
-    else:
-        rows=_rows(settings,"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.visibility='party' OR c.invite_id=? ORDER BY CASE WHEN c.invite_id=? THEN 0 ELSE 1 END,c.updated_at DESC,c.id DESC",(int(invite_id),int(invite_id)))
-    return [_character_payload(settings,r) for r in rows]
+    """Load character dossiers and image boards in two queries total."""
+    with connect(settings) as conn:
+        if admin:
+            rows=[dict(r) for r in conn.execute("SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id ORDER BY c.updated_at DESC,c.id DESC").fetchall()]
+        elif invite_id is None:
+            rows=[dict(r) for r in conn.execute("SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.visibility='party' ORDER BY c.updated_at DESC,c.id DESC").fetchall()]
+        else:
+            rows=[dict(r) for r in conn.execute("SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.visibility='party' OR c.invite_id=? ORDER BY CASE WHEN c.invite_id=? THEN 0 ELSE 1 END,c.updated_at DESC,c.id DESC",(int(invite_id),int(invite_id))).fetchall()]
+        ids=[int(r['id']) for r in rows]
+        image_rows=[]
+        if ids:
+            ph=','.join('?' for _ in ids)
+            image_rows=[dict(x) for x in conn.execute(f"SELECT * FROM character_images WHERE character_id IN ({ph}) ORDER BY character_id,sort_order,id",ids).fetchall()]
+    images_by={cid:[] for cid in ids}
+    for image in image_rows:images_by.setdefault(int(image['character_id']),[]).append(image)
+    return [_character_payload(settings,r,images_by.get(int(r['id']),[])) for r in rows]
 
 
 def get_player_character(settings: Settings, character_id: int, *, invite_id: int|None=None, admin: bool=False) -> dict|None:
-    row=_row(settings,"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.id=?",(int(character_id),))
-    if not row: return None
-    if not admin and row.get("visibility")!="party" and int(row.get("invite_id") or 0)!=int(invite_id or -1): return None
-    return _character_payload(settings,row)
+    with connect(settings) as conn:
+        row=conn.execute("SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.id=?",(int(character_id),)).fetchone()
+        if not row:return None
+        row=dict(row)
+        if not admin and row.get("visibility")!="party" and int(row.get("invite_id") or 0)!=int(invite_id or -1):return None
+        images=[dict(x) for x in conn.execute("SELECT * FROM character_images WHERE character_id=? ORDER BY sort_order,id",(int(character_id),)).fetchall()]
+    return _character_payload(settings,row,images)
 
 
 def save_player_character(settings: Settings, p: dict, *, invite_id: int|None, admin: bool=False) -> dict:

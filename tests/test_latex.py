@@ -503,7 +503,7 @@ def test_build_doctor_can_consolidate_duplicate_geometry_declarations(tmp_path: 
     assert fix is not None
     assert len(fix["edits"]) == 2
     assert fix["edits"][0]["replacement"] == r"\usepackage{geometry}\geometry{a4paper,margin=1in}"
-    assert fix["edits"][1]["replacement"].startswith("% Loreforge consolidated duplicate geometry declaration:")
+    assert fix["edits"][1]["replacement"].startswith("% Seeker consolidated duplicate geometry declaration:")
     assert "quick_fix" not in fixed[1]
 
 def test_batch_source_fixes_verify_then_apply_with_one_revision_per_file(tmp_path: Path, monkeypatch):

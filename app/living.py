@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sqlite3
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -313,6 +316,16 @@ def init_living_db(settings: Settings) -> None:
                             SELECT id,invite_id,NULL,session_id,title,body,visibility,created_at,updated_at FROM player_journals_v3""")
             conn.execute("DROP TABLE player_journals_v3")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_player_journals_owner_character ON player_journals(invite_id,character_id,updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notifications_created ON campaign_notifications(created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notification_reads_invite ON notification_reads(invite_id,notification_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_fronts_visibility_updated ON campaign_fronts(visibility,updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_threads_visibility_updated ON campaign_threads(visibility,updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_front_events_front_created ON front_events(front_id,created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_thread_notes_thread_created ON thread_notes(thread_id,created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_thread_links_thread_target ON thread_links(thread_id,target_type,target_key)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_map_region_history_region_sort ON map_region_history(region_id,start_sort,id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_player_knowledge_invite_updated ON player_knowledge(invite_id,updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_publishing_states_updated ON publishing_states(updated_at DESC)")
 
 
 def _rows(settings: Settings, sql: str, params: tuple = ()) -> list[dict]:
@@ -378,15 +391,24 @@ def knowledge_allows(settings: Settings, invite_id: int | None, target_type: str
 
 
 def list_fronts(settings: Settings, *, admin: bool = False, invite_id: int | None = None) -> list[dict]:
-    rows = _rows(settings, 'SELECT * FROM campaign_fronts ORDER BY status="active" DESC, updated_at DESC')
-    out=[]
-    for r in rows:
-        if not admin and r['visibility'] not in {'players','party'} and int(r.get('owner_invite_id') or -1) != int(invite_id or -2):
-            continue
-        r['events']=_rows(settings,'SELECT * FROM front_events WHERE front_id=? ORDER BY created_at DESC',(r['id'],))
-        if not admin: r['events']=[e for e in r['events'] if e['visible_to_players']]
-        out.append(r)
-    return out
+    """Load fronts and their event history in two queries, not one query/front."""
+    with connect(settings) as conn:
+        rows=[dict(r) for r in conn.execute('SELECT * FROM campaign_fronts ORDER BY status="active" DESC, updated_at DESC').fetchall()]
+        visible=[]
+        for r in rows:
+            if not admin and r['visibility'] not in {'players','party'} and int(r.get('owner_invite_id') or -1) != int(invite_id or -2):
+                continue
+            visible.append(r)
+        if not visible:return []
+        ids=[int(r['id']) for r in visible];placeholders=','.join('?' for _ in ids)
+        q=f'SELECT * FROM front_events WHERE front_id IN ({placeholders})'
+        if not admin:q+=' AND visible_to_players=1'
+        q+=' ORDER BY front_id,created_at DESC'
+        events=[dict(e) for e in conn.execute(q,ids).fetchall()]
+    by={fid:[] for fid in ids}
+    for e in events:by.setdefault(int(e['front_id']),[]).append(e)
+    for r in visible:r['events']=by.get(int(r['id']),[])
+    return visible
 
 
 def save_front(settings: Settings, p: dict) -> dict:
@@ -414,6 +436,14 @@ def advance_front(settings: Settings, front_id: int, delta: int, label: str, bod
 def runtime_states(settings: Settings, *, admin: bool=False) -> list[dict]:
     rows=_rows(settings,'SELECT * FROM entity_runtime_state ORDER BY updated_at DESC')
     return rows if admin else [r for r in rows if r['visibility'] in {'players','party'}]
+
+
+def runtime_state_for_page(settings: Settings, slug: str, *, admin: bool=False) -> dict | None:
+    """Fetch one mutable entity state without scanning the whole state table."""
+    row=_row(settings,'SELECT * FROM entity_runtime_state WHERE page_slug=?',(str(slug),))
+    if not row:return None
+    if not admin and row.get('visibility') not in {'players','party'}:return None
+    return row
 
 
 def save_runtime_state(settings: Settings, slug: str, p: dict) -> dict:
@@ -459,13 +489,20 @@ def save_hierarchy_edge(settings: Settings,p:dict)->dict:
 
 
 def map_regions(settings: Settings,map_id:int,*,admin:bool=False,at_sort:float|None=None)->list[dict]:
-    rows=_rows(settings,'SELECT * FROM map_regions WHERE map_id=? ORDER BY id',(int(map_id),))
-    if not admin: rows=[r for r in rows if r['visibility'] not in {'gm','hidden'}]
+    """Load all regions + historical shapes for one map in two queries."""
+    with connect(settings) as conn:
+        rows=[dict(r) for r in conn.execute('SELECT * FROM map_regions WHERE map_id=? ORDER BY id',(int(map_id),)).fetchall()]
+        if not admin:rows=[r for r in rows if r['visibility'] not in {'gm','hidden'}]
+        ids=[int(r['id']) for r in rows]
+        history_rows=[]
+        if ids:
+            ph=','.join('?' for _ in ids)
+            history_rows=[dict(h) for h in conn.execute(f'SELECT * FROM map_region_history WHERE region_id IN ({ph}) ORDER BY region_id,COALESCE(start_sort,-1e99),id',ids).fetchall()]
+    by={rid:[] for rid in ids}
+    for h in history_rows:
+        h['points']=_json(h.pop('points_json','[]'),[]);by.setdefault(int(h['region_id']),[]).append(h)
     for r in rows:
-        r['points']=_json(r.pop('points_json','[]'),[])
-        history=_rows(settings,'SELECT * FROM map_region_history WHERE region_id=? ORDER BY COALESCE(start_sort,-1e99),id',(r['id'],))
-        for h in history:
-            h['points']=_json(h.pop('points_json','[]'),[])
+        r['points']=_json(r.pop('points_json','[]'),[]);history=by.get(int(r['id']),[])
         if at_sort is not None:
             active=next((h for h in reversed(history) if (h['start_sort'] is None or float(h['start_sort'])<=at_sort) and (h['end_sort'] is None or float(h['end_sort'])>=at_sort)),None)
             if active:
@@ -518,17 +555,26 @@ def random_rumor(settings:Settings,*,location_slug:str='',faction_slug:str='',in
 
 
 def list_threads(settings:Settings,*,admin:bool=False,invite_id:int|None=None)->list[dict]:
-    rows=_rows(settings,'SELECT * FROM campaign_threads ORDER BY status="open" DESC,updated_at DESC')
-    out=[]
-    for r in rows:
-        if not admin:
-            if r['visibility']=='gm': continue
-            if r['visibility']=='private' and int(r.get('created_by_invite_id') or -1)!=int(invite_id or -2): continue
-        notes=_rows(settings,'SELECT * FROM thread_notes WHERE thread_id=? ORDER BY created_at DESC',(r['id'],))
-        if not admin:
-            notes=[n for n in notes if n['visibility']=='party' or int(n.get('invite_id') or -1)==int(invite_id or -2)]
-        r['notes']=notes;r['links']=_rows(settings,'SELECT * FROM thread_links WHERE thread_id=? ORDER BY target_type,target_key',(r['id'],));out.append(r)
-    return out
+    """Load threads, notes and lore links with three bounded queries total."""
+    with connect(settings) as conn:
+        rows=[dict(r) for r in conn.execute('SELECT * FROM campaign_threads ORDER BY status="open" DESC,updated_at DESC').fetchall()]
+        visible=[]
+        for r in rows:
+            if not admin:
+                if r['visibility']=='gm':continue
+                if r['visibility']=='private' and int(r.get('created_by_invite_id') or -1)!=int(invite_id or -2):continue
+            visible.append(r)
+        if not visible:return []
+        ids=[int(r['id']) for r in visible];ph=','.join('?' for _ in ids)
+        notes=[dict(n) for n in conn.execute(f'SELECT * FROM thread_notes WHERE thread_id IN ({ph}) ORDER BY thread_id,created_at DESC',ids).fetchall()]
+        links=[dict(l) for l in conn.execute(f'SELECT * FROM thread_links WHERE thread_id IN ({ph}) ORDER BY thread_id,target_type,target_key',ids).fetchall()]
+    notes_by={tid:[] for tid in ids};links_by={tid:[] for tid in ids}
+    for n in notes:
+        if admin or n['visibility']=='party' or int(n.get('invite_id') or -1)==int(invite_id or -2):notes_by.setdefault(int(n['thread_id']),[]).append(n)
+    for l in links:links_by.setdefault(int(l['thread_id']),[]).append(l)
+    for r in visible:
+        tid=int(r['id']);r['notes']=notes_by.get(tid,[]);r['links']=links_by.get(tid,[])
+    return visible
 
 
 def can_edit_thread(thread:dict,invite_id:int|None,admin:bool)->bool:
@@ -794,14 +840,20 @@ def create_notification(settings:Settings,p:dict)->dict:
     with connect(settings) as conn:nid=conn.execute('INSERT INTO campaign_notifications(title,body,target_type,target_key,kind,audience_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)',(str(p.get('title') or 'Campaign update'),str(p.get('body') or ''),str(p.get('target_type') or ''),str(p.get('target_key') or ''),str(p.get('kind') or 'notice'),json.dumps(aud),expires,now)).lastrowid
     return _row(settings,'SELECT * FROM campaign_notifications WHERE id=?',(nid,)) or {}
 def list_notifications(settings:Settings,invite_id:int|None,*,admin:bool=False,since:float=0)->list[dict]:
-    rows=_rows(settings,'SELECT * FROM campaign_notifications WHERE created_at>? ORDER BY created_at DESC LIMIT 100',(float(since or 0),));now=time.time();out=[]
+    # One LEFT JOIN replaces the old per-notification read-status query.
+    iid=int(invite_id) if invite_id is not None else -1
+    sql=("SELECT n.*, CASE WHEN nr.read_at IS NULL THEN 0 ELSE 1 END AS read "
+         "FROM campaign_notifications n "
+         "LEFT JOIN notification_reads nr ON nr.notification_id=n.id AND nr.invite_id=? "
+         "WHERE n.created_at>? ORDER BY n.created_at DESC LIMIT 100")
+    with connect(settings) as conn:
+        rows=[dict(r) for r in conn.execute(sql,(iid,float(since or 0))).fetchall()]
+    now=time.time();out=[]
     for r in rows:
         if r.get('expires_at') and float(r['expires_at'])<now:continue
         aud=_json(r.get('audience_json'),[])
-        if not admin and aud and int(invite_id or -1) not in {int(x) for x in aud}:continue
-        if invite_id is not None:
-            read=_row(settings,'SELECT read_at FROM notification_reads WHERE notification_id=? AND invite_id=?',(r['id'],int(invite_id)));r['read']=bool(read)
-        out.append(r)
+        if not admin and aud and iid not in {int(x) for x in aud}:continue
+        r['read']=bool(r.get('read'));out.append(r)
     return out
 def mark_notification_read(settings:Settings,nid:int,invite_id:int)->None:
     with connect(settings) as conn:conn.execute('INSERT OR REPLACE INTO notification_reads(notification_id,invite_id,read_at) VALUES(?,?,?)',(int(nid),int(invite_id),time.time()))
@@ -826,14 +878,19 @@ def save_character_arc(settings:Settings,character_id:int,p:dict)->dict:
 
 
 def entity_provenance(settings:Settings,page_slug:str)->list[dict]:
-    rows=_rows(settings,'''SELECT DISTINCT s.id,s.session_number,s.title,s.session_date,s.status FROM campaign_sessions s
-        JOIN session_lore l ON l.session_id=s.id WHERE l.page_slug=? ORDER BY COALESCE(s.session_number,999999),s.session_date''',(page_slug,))
-    updates=_rows(settings,'SELECT DISTINCT session_id FROM session_updates WHERE target_key=? AND session_id IS NOT NULL',(page_slug,));seen={r['id'] for r in rows}
-    for u in updates:
-        if u['session_id'] not in seen:
-            s=_row(settings,'SELECT id,session_number,title,session_date,status FROM campaign_sessions WHERE id=?',(u['session_id'],));
-            if s: rows.append(s)
-    return rows
+    # One UNION replaces the old N+1 pattern where every matching session update
+    # caused another SQLite connection and session lookup during article renders.
+    sql='''
+        SELECT DISTINCT s.id,s.session_number,s.title,s.session_date,s.status
+        FROM campaign_sessions s JOIN session_lore l ON l.session_id=s.id
+        WHERE l.page_slug=?
+        UNION
+        SELECT DISTINCT s.id,s.session_number,s.title,s.session_date,s.status
+        FROM campaign_sessions s JOIN session_updates u ON u.session_id=s.id
+        WHERE u.target_key=? AND u.session_id IS NOT NULL
+        ORDER BY COALESCE(session_number,999999),session_date,id
+    '''
+    return _rows(settings,sql,(page_slug,page_slug))
 
 
 def continuity_report(settings:Settings,wiki:dict)->dict:
@@ -879,13 +936,25 @@ def export_foundry_journal(title:str,html:str,img:str='')->dict:
 
 def create_portable_archive(settings:Settings,out:Path)->Path:
     out.parent.mkdir(parents=True,exist_ok=True)
-    with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,allowZip64=True) as z:
-        for base,prefix in ((settings.project_dir,'project'),(settings.uploads_dir,'uploads')):
-            if base.exists():
-                for p in base.rglob('*'):
-                    if p.is_file():z.write(p,f'{prefix}/{p.relative_to(base).as_posix()}')
-        if settings.db_path.exists():z.write(settings.db_path,'loreforge.db')
-        z.writestr('manifest.json',json.dumps({'format':'loreforge-portable-v1','created_at':time.time()},indent=2))
+    # WAL keeps recent commits in a sidecar file. Copying only the main .db file
+    # can therefore produce a valid-looking but stale/empty backup. SQLite's
+    # backup API checkpoints a consistent snapshot without blocking readers.
+    db_copy:Path|None=None
+    if settings.db_path.exists():
+        fd,tmp_name=tempfile.mkstemp(prefix='seeker-portable-',suffix='.db');os.close(fd);db_copy=Path(tmp_name)
+        src=sqlite3.connect(settings.db_path);dst=sqlite3.connect(db_copy)
+        try:src.backup(dst)
+        finally:dst.close();src.close()
+    try:
+        with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,allowZip64=True) as z:
+            for base,prefix in ((settings.project_dir,'project'),(settings.uploads_dir,'uploads')):
+                if base.exists():
+                    for p in base.rglob('*'):
+                        if p.is_file():z.write(p,f'{prefix}/{p.relative_to(base).as_posix()}')
+            if db_copy is not None:z.write(db_copy,'loreforge.db')
+            z.writestr('manifest.json',json.dumps({'format':'loreforge-portable-v1','created_at':time.time()},indent=2))
+    finally:
+        if db_copy is not None:db_copy.unlink(missing_ok=True)
     return out
 
 
@@ -893,12 +962,12 @@ def validate_portable_archive_file(path:Path)->dict:
     """Exercise a portable backup without mutating the live campaign.
 
     The check validates path safety, the manifest, presence of canonical source,
-    and a real SQLite integrity check on the archived Loreforge database.
+    and a real SQLite integrity check on the archived Seeker database.
     """
     import sqlite3, tempfile
     path=Path(path)
     if not path.exists() or not zipfile.is_zipfile(path):
-        raise ValueError('This is not a readable Loreforge ZIP archive.')
+        raise ValueError('This is not a readable Seeker ZIP archive.')
     with zipfile.ZipFile(path,'r') as z:
         infos=z.infolist();names=[i.filename for i in infos]
         for name in names:
@@ -911,7 +980,7 @@ def validate_portable_archive_file(path:Path)->dict:
         try: manifest=json.loads(z.read('manifest.json').decode('utf-8'))
         except Exception as exc: raise ValueError('Portable archive manifest is unreadable.') from exc
         if manifest.get('format')!='loreforge-portable-v1':
-            raise ValueError('Unsupported Loreforge portable archive format.')
+            raise ValueError('Unsupported Seeker portable archive format.')
         tex=[n for n in names if n.startswith('project/') and n.lower().endswith('.tex')]
         if not tex: raise ValueError('Portable archive contains no LaTeX source files.')
         with tempfile.TemporaryDirectory(prefix='loreforge-restore-test-') as td:
@@ -920,7 +989,7 @@ def validate_portable_archive_file(path:Path)->dict:
                 with sqlite3.connect(db) as conn:
                     integrity=conn.execute('PRAGMA integrity_check').fetchone()[0]
                     table_count=conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0]
-            except Exception as exc: raise ValueError('Archived Loreforge database cannot be opened.') from exc
+            except Exception as exc: raise ValueError('Archived Seeker database cannot be opened.') from exc
             if str(integrity).lower()!='ok': raise ValueError('Archived database failed SQLite integrity_check: '+str(integrity))
         uploads=[n for n in names if n.startswith('uploads/') and not n.endswith('/')]
         project_files=[n for n in names if n.startswith('project/') and not n.endswith('/')]

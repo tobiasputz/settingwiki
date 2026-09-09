@@ -88,5 +88,5 @@
     drawDragon(ctx,w,h,now,intensity,speed){if(now>this.nextDragon){this.dragonUntil=now+5200;this.nextDragon=now+15000+Math.random()*30000;this.dragonSeed={y:.15+Math.random()*.55,dir:Math.random()>.5?1:-1,size:34+Math.random()*28}}if(now<this.dragonUntil&&this.dragonSeed){const s=this.dragonSeed,t=1-(this.dragonUntil-now)/5200,x=(s.dir>0?(-.15+t*1.3):(1.15-t*1.3))*w,y=s.y*h+Math.sin(t*Math.PI*2)*h*.025,z=s.size;ctx.save();ctx.translate(x,y);ctx.scale(s.dir,1);ctx.fillStyle=`rgba(8,7,8,${.10*intensity})`;ctx.beginPath();ctx.ellipse(0,0,z*.42,z*.13,0,0,Math.PI*2);ctx.moveTo(-z*.15,0);ctx.quadraticCurveTo(-z*.85,-z*.42,-z*1.4,-z*.1);ctx.quadraticCurveTo(-z*.72,-z*.02,-z*.18,z*.04);ctx.moveTo(z*.15,0);ctx.quadraticCurveTo(z*.85,-z*.42,z*1.4,-z*.1);ctx.quadraticCurveTo(z*.72,-z*.02,z*.18,z*.04);ctx.moveTo(z*.36,0);ctx.lineTo(z*.9,z*.18);ctx.lineTo(z*.42,z*.08);ctx.fill();ctx.restore()}}
     drawLightning(ctx,w,h,now,intensity){if(now>this.nextLightning){this.flashUntil=now+80+Math.random()*90;this.nextLightning=now+3500+Math.random()*9000}if(now<this.flashUntil){const a=.07+.16*intensity;ctx.fillStyle=`rgba(218,229,255,${a})`;ctx.fillRect(0,0,w,h)}}
   }
-  window.LoreforgeMapEffects={FantasyMapEffects,defaults};
+  window.SeekerMapEffects={FantasyMapEffects,defaults};
 })();

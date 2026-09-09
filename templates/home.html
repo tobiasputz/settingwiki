@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}{{ wiki.title }} · Campaign Atlas{% endblock %}
+{% block title %}{{ wiki.title }} · Seeker{% endblock %}
 {% block body %}
 <main>
   <section class="hero">
     <div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div>
     <div class="hero-inner reveal">
-      <div class="eyebrow">PLAYER SETTING GUIDE</div>
+      <div class="eyebrow">SEEKER’S ARCHIVE</div>
       <h1>{{ wiki.title }}</h1>
       <p class="hero-tagline">{{ wiki.tagline }}</p>
       <div class="hero-actions">
-        {% if wiki.pages %}<a class="primary-button" href="/wiki/{{ wiki.pages[0].slug }}">Begin exploring <span>→</span></a>{% endif %}
+        {% if wiki.pages %}<a class="primary-button" href="/wiki/{{ wiki.pages[0].slug }}">Enter the Codex <span>→</span></a>{% endif %}
         <button class="ghost-button" data-open-search>Search the codex <kbd>/</kbd></button>
       </div>
       <div class="hero-meta">
@@ -22,7 +22,7 @@
   </section>
 
 
-  <section class="home-section reveal campaign-now-home"><div class="section-heading"><div><span class="eyebrow">YOUR CAMPAIGN NOW</span><h2>Pick up where the table left off</h2></div><a href="/campaign" class="quiet-link">Open campaign desk →</a></div><div class="campaign-now-grid">
+  <section class="home-section reveal campaign-now-home"><div class="section-heading"><div><span class="eyebrow">YOUR CHRONICLE NOW</span><h2>Pick up where the table left off</h2></div><a href="/campaign" class="quiet-link">Open Chronicle →</a></div><div class="campaign-now-grid">
     <a class="campaign-now-card" href="/campaign#threads"><small>OPEN THREADS</small><strong>{{ threads|selectattr('status','equalto','open')|list|length }}</strong><p>{% if threads %}{{ threads[0].title }}{% else %}No active plot threads yet.{% endif %}</p></a>
     <a class="campaign-now-card" href="/characters"><small>YOUR CHARACTERS</small><strong>{{ characters|length }}</strong><p>{% if characters %}{{ characters[0].name }}{% else %}Create a player character dossier.{% endif %}</p></a>
     <a class="campaign-now-card" href="/calendar"><small>WORLD DATE</small><strong>{{ calendar.current_date or '—' }}</strong><p>{{ calendar.season or calendar.name }}</p></a>
@@ -34,7 +34,7 @@
   {% endif %}
 
   {% if updates %}
-  <section class="home-section reveal"><div class="section-heading"><div><span class="eyebrow">WHAT'S NEW</span><h2>Recent discoveries</h2></div><a href="/updates" class="quiet-link">View discovery log →</a></div><div class="home-update-grid">{% for u in updates %}<a href="{% if u.target_type == 'lore' and u.target_key %}/wiki/{{ u.target_key }}{% else %}/updates{% endif %}"><small><time data-epoch="{{ u.created_at }}"></time></small><strong>{{ u.title }}</strong><p>{{ u.body }}</p></a>{% endfor %}</div></section>
+  <section class="home-section reveal"><div class="section-heading"><div><span class="eyebrow">NEWLY REVEALED</span><h2>Recent discoveries</h2></div><a href="/updates" class="quiet-link">Open revelation log →</a></div><div class="home-update-grid">{% for u in updates %}<a href="{% if u.target_type == 'lore' and u.target_key %}/wiki/{{ u.target_key }}{% else %}/updates{% endif %}"><small><time data-epoch="{{ u.created_at }}"></time></small><strong>{{ u.title }}</strong><p>{{ u.body }}</p></a>{% endfor %}</div></section>
   {% endif %}
   {% if featured %}
   <section class="home-section featured-section reveal">
@@ -56,7 +56,7 @@
   </section>
 
   <section class="home-section reveal" id="codex">
-    <div class="section-heading"><div><span class="eyebrow">THE CODEX</span><h2>World knowledge</h2></div><p>Everything here is generated from the campaign's LaTeX source.</p></div>
+    <div class="section-heading"><div><span class="eyebrow">SEEKER’S CODEX</span><h2>The known world</h2></div><p>Records, people, places and truths drawn directly from the campaign source.</p></div>
     <div class="chapter-grid">
       {% for category in wiki.categories %}
       <article class="chapter-card {% if category.presentation.display_toc_image_url %}chapter-card-art{% endif %}" {% if category.presentation.display_toc_image_url %}style="--chapter-art:url('{{ category.presentation.display_toc_image_url }}')"{% endif %}>
@@ -98,7 +98,7 @@
   <section class="home-section reveal">
     <div class="quote-panel">
       <div class="quote-rune">✧</div>
-      <div><span class="eyebrow">A LIVING SETTING</span><h2>When the chronicle changes, the atlas changes with it.</h2><p>This guide is compiled from the same source the GM writes in. No separate PDF upload, no stale handout, no duplicated lore.</p></div>
+      <div><span class="eyebrow">THE WORLD REMEMBERS</span><h2>Every discovery leaves a mark.</h2><p>Seeker follows the same source the GM writes in, so the Codex, chronicle and atlas stay in step with the campaign.</p></div>
     </div>
   </section>
 </main>

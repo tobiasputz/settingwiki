@@ -98,14 +98,24 @@ CREATE TABLE IF NOT EXISTS codex_presentation (
 
 
 def connect(settings: Settings) -> sqlite3.Connection:
-    conn = sqlite3.connect(settings.db_path)
+    # Keep connections short-lived, but configure them for the concurrent read-heavy
+    # workload of a campaign table. busy_timeout prevents transient "database is
+    # locked" failures when several players poll while the GM saves something.
+    conn = sqlite3.connect(settings.db_path, timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
 def init_db(settings: Settings) -> None:
     with connect(settings) as conn:
+        # WAL lets readers continue while a GM write is committing. NORMAL is a
+        # good durability/performance trade-off for Railway's persistent volume
+        # and avoids needless fsync pressure on every small journal/poll write.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(SCHEMA)
         # Lightweight forward migrations for persistent Railway volumes created
         # by older Loreforge versions. SQLite CREATE TABLE IF NOT EXISTS does
@@ -299,22 +309,31 @@ def register_player_device(
 def validate_player_invite_session(
     settings: Settings, invite_id: int | None, version: int | None, device_id: str | None = None
 ) -> dict | None:
+    """Validate a request session with one SQLite round-trip.
+
+    v4 used get_player_invite() here, which also loaded the complete device list,
+    then opened another connection to validate the current device. On pages that
+    ask about the current invitation several times this multiplied into dozens of
+    tiny DB reads. The request layer now caches this result too, so one request
+    performs at most one invite validation query.
+    """
     if invite_id is None or version is None or not device_id:
         return None
-    invite = get_player_invite(settings, invite_id)
-    if not invite or not invite["active"]:
-        return None
     try:
-        if int(invite["access_version"]) != int(version):
-            return None
+        invite_id_i, version_i = int(invite_id), int(version)
     except (TypeError, ValueError):
         return None
     with connect(settings) as conn:
-        device = conn.execute(
-            "SELECT id FROM player_devices WHERE id=? AND invite_id=? AND access_version=?",
-            (str(device_id), int(invite_id), int(version)),
+        row = conn.execute(
+            """SELECT i.* FROM player_invites i
+               JOIN player_devices d ON d.invite_id=i.id AND d.access_version=i.access_version
+               WHERE i.id=? AND i.access_version=? AND d.id=? LIMIT 1""",
+            (invite_id_i, version_i, str(device_id)),
         ).fetchone()
-    return invite if device else None
+    if not row:
+        return None
+    payload = _invite_payload(settings, row)
+    return payload if payload["active"] else None
 
 
 def reset_player_invite_devices(settings: Settings, invite_id: int) -> dict:
@@ -528,7 +547,7 @@ def safe_extract_zip(zip_path: Path, dest: Path, *, max_uncompressed_bytes: int 
         for member in members:
             total += int(member.file_size or 0)
             if total > max_uncompressed_bytes:
-                raise ValueError("The ZIP expands beyond Loreforge's 2 GB import safety limit.")
+                raise ValueError("The ZIP expands beyond Seeker's 2 GB import safety limit.")
             # Reject Unix symlinks. A campaign source archive should contain real files.
             if (member.external_attr >> 16) & 0o170000 == 0o120000:
                 raise ValueError(f"Symbolic links are not allowed in project ZIPs: {member.filename}")

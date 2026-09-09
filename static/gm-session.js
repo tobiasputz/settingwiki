@@ -15,7 +15,7 @@ $('#gmRevealSearch').oninput=renderReveals;$('#gmRevealStateFilter').onchange=re
 $('#gmSendUpdateBtn').onclick=async()=>{const title=$('#gmUpdateTitle').value.trim();if(!title)return toast('Give the discovery a headline','error');await api('/api/admin/session-updates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:session.id||null,title,body:$('#gmUpdateBody').value,target_type:'lore',target_key:'',visibility:'players'})});$('#gmUpdateTitle').value='';$('#gmUpdateBody').value='';toast('Discovery sent to player screens')};
 })();
 
-// Loreforge 3 — live table push, front clocks and the rumor engine.
+// Seeker 3 — live table push, front clocks and the rumor engine.
 (()=>{
 const $=s=>document.querySelector(s);const api=(u,o={})=>fetch(u,o).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.detail||'Request failed');return d});
 const post=(u,d)=>api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});

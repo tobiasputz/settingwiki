@@ -1,4 +1,17 @@
-# Loreforge 4.0.0 — player-first sessions & quality of life
+# Seeker 4.1.0 — final identity & release hardening
+
+- Renamed the product identity to **Seeker** across the player UI, GM tools, PWA metadata, documentation, local launch scripts and user-facing download names. Legacy `loreforge-*` LaTeX directives, browser-storage keys, database/archive identifiers and environment-variable fallbacks remain supported deliberately so an upgrade does not lose campaigns, notes, offline state or saved preferences.
+- Reworded the most generic player-facing surfaces into a clearer Seeker voice: the home page is now **Seeker’s Archive**, the Codex presents the **known world**, historical navigation uses **Chronicle of Ages**, player-maintained objectives are **Threads worth following**, and GM navigation uses more campaign-shaped language without obscuring what controls do.
+- Added a bounded **per-access Codex view cache** on top of the parsed wiki cache. Repeat article navigation now performs only a small SQLite revision-fingerprint query when nothing relevant changed instead of reconstructing reveal, publication, style, relationship, alias, variant and per-player knowledge state for every click. Ordinary activity logging no longer invalidates that cache.
+- Removed several remaining N+1 query patterns in fronts, thread notes/links, mysteries, character images and historical map-region data, and added matching hot-path indexes for persistent Railway databases.
+- Changed player contribution, GM inbox, character-art and map uploads to **1 MB streamed chunks with hard size limits**, preventing 15–100 MB request bodies from being duplicated into Python memory.
+- Hardened heavy build work: XeLaTeX/latexmk output is spooled to a temporary file with only a bounded diagnostic tail retained in memory, automatic PDF compilation on process startup is disabled unless explicitly enabled, and compile/rebuild/import operations share a non-blocking build lock so concurrent GM actions cannot launch overlapping TeX jobs.
+- Added runtime diagnostics in Studio for current/peak web-process RSS, peak child-process RSS, build state and log cap. This makes future Railway memory spikes attributable instead of opaque.
+- Reduced live-session background load with visibility-aware polling and a lightweight session-pulse endpoint; stale searches are aborted and hover-preview caches are bounded.
+- Kept v4’s character-scoped sessions/journals, first-run Quick Tour, mobile player UI and all upgrade migrations intact.
+- Bumped application/PWA assets to **v4100** and retained network-first static caching so deployed fixes replace stale browser bundles promptly.
+
+# Seeker 4.0.0 — player-first sessions & quality of life
 
 - Added **session character identity**. Players with multiple PCs can enter each live session as a specific character, switch deliberately, or remain player-wide. The selected identity is remembered for that live session only, so the next session can prompt again when appropriate.
 - Made **player journals character-scoped**. A note attached to one character is hidden when that same player enters as another character; player-wide notes remain available separately. Existing v3 journals migrate safely as player-wide notes. Party-shared notes from other players remain visible according to their normal visibility rules.
@@ -10,7 +23,7 @@
 - Bumped all application/PWA asset caches to v4000 so existing installations fetch the v4 JavaScript/CSS instead of retaining older cached UI code.
 - Added regression coverage for character-scoped journal isolation, cross-player ownership checks, v3 journal migration, session identity switching, v4 assets, and cache-version consistency.
 
-# Loreforge 3.0.2 — Studio stale-cache recovery
+# Seeker 3.0.2 — Studio stale-cache recovery
 
 - Fixed the upgrade path that could keep serving the broken v3.0.0 Campaign Studio JavaScript even after the v3.0.1 source fix was deployed. The PWA service worker had cached all `/static/*` assets cache-first while the HTML continued to request `admin.js?v=3000`, so an existing browser could remain pinned to the old file indefinitely.
 - Bumped application asset URLs and PWA cache namespaces to v3002 so existing installations request a fresh Studio bundle immediately.
@@ -19,15 +32,15 @@
 - Marked the Campaign Studio HTML response `no-store` so a browser cannot retain an older page that still references the obsolete asset URL.
 - Added regression coverage for Studio helper presence, asset-version consistency, stale-cache prevention, and service-worker update headers.
 
-# Loreforge 3.0.1 — Campaign Studio startup regression fix
+# Seeker 3.0.1 — Campaign Studio startup regression fix
 
 - Restored the Campaign Studio `refreshStatus()`, `refreshFiles()`, and `renderFileTree()` helpers that were accidentally dropped during the tabbed-editor refactor. Their absence threw during Studio startup and prevented later initialization, including Access controls.
 - Reconnected project status, PDF readiness, project-health messaging, file filtering/selection, and the main-file selector to the restored refresh flow.
 - Added regression coverage so the Studio bootstrap helpers cannot silently disappear again.
 
-# Loreforge 3.0.0 — Living world, player agency & campaign memory
+# Seeker 3.0.0 — Living world, player agency & campaign memory
 
-- Added a formal **Lore vs. State** architecture. Canonical setting prose remains in LaTeX; mutable campaign state (where people are, what factions are doing, what players know, and what is currently unresolved) lives in Loreforge metadata instead of polluting the manuscript.
+- Added a formal **Lore vs. State** architecture. Canonical setting prose remains in LaTeX; mutable campaign state (where people are, what factions are doing, what players know, and what is currently unresolved) lives in Seeker metadata instead of polluting the manuscript.
 - Added **per-player knowledge state** for lore/state targets so different invited players can know, suspect, or remain unaware of different facts without duplicating Codex pages.
 - Added **Campaign Fronts** with clocks, status, goals, stakes and advancement history for factions, threats, wars and off-screen projects.
 - Added **runtime NPC/entity state** for current location, status, attitude, faction, objective, last appearance and other volatile campaign facts.
@@ -40,7 +53,7 @@
 - Added **player submissions** for proposed lore, recaps, relationship ideas and worldbuilding, with GM approval/rejection instead of direct canonical-source editing. Submissions and GM Inbox items support file/image uploads.
 - Added a fast **GM Inbox** for notes, NPC/location ideas, reminders, photos and browser-recorded voice memos to classify after the session.
 - Added **staged publishing** (Draft / Ready / Published) so the GM can prepare several related Codex changes and release them together after a session.
-- Added **session state snapshots** and provenance so Loreforge can answer what changed around a session and where an entry appeared/revealed over campaign history.
+- Added **session state snapshots** and provenance so Seeker can answer what changed around a session and where an entry appeared/revealed over campaign history.
 - Added a **notification/live-push layer** for discoveries and session spotlights. Player Session surfaces newly delivered information without requiring players to manually hunt through the Codex.
 - Added **continuity checks and lore suggestions** for runtime/lore conflicts, missing relationships and opportunities to connect prose to existing lore. Suggestions are approval-only and never rewrite source automatically.
 - Added a dedicated **Media Library** with asset kinds/tags, focal points, alt text, usage lookup, thumbnails and owner-only reference replacement across LaTeX + supported metadata.
@@ -53,20 +66,20 @@
 - Expanded Player Session and Campaign pages so party-maintained threads, journals and character-owned state are reachable from phone/tablet play rather than living only in GM screens.
 - Added regression coverage for player/party authorship boundaries, observer/co-GM permissions, archive freeze behavior, historical polygon round-trips, media usage/replacement, portable archive integrity, mobile player-session integration, and owner-only backup testing.
 
-# Loreforge 2.1.0 — World Builder, readable network & player characters
+# Seeker 2.1.0 — World Builder, readable network & player characters
 
 - Rebuilt the **Lore Network** around readable story relationships instead of drawing every heading at once. Story mode caps noisy automatic references, prioritizes Person-of-Note/entity links and explicit semantic relationships, hides unconnected nodes, suppresses label clutter, supports chapter/search filters, and adds correct responsive pan/zoom plus two-finger pinch on touch devices. The false “No links yet” overlay is fixed.
 - Turned **Timeline** into a dedicated **Historical Chronicle**. GMs can create eras, date ranges, wars, reigns, discoveries, treaties, catastrophes, revolutions and other turning points; events have significance and historical certainty, while session recaps/festivals no longer clutter the historical view.
 - Rebuilt **Campaign Control → World Builder** as a visual authoring workflow: structured month/week/moon editors, geography/travel controls, world-health progress, purpose-based lore templates, and direct jumps into History, Relationships and Atlas tools.
 - Added **Create entry in Campaign Studio** from World Builder. It creates a normal LaTeX file under `Worldbuilding/`, revision-safely wires it into the main document, and opens that file directly in the Studio editor. A non-mutating “Copy LaTeX scaffold” option remains available.
-- Added **Obsidian-style source tabs** to Campaign Studio. Multiple `.tex`/source files can stay open, dirty state is shown per tab, files can be closed individually, and internal Loreforge navigation now stays in the same app window rather than spawning browser windows.
+- Added **Obsidian-style source tabs** to Campaign Studio. Multiple `.tex`/source files can stay open, dirty state is shown per tab, files can be closed individually, and internal Seeker navigation now stays in the same app window rather than spawning browser windows.
 - Added a persistent GM mode switcher between **Player / Session / Studio / Control** and expanded tablet behavior. iPad-sized screens now use the same Files / Editor / Preview single-pane authoring model as phones instead of squeezing the desktop three-pane layout into a narrow viewport.
 - Added a first-class **Player Characters** shelf. Each invited player can own multiple characters, edit biography/goals/status/profile information, choose party-visible or private-to-player+GM visibility, upload portraits, gallery art and inspiration references, and manage retired/alternate characters. GMs can inspect/edit every character.
 - Player characters are available from desktop navigation, the mobile bottom bar, Player Session quick actions, Campaign Control → Party, and global search. Private character dossiers and their uploaded images remain inaccessible to other players even if an asset URL is guessed.
 - Updated PWA/offline routing so character dossiers and their media are treated as invitation-protected campaign content.
 - Added regression coverage for historical eras, timeline filtering, multiple/private player characters, private character assets/search, direct World Builder file creation, network/mobile UI shipping, and existing v2 functionality.
 
-# Loreforge 2.0.0 — living campaign platform
+# Seeker 2.0.0 — living campaign platform
 
 - Added dedicated **GM Session Mode** and **Player Session Mode** with live session state, spotlight lore/maps, discoveries, handouts, recaps, current location, and session history.
 - Added **progressive lore** (hidden / rumor / discovered / public), party or player-specific audiences, temporary reveals, unreliable-knowledge variants, and an editor **Reveal** composer that wraps selected LaTeX prose without changing the canonical PDF.
@@ -88,7 +101,7 @@
 - Added an Access workspace for creating, copying, expiring, revoking, restoring, rotating, and deleting personal invitations. Usage count, last-used time, and remembered browser/device count are shown per invitation.
 - Invitations can optionally be limited to a set number of browsers/devices. Reopening the link in the same remembered browser reuses its slot; the GM can reset remembered devices without changing the invitation URL.
 - Opening an invitation while already logged in as GM does not consume a player device slot, so testing/copying links cannot accidentally lock a one-device invitation.
-- Invitation links are signed with the persistent Loreforge session secret. The database stores an invitation nonce/version rather than a reusable global player password; rotating a link increments its access version and immediately invalidates old links and existing player sessions.
+- Invitation links are signed with the persistent Seeker session secret. The database stores an invitation nonce/version rather than a reusable global player password; rotating a link increments its access version and immediately invalidates old links and existing player sessions.
 - Revocation is checked on every protected request, including Codex pages, Atlas pages/assets, Lore Network, search, project images, uploaded map art, and PDF preview. Static application assets and the health endpoint remain public.
 - Added three player access modes: **Invitation links only** (default/recommended), legacy shared `PLAYER_PASSWORD`, and fully public. Creating an invitation automatically moves the site back to invite-only mode.
 - Railway deployments now default session cookies to Secure; local HTTP development remains supported.
@@ -101,7 +114,7 @@
 
 - Restored the earlier Codex visual hierarchy: automatic first-image artwork now belongs to the **whole large chapter/section block**, not behind each individual entry headline.
 - The reading sidebar and entry links are text-only again; the small thumbnail treatment remains disabled.
-- Automatic section art is still enabled by default. Loreforge uses the first meaningful image found in that chapter, while skipping PF2e action-symbol utility images.
+- Automatic section art is still enabled by default. Seeker uses the first meaningful image found in that chapter, while skipping PF2e action-symbol utility images.
 - Explicit chapter artwork overrides the automatic section image. Entry-level TOC artwork remains deliberate metadata and is no longer auto-painted behind every navigation row.
 - Updated Project settings and Codex Studio copy/preview so the behavior is clear: `AUTO · SECTION BACKGROUND` is shown for automatically illustrated chapter cards.
 - Added regression coverage for section-level image promotion and for keeping individual entry navigation free of automatic image backgrounds.
@@ -110,8 +123,8 @@
 
 ## 1.3.10 — zero-copy PDF previews and ENOSPC false-failure fix
 
-- Fixed the remaining false `Compilation failed` state for very large successful PDFs. The TeX pipeline could finish cleanly, then Loreforge would duplicate `project/main.pdf` into `build/campaign.pdf`; if that second ~100+ MB copy filled the Railway volume, the filesystem error was swallowed and the successful TeX tail was displayed as the supposed blocker.
-- Loreforge no longer duplicates compiled PDF bytes. `/preview/pdf` serves the canonical project PDF directly and `build/campaign.pdf` is now only an optional zero-copy symlink/hardlink alias.
+- Fixed the remaining false `Compilation failed` state for very large successful PDFs. The TeX pipeline could finish cleanly, then Seeker would duplicate `project/main.pdf` into `build/campaign.pdf`; if that second ~100+ MB copy filled the Railway volume, the filesystem error was swallowed and the successful TeX tail was displayed as the supposed blocker.
+- Seeker no longer duplicates compiled PDF bytes. `/preview/pdf` serves the canonical project PDF directly and `build/campaign.pdf` is now only an optional zero-copy symlink/hardlink alias.
 - Before a new compile, an obsolete full-copy `build/campaign.pdf` from older versions is removed when the canonical project PDF still exists, immediately reclaiming the duplicate storage before XeLaTeX needs room for a new output.
 - Failure to create the optional preview alias can no longer turn a successful TeX build into a failed build; the preview falls back to the canonical PDF.
 - Persisting the optional build log is now best-effort, so a nearly full volume cannot retroactively invalidate a finished PDF.
@@ -122,22 +135,22 @@
 
 - Fixed the remaining false-negative XeLaTeX build state where an earlier failed latexmk pass in the same combined log poisoned a later successful `xdvipdfmx`/PDF pass.
 - Final PDF reconciliation is now chronological: a strong success witness (`N bytes written`, `Output written on main.pdf`, or `All targets (main.pdf) are up-to-date`) is accepted when it occurs after the last fatal marker.
-- Successful terminal PDF evidence is checked before Loreforge launches stale-state retries, preventing unnecessary recompilation of very large campaign books.
+- Successful terminal PDF evidence is checked before Seeker launches stale-state retries, preventing unnecessary recompilation of very large campaign books.
 - A fatal/error marker that occurs after the final PDF success witness still correctly keeps the build failed.
 - Added regression coverage matching the reported 347-page Railway log: early `gave an error`/collected summary followed by `144035686 bytes written` and a final up-to-date `main.pdf`.
 
 ## 1.3.8 — Successful-PDF reconciliation
 
 - Fixed a false compile failure where XeLaTeX/xdvipdfmx successfully wrote `main.pdf` but `latexmk` retained a non-zero wrapper status.
-- Loreforge now verifies the final PDF and accepts strong success witnesses such as `All targets (main.pdf) are up-to-date` or a fresh `N bytes written` converter result when no real TeX errors are present.
+- Seeker now verifies the final PDF and accepts strong success witnesses such as `All targets (main.pdf) are up-to-date` or a fresh `N bytes written` converter result when no real TeX errors are present.
 - Prevents the successful end of a 300+ page build from being displayed as `FIRST BLOCKING ERROR`.
 - Avoids launching an unnecessary direct XeLaTeX diagnostic pass after a final PDF has already been proven good.
 
 # v1.3.6 — large-book XeLaTeX pipeline recovery
 
-- Fixed a major large-project bug where `LATEX_ENGINE=auto` resolving to XeLaTeX was treated as a fresh engine switch on **every compile**. Loreforge now remembers the effective engine, so `.aux`, `.toc`, `.fdb_latexmk`, and related incremental state are only cleared when the engine actually changes (or when the GM explicitly requests a clean build).
+- Fixed a major large-project bug where `LATEX_ENGINE=auto` resolving to XeLaTeX was treated as a fresh engine switch on **every compile**. Seeker now remembers the effective engine, so `.aux`, `.toc`, `.fdb_latexmk`, and related incremental state are only cleared when the engine actually changes (or when the GM explicitly requests a clean build).
 - Added adaptive build windows for large XeLaTeX/LuaLaTeX campaign books. Projects with many source files or image assets receive a longer per-stage allowance while `LATEX_TIMEOUT` remains the minimum configured timeout.
-- Added first-class XeLaTeX **XDV → PDF recovery**. When XeLaTeX has successfully produced a fresh `.xdv` but the outer `latexmk` stage fails or times out before PDF conversion, Loreforge invokes `xdvipdfmx` separately and can recover the build without re-typesetting hundreds of pages.
+- Added first-class XeLaTeX **XDV → PDF recovery**. When XeLaTeX has successfully produced a fresh `.xdv` but the outer `latexmk` stage fails or times out before PDF conversion, Seeker invokes `xdvipdfmx` separately and can recover the build without re-typesetting hundreds of pages.
 - If `xdvipdfmx` itself fails, Build Doctor now surfaces the converter's actual fatal message instead of showing the harmless end of the XeLaTeX transcript (`Output written on main.xdv ...`) as the blocking error.
 - FIRST BLOCKING ERROR now prioritizes the pipeline/controller log before appending the potentially huge TeX engine log, so timeout/conversion failures can no longer be pushed out of view by a 300+ page transcript.
 - Added regression coverage for XDV recovery, adaptive pipeline diagnostics, and preserving incremental auxiliary state across repeated AUTO → XeLaTeX builds.
@@ -160,9 +173,9 @@
 
 ## 1.3.2
 
-- Added conservative one-click **Build Doctor quick fixes** for high-confidence imported-source mistakes. The current set repairs stray `\\` after headings / `multicols` boundaries, missing `{2}` on bare `\begin{multicols}`, `\subsubection` typos, and accidental sentence-start `\The`. Every fix verifies the exact original line, uses Loreforge revision history, and recompiles immediately.
+- Added conservative one-click **Build Doctor quick fixes** for high-confidence imported-source mistakes. The current set repairs stray `\\` after headings / `multicols` boundaries, missing `{2}` on bare `\begin{multicols}`, `\subsubection` typos, and accidental sentence-start `\The`. Every fix verifies the exact original line, uses Seeker revision history, and recompiles immediately.
 - Build Doctor no longer treats every `Missing number` as a dimension problem: bare `multicols` environments are diagnosed specifically as missing the required column count.
-- Loreforge now keeps and previews a **fresh PDF generated despite LaTeX errors**, similar to Overleaf's recoverable-error workflow. The build remains visibly marked as having source errors so a partial PDF is never mistaken for a clean final build.
+- Seeker now keeps and previews a **fresh PDF generated despite LaTeX errors**, similar to Overleaf's recoverable-error workflow. The build remains visibly marked as having source errors so a partial PDF is never mistaken for a clean final build.
 - Improved the build panel with explicit `PDF produced with source errors` state and quick-repair controls attached directly to the relevant diagnostics.
 
 ## 1.3.1
@@ -176,8 +189,8 @@
 
 ## 1.3.0
 
-- Fixed `fontspec` projects being sent to pdfLaTeX. Loreforge now detects `fontspec`, `\setmainfont`, `\setsansfont`, `\setmonofont`, `unicode-math`, and Lua-only source across `.tex`, `.sty`, and `.cls` files and automatically selects XeLaTeX/LuaLaTeX even when an older Railway environment still says `LATEX_ENGINE=pdflatex`.
-- When the effective engine changes, Loreforge clears only generated dependency/auxiliary state before compiling so stale pdfLaTeX `.fdb_latexmk` data cannot poison the first XeLaTeX build.
+- Fixed `fontspec` projects being sent to pdfLaTeX. Seeker now detects `fontspec`, `\setmainfont`, `\setsansfont`, `\setmonofont`, `unicode-math`, and Lua-only source across `.tex`, `.sty`, and `.cls` files and automatically selects XeLaTeX/LuaLaTeX even when an older Railway environment still says `LATEX_ENGINE=pdflatex`.
+- When the effective engine changes, Seeker clears only generated dependency/auxiliary state before compiling so stale pdfLaTeX `.fdb_latexmk` data cannot poison the first XeLaTeX build.
 - Added OpenType TeX Gyre and EB Garamond system fonts plus fontconfig to the Docker image. The Docker build now validates that **TeX Gyre Adventor** and **EB Garamond** are actually discoverable before the image succeeds.
 - Improved Build Doctor so the `fontspec + pdfTeX` failure is identified as an engine mismatch rather than incorrectly reported as a missing font. The build panel now shows the effective engine on both successful and failed builds.
 - Added first-class player-Codex rendering for the supplied PF2e campaign macros: `\feat`, `\action`, `\itemtemplate`, `monster`, `\monstersection`, `\monsterline`, `\monsterabilityscores`, `\monsterdefenses`, `\monsterspeed`, `\monsterattack`, `\monsterspellcasting`, and `\monsterability`.
@@ -216,7 +229,7 @@
 
 - Fixed a Build Doctor false positive where any later fatal TeX error could be incorrectly attributed to `fontspec`/pdfLaTeX even while XeLaTeX was actually active.
 - Font warnings now require an explicit "font not found" diagnostic; generic `fontspec` errors are no longer mislabeled as missing fonts.
-- Build Doctor now compares the engine Loreforge selected with the TeX engine banner actually observed in the log and reports project-local `latexmkrc` overrides when they disagree.
+- Build Doctor now compares the engine Seeker selected with the TeX engine banner actually observed in the log and reports project-local `latexmkrc` overrides when they disagree.
 - Bumped static asset cache keys so Railway/browser caches cannot keep an older admin UI that lacks the **FIRST BLOCKING ERROR** panel after an application update.
 
 ## 1.3.7 — Atmospheric navigation backgrounds

@@ -10,7 +10,7 @@ $$('[data-character-image]').forEach(input=>input.addEventListener('change',asyn
 $$('[data-delete-character-image]').forEach(b=>b.onclick=async()=>{if(!confirm('Remove this image?'))return;const r=await fetch('/api/player/character-images/'+b.dataset.deleteCharacterImage,{method:'DELETE'});if(r.ok)location.reload()});
 })();
 
-// Loreforge 3 — character arcs and relationship agency on the dossier itself.
+// Seeker 3 — character arcs and relationship agency on the dossier itself.
 (()=>{
   const root=document.querySelector('[data-character-page]');if(!root||root.dataset.canEdit!=='1')return;
   const character=JSON.parse(document.getElementById('singleCharacterData')?.textContent||'{}');

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import copy
+import functools
 import json
 import os
 import re
 import secrets
 import shutil
 import tempfile
+import threading
 import time
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -20,7 +21,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import load_settings
 from .latex import analyze_project, build_wiki, choose_main, compile_pdf, compiled_pdf_path, load_wiki
-from .maps import create_map, create_marker, delete_map, delete_marker, get_map, list_maps, update_map, update_marker
+from .maps import create_map, create_marker, delete_map, delete_marker, get_map, list_maps, map_locations_for_page, update_map, update_marker
 from .storage import (
     cleanup_legacy_import_artifacts, connect, create_player_invite, delete_player_invite, export_project_zip,
     get_codex_presentation, get_setting, init_db, list_player_invites, list_project_files, list_revisions,
@@ -33,7 +34,7 @@ from .features import (
     delete_mystery_edge, delete_mystery_pin,
     create_snapshot, delete_session, entity_style, fog_regions, get_live_session, init_feature_db,
     list_annotations, list_bookmarks, list_handouts, list_mysteries, list_relationships, list_reveal_blocks_from_wiki, list_reveal_states,
-    list_sessions, list_snapshots, list_timeline, list_timeline_eras, list_variants, log_activity, map_layers, page_relationships,
+    list_sessions, session_appearances_for_page, list_snapshots, list_timeline, list_timeline_eras, list_variants, log_activity, map_layers, page_relationships,
     recent_updates, reveal_state, restore_snapshot, save_alias, save_entity_style, save_fog_region, save_handout, save_map_layer,
     save_mystery, save_mystery_edge, save_relationship, save_session, save_timeline_event, save_timeline_era, delete_timeline_era,
     save_variant, delete_variant, set_reveal, set_session_lore, toggle_bookmark, travel_between_markers,
@@ -42,7 +43,7 @@ from .features import (
 
 from .living import (
     init_living_db, knowledge_state, set_knowledge, list_knowledge, knowledge_index, knowledge_allows, list_fronts, save_front, advance_front,
-    runtime_states, save_runtime_state, relationship_history, save_relationship_history, hierarchies, save_hierarchy_edge,
+    runtime_states, runtime_state_for_page, save_runtime_state, relationship_history, save_relationship_history, hierarchies, save_hierarchy_edge,
     map_regions, save_map_region, save_region_history, list_rumors, save_rumor, random_rumor, list_threads, save_thread, add_thread_note, update_thread_note, delete_thread_note, save_thread_link, delete_thread_link,
     list_journals, list_party_journals, save_journal, inbox_items, save_inbox, list_submissions, save_submission, review_submission,
     publishing_state, set_publishing_state, publishing_states, capture_session_state, session_state_snapshots, scan_suggestions, update_suggestion,
@@ -52,11 +53,12 @@ from .living import (
 )
 
 settings = load_settings()
+BUILD_LOCK = threading.Lock()
 init_db(settings)
 init_feature_db(settings)
 seed_project(settings)
 
-app = FastAPI(title="Loreforge", docs_url=None, redoc_url=None)
+app = FastAPI(title="Seeker", docs_url=None, redoc_url=None)
 _secure_session_cookie = os.getenv("SESSION_COOKIE_SECURE", "1" if os.getenv("RAILWAY_ENVIRONMENT") else "0").lower() in {"1", "true", "yes"}
 app.add_middleware(
     SessionMiddleware, secret_key=settings.session_secret, https_only=_secure_session_cookie,
@@ -64,6 +66,26 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=settings.root_dir / "static"), name="static")
 templates = Jinja2Templates(directory=settings.root_dir / "templates")
+
+
+async def _stream_upload(upload: UploadFile, target: Path, max_bytes: int, too_large: str) -> int:
+    """Stream an upload to disk with a hard bound on resident memory."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    total=0
+    try:
+        with target.open("wb") as fh:
+            while True:
+                chunk=await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(413, too_large)
+                fh.write(chunk)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return total
 
 
 def is_admin(request: Request) -> bool:
@@ -120,16 +142,34 @@ def knowledge_visible(request: Request, target_type: str, target_key: str, *, de
     return knowledge_allows(settings,_invite_id(request),target_type,str(target_key),default=default)
 
 
+def _knowledge_visible_from_index(index: dict[tuple[str,str],dict], target_type: str, target_key: str, *, default: bool=True) -> tuple[bool,str]:
+    row=index.get((str(target_type),str(target_key)))
+    if not row:return default,"default"
+    state=str(row.get("state") or "unknown")
+    return state!="unknown",state
+
+
 def player_access_mode() -> str:
     mode = get_setting(settings, "player_access_mode", "invite").strip().lower()
     return mode if mode in {"invite", "password", "public"} else "invite"
 
 
 def current_player_invite(request: Request) -> dict | None:
-    return validate_player_invite_session(
+    # Invitation validation is used by several helpers on one page render. Cache
+    # it on the Starlette request object so a single request never revalidates
+    # the same device/session repeatedly. Tiny request shims used by scripts/tests
+    # may not expose Starlette's ``state`` attribute, so caching is opportunistic.
+    state = getattr(request, "state", None)
+    if state is not None and getattr(state, "_seeker_invite_checked", False):
+        return getattr(state, "_seeker_invite", None)
+    invite = validate_player_invite_session(
         settings, request.session.get("player_invite_id"), request.session.get("player_invite_version"),
         request.session.get("player_device_id"),
     )
+    if state is not None:
+        state._seeker_invite_checked = True
+        state._seeker_invite = invite
+    return invite
 
 
 def player_allowed(request: Request) -> bool:
@@ -183,7 +223,7 @@ def ensure_built() -> dict:
     try:
         return load_wiki(settings)
     except Exception:
-        return {"title": "Loreforge", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time()}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 4100}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -243,17 +283,141 @@ def _gallery_from_html(html_text: str) -> list[dict]:
     return out[:24]
 
 
-def _visible_wiki(request: Request, *, include_hidden_for_admin: bool = True) -> dict:
-    wiki = copy.deepcopy(ensure_built())
-    admin = is_gm(request)
-    invite_id = _invite_id(request)
+def _effective_reveal(row: dict | None, invite_id: int | None, now: float) -> dict:
+    if not row:
+        return {"state":"hidden","rumor_text":"","configured":False,"audience":[]}
+    out=dict(row); out["configured"]=True
+    if out.get("expires_at") and float(out["expires_at"]) <= now:
+        out["state"]="hidden"
+    try:
+        audience=json.loads(out.get("audience_json") or "[]")
+    except Exception:
+        audience=[]
+    if audience:
+        try: allowed={int(x) for x in audience}
+        except Exception: allowed=set()
+        if invite_id is None or int(invite_id) not in allowed:
+            out["state"]="hidden"
+    out["audience"]=audience
+    return out
+
+
+def _wiki_dynamic_state(invite_id: int | None, admin: bool) -> dict:
+    """Load all per-player Codex state in one SQLite connection.
+
+    v4 performed several new connections for every single Codex page (reveal,
+    publishing, knowledge, dossier style, relationships and variants). On a
+    large setting this made ordinary page navigation scale with page count.
+    """
+    with connect(settings) as conn:
+        reveals=[dict(r) for r in conn.execute("SELECT * FROM lore_reveals").fetchall()]
+        publishing=[dict(r) for r in conn.execute("SELECT * FROM publishing_states").fetchall()]
+        if invite_id is None:
+            knowledge=[]
+        else:
+            knowledge=[dict(r) for r in conn.execute(
+                "SELECT * FROM player_knowledge WHERE invite_id=?", (int(invite_id),)
+            ).fetchall()]
+        styles=[dict(r) for r in conn.execute("SELECT * FROM entity_styles").fetchall()]
+        relationships=[dict(r) for r in conn.execute("SELECT * FROM lore_relationships").fetchall()]
+        variants=[dict(r) for r in conn.execute("SELECT * FROM lore_variants ORDER BY id").fetchall()]
+        alias_rows=[dict(r) for r in conn.execute("SELECT alias,page_slug FROM page_aliases").fetchall()]
+        live_row=conn.execute("SELECT id,session_number,title,status,updated_at FROM campaign_sessions WHERE status='live' ORDER BY updated_at DESC,id DESC LIMIT 1").fetchone()
+    if not admin:
+        relationships=[r for r in relationships if r.get("visibility") not in {"gm","hidden"}]
+        variants=[r for r in variants if r.get("visibility") not in {"gm","hidden"}]
+    rel_by: dict[str,list[dict]]={}
+    for r in relationships:
+        rel_by.setdefault(str(r.get("source_slug") or ""),[]).append(r)
+        rel_by.setdefault(str(r.get("target_slug") or ""),[]).append(r)
+    variants_by: dict[str,list[dict]]={}
+    for r in variants:
+        variants_by.setdefault(str(r.get("page_slug") or ""),[]).append(r)
+    return {
+        "reveals": {(str(r.get("target_type")),str(r.get("target_key"))):r for r in reveals},
+        "publishing": {str(r.get("page_slug")):str(r.get("state") or "published") for r in publishing},
+        "knowledge": {(str(r.get("target_type")),str(r.get("target_key"))):r for r in knowledge},
+        "styles": {str(r.get("page_slug")):r for r in styles},
+        "relationships": rel_by,
+        "variants": variants_by,
+        "aliases": {str(r.get("alias") or "").casefold():str(r.get("page_slug") or "") for r in alias_rows},
+        "live_session": dict(live_row) if live_row else None,
+    }
+
+
+_REVEAL_SECTION_RE = re.compile(r'<section class="lore-reveal" data-lore-reveal="([^"]+)"(?: data-rumor="([^"]*)")?>(.*?)</section>', re.S)
+
+
+def _apply_reveals_from_index(html_text: str, page_slug: str, state: dict, invite_id: int | None, now: float) -> str:
+    def repl(match):
+        key=match.group(1); rumor=match.group(2) or ""
+        reveal=_effective_reveal(state["reveals"].get(("block",f"{page_slug}:{key}")),invite_id,now)
+        if reveal.get("state") in {"discovered","public"}: return match.group(3)
+        if reveal.get("state")=="rumor":
+            return f'<aside class="lore-rumor"><small>RUMOR</small><p>{reveal.get("rumor_text") or rumor}</p></aside>'
+        return '<div class="lore-undiscovered"><span>✦</span><small>UNDISCOVERED LORE</small></div>'
+    return _REVEAL_SECTION_RE.sub(repl, html_text or "")
+
+
+def _path_signature(path: Path) -> tuple[int,int]:
+    try:
+        st=path.stat(); return int(st.st_mtime_ns), int(st.st_size)
+    except OSError:
+        return 0,0
+
+
+def _visible_wiki_signature(invite_id: int | None, admin: bool) -> tuple:
+    """Return a compact revision fingerprint for data that changes Codex output.
+
+    Do not key this cache from the SQLite WAL file itself: ordinary activity
+    logging/bookmarks also write to the WAL and would invalidate the Codex on
+    every page view. One small aggregate query is substantially cheaper than
+    reconstructing every reveal, variant, relationship and style on each click.
+    """
+    index=settings.build_dir / "wiki_index.json"
+    with connect(settings) as conn:
+        knowledge_clause = "WHERE invite_id=?" if (invite_id is not None and not admin) else "WHERE 0"
+        params = (int(invite_id),) if (invite_id is not None and not admin) else ()
+        row=conn.execute(f"""
+            SELECT
+              (SELECT COUNT(*) FROM lore_reveals),
+              (SELECT COALESCE(MAX(updated_at),0) FROM lore_reveals),
+              (SELECT COUNT(*) FROM publishing_states),
+              (SELECT COALESCE(MAX(updated_at),0) FROM publishing_states),
+              (SELECT COUNT(*) FROM player_knowledge {knowledge_clause}),
+              (SELECT COALESCE(MAX(updated_at),0) FROM player_knowledge {knowledge_clause}),
+              (SELECT COUNT(*) FROM entity_styles),
+              (SELECT COALESCE(MAX(updated_at),0) FROM entity_styles),
+              (SELECT COUNT(*) FROM lore_relationships),
+              (SELECT COALESCE(MAX(updated_at),0) FROM lore_relationships),
+              (SELECT COUNT(*) FROM lore_variants),
+              (SELECT COALESCE(MAX(updated_at),0) FROM lore_variants),
+              (SELECT COUNT(*) FROM page_aliases),
+              (SELECT COALESCE(MAX(updated_at),0) FROM page_aliases),
+              (SELECT COUNT(*) FROM campaign_sessions WHERE status='live'),
+              (SELECT COALESCE(MAX(updated_at),0) FROM campaign_sessions WHERE status='live')
+        """, params + params).fetchone()
+    return (str(index), *_path_signature(index), *(tuple(row) if row else ()))
+
+
+@functools.lru_cache(maxsize=12)
+def _visible_wiki_cached(admin: bool, invite_id: int | None, player_label: str, player_access_key: str, signature: tuple) -> dict:
+    # ``signature`` is intentionally unused inside the body: it is part of the
+    # cache key and changes whenever the generated Codex or SQLite state changes.
+    del signature
+    base = ensure_built()
+    wiki = {k:v for k,v in base.items() if k not in {"pages","categories"}}
+    dynamic = _wiki_dynamic_state(invite_id, admin)
+    now=time.time()
     visible_pages = []
     allowed_slugs = set()
-    for page in wiki.get("pages", []):
+    for source_page in base.get("pages", []):
+        page=dict(source_page)
+        page["presentation"]=dict(source_page.get("presentation",{}))
         visibility = page.get("presentation", {}).get("visibility", "public")
-        page_reveal = reveal_state(settings, "page", page.get("slug", ""), invite_id)
-        publish = publishing_state(settings, page.get("slug", ""))
-        player_knowledge = knowledge_state(settings, invite_id, "page", page.get("slug", ""))
+        page_reveal = _effective_reveal(dynamic["reveals"].get(("page",str(page.get("slug", "")))), invite_id, now)
+        publish = dynamic["publishing"].get(str(page.get("slug","")),"published")
+        player_knowledge = dynamic["knowledge"].get(("page",str(page.get("slug",""))))
         page["publishing_state"] = publish
         page["knowledge_state"] = player_knowledge
         if not admin:
@@ -273,43 +437,54 @@ def _visible_wiki(request: Request, *, include_hidden_for_admin: bool = True) ->
                 page["presentation"]["visibility"] = "teaser"
                 if page_reveal.get("rumor_text"):
                     page["excerpt"] = page_reveal["rumor_text"]
-            page["html"] = apply_reveals_to_html(settings, page.get("html", ""), page.get("slug", ""), admin=False, invite_id=invite_id)
-            # Regenerate searchable text from the filtered HTML so hidden truth is
-            # never leaked by search snippets or hover previews.
-            page["plain_text"] = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page["html"])).strip()
-        style = entity_style(settings, page.get("slug", ""))
+            source_html=page.get("html", "")
+            if 'data-lore-reveal=' in source_html:
+                page["html"] = _apply_reveals_from_index(source_html, page.get("slug", ""), dynamic, invite_id, now)
+                page["plain_text"] = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page["html"])).strip()
+        style = dict(dynamic["styles"].get(str(page.get("slug",""))) or {"page_slug":page.get("slug",""),"crest_ref":"","accent":"","motif":"","ambient_audio_ref":"","dossier_type":"auto"})
         style["crest_url"] = _asset_ref_url(style.get("crest_ref", ""))
         style["ambient_audio_url"] = _asset_ref_url(style.get("ambient_audio_ref", ""))
         page["entity_style"] = style
-        page["explicit_relationships"] = page_relationships(settings, page.get("slug", ""), admin=admin)
-        page["variants"] = list_variants(settings, page.get("slug", ""), admin=admin)
-        page["gallery"] = _gallery_from_html(page.get("html", ""))
+        page["explicit_relationships"] = [dict(r) for r in dynamic["relationships"].get(str(page.get("slug","")),[])]
+        page["variants"] = [dict(r) for r in dynamic["variants"].get(str(page.get("slug","")),[])]
         visible_pages.append(page)
         allowed_slugs.add(page.get("slug"))
     wiki["pages"] = visible_pages
     clean_categories = []
-    for category in wiki.get("categories", []):
-        category["pages"] = [p for p in category.get("pages", []) if p.get("slug") in allowed_slugs]
+    by_slug={p.get("slug"):p for p in visible_pages}
+    for source_category in base.get("categories", []):
+        category=dict(source_category)
+        category["presentation"]=dict(source_category.get("presentation",{}))
+        # Reuse the already filtered/mutated visible page objects so teaser
+        # state and player-specific excerpts are consistent in sidebars/home.
+        category["pages"]=[by_slug[p.get("slug")] for p in source_category.get("pages",[]) if p.get("slug") in by_slug]
         if category["pages"]:
             clean_categories.append(category)
     wiki["categories"] = clean_categories
-    # Explicit semantic edges are spoiler-safe too: relationships to hidden
-    # entries are removed rather than exposing a secret slug/title indirectly.
     if not admin:
         for page in visible_pages:
             page["explicit_relationships"] = [
                 r for r in page.get("explicit_relationships", [])
                 if r.get("source_slug") in allowed_slugs and r.get("target_slug") in allowed_slugs
             ]
-    wiki["aliases"] = aliases(settings)
-    wiki["live_session"] = get_live_session(settings, invite_id=invite_id, admin=admin)
-    active_invite=current_player_invite(request) if not admin else None
-    wiki["player_label"] = (active_invite or {}).get("label", "") if not admin else ("Co-GM" if is_co_gm(request) else "GM")
+    wiki["aliases"] = dynamic["aliases"]
+    wiki["live_session"] = dynamic["live_session"]
+    wiki["player_label"] = player_label
     wiki["gm_view"] = admin
-    # Used only to segregate browser-local/offline state when the same device is
-    # handed from one invitation to another. It is not an authentication token.
-    wiki["player_access_key"] = (f"invite:{active_invite.get('id')}:{active_invite.get('access_version')}" if active_invite else ("admin" if admin else player_access_mode()))
+    wiki["player_access_key"] = player_access_key
     return wiki
+
+
+def _visible_wiki(request: Request, *, include_hidden_for_admin: bool = True) -> dict:
+    # ``include_hidden_for_admin`` remains for API compatibility with older
+    # integrations; GM views always include hidden material.
+    del include_hidden_for_admin
+    admin=is_gm(request)
+    invite=None if admin else current_player_invite(request)
+    invite_id=int(invite["id"]) if invite else None
+    player_label=("Co-GM" if is_co_gm(request) else "GM") if admin else str((invite or {}).get("label") or "")
+    access_key=("admin" if is_admin(request) else "co-gm") if admin else (f"invite:{invite.get('id')}:{invite.get('access_version')}" if invite else player_access_mode())
+    return _visible_wiki_cached(admin, invite_id, player_label, access_key, _visible_wiki_signature(invite_id, admin))
 
 
 def _asset_rows() -> list[dict]:
@@ -330,12 +505,30 @@ def _asset_rows() -> list[dict]:
 @app.on_event("startup")
 def startup_build() -> None:
     try:
-        if list(settings.project_dir.rglob("*.tex")):
-            build_wiki(settings)
-            if os.getenv("COMPILE_ON_START", "1").lower() in {"1", "true", "yes"}:
+        tex_files=list(settings.project_dir.rglob("*.tex"))
+        if tex_files:
+            index_path=settings.build_dir / "wiki_index.json"
+            needs_build=not index_path.exists()
+            if not needs_build:
+                try:
+                    existing=load_wiki(settings)
+                    needs_build=int(existing.get("renderer_version") or 0) < 4100
+                    index_mtime=index_path.stat().st_mtime_ns
+                    if not needs_build:
+                        source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
+                        needs_build=any(p.stat().st_mtime_ns>index_mtime for p in source_files)
+                except Exception:
+                    needs_build=True
+            if needs_build:
+                build_wiki(settings)
+            # PDF compilation is intentionally opt-in on boot. TeX is the
+            # heaviest process in this container and can transiently consume far
+            # more memory than the web app. The Studio compile action remains
+            # available, and COMPILE_ON_START=1 restores the old behavior.
+            if os.getenv("COMPILE_ON_START", "0").lower() in {"1", "true", "yes"}:
                 compile_pdf(settings)
     except Exception as exc:
-        print(f"Loreforge startup build warning: {exc}", flush=True)
+        print(f"Seeker startup build warning: {exc}", flush=True)
 
 
 @app.get("/health")
@@ -419,7 +612,7 @@ def player_login(request: Request, password: str = Form(...)):
 
 @app.get("/admin/login", response_class=HTMLResponse)
 def admin_login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "mode": "admin", "title": "Loreforge Editor"})
+    return templates.TemplateResponse("login.html", {"request": request, "mode": "admin", "title": "Seeker Studio"})
 
 
 @app.post("/admin/login")
@@ -427,7 +620,7 @@ def admin_login(request: Request, password: str = Form(...)):
     if secrets.compare_digest(password, settings.admin_password):
         request.session["admin"] = True
         return RedirectResponse("/admin", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request, "mode": "admin", "error": "Wrong password.", "title": "Loreforge Editor"}, status_code=401)
+    return templates.TemplateResponse("login.html", {"request": request, "mode": "admin", "error": "Wrong password.", "title": "Seeker Studio"}, status_code=401)
 
 
 @app.post("/api/logout")
@@ -455,22 +648,27 @@ def home(request: Request):
 def wiki_page(request: Request, slug: str):
     if not player_allowed(request): return player_gate_redirect(request)
     wiki = _visible_wiki(request); pages = wiki.get("pages", [])
-    page = next((p for p in pages if p["slug"] == slug), None)
-    if not page:
-        alias_target=aliases(settings).get(unquote(slug).casefold())
+    found = next(((i,p) for i,p in enumerate(pages) if p["slug"] == slug), None)
+    if not found:
+        alias_target=wiki.get("aliases",{}).get(unquote(slug).casefold())
         if alias_target and any(p.get("slug")==alias_target for p in pages): return RedirectResponse(f"/wiki/{alias_target}",status_code=302)
         raise HTTPException(404, "Wiki page not found")
-    idx = pages.index(page)
+    idx,cached_page=found
+    # The visible Codex is a bounded shared cache. Article-only enrichment must
+    # never mutate that cached object or one reader could affect later requests.
+    page=dict(cached_page)
+    page["presentation"]=dict(cached_page.get("presentation",{}))
+    page["entity_style"]=dict(cached_page.get("entity_style",{}))
+    page["explicit_relationships"]=[dict(r) for r in cached_page.get("explicit_relationships",[])]
+    page["variants"]=[dict(v) for v in cached_page.get("variants",[])]
+    # Gallery extraction is only useful on the article being rendered. v4 did
+    # this regex scan for every visible page on every Codex/search request.
+    page["gallery"] = _gallery_from_html(page.get("html", ""))
     prev_page = pages[idx-1] if idx > 0 else None
     next_page = pages[idx+1] if idx + 1 < len(pages) else None
     page_locked = (not is_gm(request) and page.get("presentation", {}).get("visibility") == "teaser")
-    all_maps=list_maps(settings,public=not is_gm(request)); map_locations=[]
-    for m in all_maps:
-        for marker in m.get("markers",[]):
-            if marker.get("page_slug")==slug: map_locations.append({"map":m,"marker":marker})
-    appearances=[]
-    for sess in list_sessions(settings,public=not is_gm(request),invite_id=_invite_id(request)):
-        if any(x.get("page_slug")==slug for x in sess.get("lore",[])): appearances.append(sess)
+    has_maps,map_locations=map_locations_for_page(settings,slug,public=not is_gm(request))
+    appearances=session_appearances_for_page(settings,slug,public=not is_gm(request))
     by_slug={p["slug"]:p for p in pages}
     for rel in page.get("explicit_relationships",[]):
         other=rel["target_slug"] if rel["source_slug"]==slug else rel["source_slug"]
@@ -483,8 +681,8 @@ def wiki_page(request: Request, slug: str):
         "page.html",
         {
             "request": request, "wiki": wiki, "page": page, "prev_page": prev_page, "next_page": next_page,
-            "page_locked": page_locked, "admin_view": is_gm(request),"maps":all_maps,"map_locations":map_locations,"appearances":appearances,
-            "runtime_state": next((x for x in runtime_states(settings,admin=is_gm(request)) if x.get("page_slug")==slug),None),"provenance":entity_provenance(settings,slug),
+            "page_locked": page_locked, "admin_view": is_gm(request),"maps":([{"id":1}] if has_maps else []),"map_locations":map_locations,"appearances":appearances,
+            "runtime_state": runtime_state_for_page(settings,slug,admin=is_gm(request)),"provenance":entity_provenance(settings,slug),
         },
     )
 
@@ -557,10 +755,13 @@ def map_page(request: Request, slug: str):
     map_data["layers"] = map_layers(settings, int(map_data["id"]), public=True)
     map_data["fog_regions"] = fog_regions(settings, int(map_data["id"]), public=True)
     if not is_gm(request):
-        map_data["markers"]=[m for m in map_data.get("markers",[]) if knowledge_visible(request,"map_marker",f"{map_data['id']}:{m.get('id')}")[0]]
+        kidx=knowledge_index(settings,_invite_id(request))
+        map_data["markers"]=[m for m in map_data.get("markers",[]) if _knowledge_visible_from_index(kidx,"map_marker",f"{map_data['id']}:{m.get('id')}")[0]]
+    else:
+        kidx={}
     map_data["regions"] = map_regions(settings, int(map_data["id"]), admin=is_gm(request))
     if not is_gm(request):
-        map_data["regions"]=[r for r in map_data["regions"] if knowledge_visible(request,"map_region",str(r.get('id')))[0]]
+        map_data["regions"]=[r for r in map_data["regions"] if _knowledge_visible_from_index(kidx,"map_region",str(r.get('id')))[0]]
     map_data["history_min"] = min([float(h.get("start_sort")) for r in map_data["regions"] for h in r.get("history",[]) if h.get("start_sort") is not None], default=0)
     map_data["history_max"] = max([float(h.get("end_sort") if h.get("end_sort") is not None else h.get("start_sort")) for r in map_data["regions"] for h in r.get("history",[]) if h.get("start_sort") is not None], default=0)
     map_data["world_width"] = float(get_setting(settings,"world_width","1000") or 1000)
@@ -574,7 +775,9 @@ def public_search(request: Request, q: str = ""):
     qn = q.strip().lower()
     if not qn: return []
     wiki = _visible_wiki(request)
-    alias_map = aliases(settings)
+    # Aliases are already loaded with the spoiler-filtered Codex state; avoid an
+    # extra SQLite connection on every search keystroke.
+    alias_map = wiki.get("aliases", {})
     ranked=[]
     # Aliases and redirects resolve fantasy titles, old spellings, epithets, and
     # hidden true names to the same canonical entry without duplicate pages.
@@ -632,10 +835,11 @@ def public_search(request: Request, q: str = ""):
 @app.get("/manifest.webmanifest")
 def web_manifest(request: Request):
     wiki = ensure_built()
+    campaign_title=str(wiki.get("title") or "").strip()
     payload = {
-        "name": wiki.get("title", "Loreforge Campaign Atlas"),
-        "short_name": "Loreforge",
-        "description": wiki.get("tagline", "A living campaign atlas."),
+        "name": f"Seeker — {campaign_title}" if campaign_title and campaign_title.casefold() != "seeker" else "Seeker",
+        "short_name": "Seeker",
+        "description": wiki.get("tagline", "A living record of the world."),
         "start_url": "/?source=pwa",
         "scope": "/",
         "display": "standalone",
@@ -645,12 +849,12 @@ def web_manifest(request: Request):
         "icons": [
             {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
             {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
-            {"src": "/static/loreforge-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+            {"src": "/static/seeker-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
         ],
         "shortcuts": [
             {"name": "Session", "url": "/session", "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"}]},
             {"name": "Codex", "url": "/#codex", "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"}]},
-            {"name": "History", "url": "/timeline", "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"}]},
+            {"name": "Chronicle of Ages", "url": "/timeline", "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"}]},
             {"name": "Characters", "url": "/characters", "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"}]},
             {"name": "Calendar", "url": "/calendar", "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"}]}
         ],
@@ -729,7 +933,8 @@ def timeline_page(request: Request):
     events=list_timeline(settings,admin=is_gm(request),historical_only=True)
     eras=list_timeline_eras(settings,admin=is_gm(request))
     if not is_gm(request):
-        events=[e for e in events if knowledge_visible(request,"timeline_event",str(e.get('id')))[0]]
+        kidx=knowledge_index(settings,_invite_id(request))
+        events=[e for e in events if _knowledge_visible_from_index(kidx,"timeline_event",str(e.get('id')))[0]]
     allowed={p.get("slug") for p in wiki.get("pages",[])}
     for event in events:
         event["image_url"]=_asset_ref_url(event.get("image_ref",""))
@@ -800,19 +1005,53 @@ def handout_page(request: Request, slug: str):
 
 @app.get("/api/public/session-pulse")
 def public_session_pulse(request: Request):
+    """Very small live-session heartbeat used every few seconds by clients.
+
+    Do not build a full live-session object here: v4 loaded lore, updates and
+    handouts separately on every pulse. This route now uses one connection and
+    returns only the timestamps the browser actually compares.
+    """
     if not player_allowed(request): raise HTTPException(401)
-    iid=_invite_id(request); admin=is_gm(request); live=get_live_session(settings,invite_id=iid,admin=admin)
-    visible_updates=recent_updates(settings,iid,1,admin=admin); u=visible_updates[0].get("created_at",0) if visible_updates else 0
-    reveal_rows=list_reveal_states(settings)
-    if not admin:
-        def audience_ok(row):
-            try: audience=json.loads(row.get("audience_json") or "[]")
-            except Exception: audience=[]
-            return not audience or (iid is not None and int(iid) in {int(x) for x in audience})
-        reveal_rows=[x for x in reveal_rows if audience_ok(x)]
-    r=max([float(x.get("updated_at") or 0) for x in reveal_rows],default=0)
-    with connect(settings) as conn: h=conn.execute("SELECT MAX(updated_at) FROM handouts WHERE visibility!='gm'").fetchone()[0] or 0
-    return {"session_id":live.get("id") if live else None,"session_updated":live.get("updated_at",0) if live else 0,"latest_update":u,"latest_reveal":r,"latest_handout":h}
+    iid=_invite_id(request); admin=is_gm(request)
+    with connect(settings) as conn:
+        live_row=conn.execute("SELECT id,updated_at FROM campaign_sessions WHERE status='live' ORDER BY updated_at DESC,id DESC LIMIT 1").fetchone()
+        handout_row=conn.execute("SELECT MAX(updated_at) AS value FROM handouts WHERE visibility!='gm'").fetchone()
+        if admin:
+            update_row=conn.execute("SELECT MAX(created_at) AS value FROM session_updates WHERE visibility!='gm'").fetchone()
+            reveal_row=conn.execute("SELECT MAX(updated_at) AS value FROM lore_reveals").fetchone()
+        elif iid is None:
+            update_row=conn.execute("SELECT MAX(created_at) AS value FROM session_updates WHERE visibility!='gm' AND COALESCE(audience_json,'[]')='[]'").fetchone()
+            reveal_row=conn.execute("SELECT MAX(updated_at) AS value FROM lore_reveals WHERE COALESCE(audience_json,'[]')='[]'").fetchone()
+        else:
+            try:
+                # JSON1 lets SQLite calculate the newest event visible to this
+                # invitation instead of shipping whole reveal/update tables to
+                # Python every five seconds for every player at the table.
+                audience_clause="(COALESCE(audience_json,'[]')='[]' OR EXISTS (SELECT 1 FROM json_each(audience_json) WHERE CAST(json_each.value AS INTEGER)=?))"
+                update_row=conn.execute(f"SELECT MAX(created_at) AS value FROM session_updates WHERE visibility!='gm' AND {audience_clause}",(int(iid),)).fetchone()
+                reveal_row=conn.execute(f"SELECT MAX(updated_at) AS value FROM lore_reveals WHERE {audience_clause}",(int(iid),)).fetchone()
+            except Exception:
+                # Conservative compatibility fallback for SQLite builds without
+                # JSON1. It is bounded so a malformed/ancient database cannot
+                # turn the heartbeat into an unbounded allocation.
+                update_rows=[dict(r) for r in conn.execute("SELECT created_at,audience_json FROM session_updates WHERE visibility!='gm' ORDER BY created_at DESC LIMIT 250").fetchall()]
+                reveal_rows=[dict(r) for r in conn.execute("SELECT updated_at,audience_json FROM lore_reveals ORDER BY updated_at DESC LIMIT 250").fetchall()]
+                def audience_ok(row):
+                    try: audience=json.loads(row.get("audience_json") or "[]")
+                    except Exception: audience=[]
+                    if not audience:return True
+                    try:return int(iid) in {int(x) for x in audience}
+                    except Exception:return False
+                update_row={"value":next((float(x.get("created_at") or 0) for x in update_rows if audience_ok(x)),0)}
+                reveal_row={"value":next((float(x.get("updated_at") or 0) for x in reveal_rows if audience_ok(x)),0)}
+    u=float(update_row["value"] or 0) if update_row else 0
+    r=float(reveal_row["value"] or 0) if reveal_row else 0
+    return {
+        "session_id":int(live_row["id"]) if live_row else None,
+        "session_updated":float(live_row["updated_at"] or 0) if live_row else 0,
+        "latest_update":u,"latest_reveal":r,
+        "latest_handout":float(handout_row["value"] or 0) if handout_row else 0,
+    }
 
 
 @app.get("/api/public/page-card/{slug}")
@@ -976,11 +1215,10 @@ async def player_character_image_upload(request:Request,character_id:int,image:U
     if not admin_view and int(char.get("invite_id") or 0)!=int(iid or -1): raise HTTPException(403,"You can only upload art for your own characters.")
     ext=Path(image.filename or "image.jpg").suffix.lower()
     if ext not in {".png",".jpg",".jpeg",".webp",".gif"}: raise HTTPException(400,"Use PNG, JPG, WebP, or GIF images.")
-    data=await image.read(15_000_001)
-    if len(data)>15_000_000: raise HTTPException(413,"Character images are limited to 15 MB each.")
     owner=int(char.get("invite_id") or 0); folder=settings.uploads_dir/"characters"/str(owner)/str(character_id); folder.mkdir(parents=True,exist_ok=True)
     safe_name=re.sub(r"[^A-Za-z0-9._-]+","-",Path(image.filename or "image").stem).strip("-")[:80] or "image"
-    filename=f"{int(time.time()*1000)}-{safe_name}{ext}"; path=folder/filename; path.write_bytes(data)
+    filename=f"{int(time.time()*1000)}-{safe_name}{ext}"; path=folder/filename
+    await _stream_upload(image,path,15_000_000,"Character images are limited to 15 MB each.")
     rel=path.relative_to(settings.uploads_dir).as_posix()
     try: return add_character_image(settings,character_id,rel,kind,caption,invite_id=iid,admin=admin_view)
     except (PermissionError,ValueError) as exc:
@@ -1034,7 +1272,7 @@ def uploaded_asset(request: Request, asset_path: str):
 def admin(request: Request):
     if is_co_gm(request): return RedirectResponse("/admin/campaign", status_code=303)
     if not is_admin(request): return RedirectResponse("/admin/login")
-    return templates.TemplateResponse("admin.html", {"request": request, "title": "Loreforge Editor"}, headers={"Cache-Control": "no-store"})
+    return templates.TemplateResponse("admin.html", {"request": request, "title": "Seeker Studio"}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/admin/preview/wiki", response_class=HTMLResponse)
@@ -1052,6 +1290,41 @@ def preview_pdf(request: Request):
     return FileResponse(path, media_type="application/pdf", headers={"Cache-Control":"no-store"})
 
 
+def _runtime_memory_report() -> dict:
+    """Small Linux-friendly runtime snapshot for Studio diagnostics.
+
+    Railway's container graph includes child processes such as XeLaTeX, while
+    /proc/self only describes the web process. Keep both where the platform
+    exposes them so a future spike is easier to attribute.
+    """
+    out={"rss_mb":None,"peak_rss_mb":None,"child_peak_rss_mb":None}
+    try:
+        values={}
+        for line in Path("/proc/self/status").read_text(encoding="utf-8",errors="ignore").splitlines():
+            if line.startswith(("VmRSS:","VmHWM:")):
+                key,val,*_=line.split(); values[key.rstrip(":")]=float(val)/1024
+        out["rss_mb"]=round(values.get("VmRSS"),1) if values.get("VmRSS") is not None else None
+        out["peak_rss_mb"]=round(values.get("VmHWM"),1) if values.get("VmHWM") is not None else None
+    except Exception:
+        pass
+    try:
+        import resource
+        child_kb=float(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss or 0)
+        if child_kb: out["child_peak_rss_mb"]=round(child_kb/1024,1)
+    except Exception:
+        pass
+    try: out["db_mb"]=round(settings.db_path.stat().st_size/(1024*1024),2)
+    except Exception: out["db_mb"]=0
+    try: out["wiki_index_mb"]=round((settings.build_dir/"wiki_index.json").stat().st_size/(1024*1024),2)
+    except Exception: out["wiki_index_mb"]=0
+    out["startup_pdf_compile"]=os.getenv("COMPILE_ON_START","0").lower() in {"1","true","yes"}
+    try: tail_bytes=max(512_000,int(os.getenv("SEEKER_BUILD_LOG_TAIL_BYTES","4194304")))
+    except (TypeError,ValueError): tail_bytes=4_194_304
+    out["build_log_tail_mb"]=round(tail_bytes/(1024*1024),1)
+    out["build_running"]=BUILD_LOCK.locked()
+    return out
+
+
 @app.get("/api/admin/status")
 def admin_status(request: Request):
     require_admin(request)
@@ -1061,7 +1334,7 @@ def admin_status(request: Request):
     if has_tex:
         try: analysis=analyze_project(settings)
         except Exception as exc: error=str(exc)
-    persistent = (os.getenv("RAILWAY_ENVIRONMENT") is None) or os.path.ismount(str(settings.data_dir)) or os.getenv("LOREFORGE_ASSUME_PERSISTENT", "").lower() in {"1","true","yes"}
+    persistent = (os.getenv("RAILWAY_ENVIRONMENT") is None) or os.path.ismount(str(settings.data_dir)) or (os.getenv("SEEKER_ASSUME_PERSISTENT") or os.getenv("LOREFORGE_ASSUME_PERSISTENT", "")).lower() in {"1","true","yes"}
     return {
         "has_project":has_tex,"analysis":analysis,"error":error,"data_dir":str(settings.data_dir),
         "persistent_storage_detected":bool(persistent),"latex_engine":settings.latex_engine,
@@ -1076,6 +1349,7 @@ def admin_status(request: Request):
         "player_access_mode":player_access_mode(),
         "active_invites":sum(1 for row in list_player_invites(settings) if row.get("active")),
         "storage":storage_report(settings),
+        "runtime":_runtime_memory_report(),
     }
 
 
@@ -1323,19 +1597,26 @@ def admin_source_fixes(request: Request, payload: dict = Body(...)):
 @app.post("/api/admin/compile")
 def admin_compile(request: Request, clean: bool = False):
     require_admin(request)
+    if not BUILD_LOCK.acquire(blocking=False):
+        raise HTTPException(409, "A Seeker build is already running. Wait for it to finish instead of starting another resource-heavy TeX process.")
     try:
         wiki=build_wiki(settings); result=compile_pdf(settings, clean=clean)
         return {"wiki_pages":len(wiki.get("pages",[])), **result.__dict__}
     except Exception as exc:
         raise HTTPException(400,str(exc))
+    finally:
+        BUILD_LOCK.release()
 
 
 @app.post("/api/admin/rebuild-wiki")
 def admin_rebuild(request: Request):
     require_admin(request)
+    if not BUILD_LOCK.acquire(blocking=False):
+        raise HTTPException(409, "A Seeker build is already running.")
     try:
         wiki=build_wiki(settings); return {"ok":True,"pages":len(wiki.get("pages",[])),"analysis":wiki.get("analysis",{})}
     except Exception as exc: raise HTTPException(400,str(exc))
+    finally: BUILD_LOCK.release()
 
 
 @app.post("/api/admin/import")
@@ -1346,7 +1627,7 @@ async def admin_import(request: Request, archive: UploadFile = File(...)):
     # volumes are small, while the service temp filesystem is intended for scratch I/O.
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(prefix="loreforge-upload-", suffix=".zip", delete=False) as f:
+        with tempfile.NamedTemporaryFile(prefix="seeker-upload-", suffix=".zip", delete=False) as f:
             tmp_path = Path(f.name)
             uploaded = 0
             while chunk := await archive.read(1024 * 1024):
@@ -1354,15 +1635,20 @@ async def admin_import(request: Request, archive: UploadFile = File(...)):
                 if uploaded > 1_000_000_000:
                     raise HTTPException(413, "Project ZIP is larger than the 1 GB upload safety limit.")
                 f.write(chunk)
-        import_info = replace_project_from_zip(settings, tmp_path)
-        set_setting(settings,"main_file","")
-        analysis=analyze_project(settings); wiki=build_wiki(settings); result=compile_pdf(settings)
-        return {"ok":True,"analysis":analysis,"wiki_pages":len(wiki.get("pages",[])),"compile":result.__dict__,"import":import_info}
+        if not BUILD_LOCK.acquire(blocking=False):
+            raise HTTPException(409,"A Seeker build is already running. Wait for it to finish before importing a project.")
+        try:
+            import_info = replace_project_from_zip(settings, tmp_path)
+            set_setting(settings,"main_file","")
+            analysis=analyze_project(settings); wiki=build_wiki(settings); result=compile_pdf(settings)
+            return {"ok":True,"analysis":analysis,"wiki_pages":len(wiki.get("pages",[])),"compile":result.__dict__,"import":import_info}
+        finally:
+            BUILD_LOCK.release()
     except HTTPException:
         raise
     except OSError as exc:
         if getattr(exc, "errno", None) == 28:
-            raise HTTPException(507, "Persistent storage is full. Loreforge now stages imports outside /data, but your volume itself needs more room. Increase the Railway volume or use Storage cleanup in Project settings.")
+            raise HTTPException(507, "Persistent storage is full. Seeker stages imports outside /data, but your volume itself needs more room. Increase the Railway volume or use Storage cleanup in Project settings.")
         raise HTTPException(400,str(exc))
     except Exception as exc:
         raise HTTPException(400,str(exc))
@@ -1432,10 +1718,10 @@ async def admin_asset_upload(request: Request, image: UploadFile = File(...), de
         raise HTTPException(400, "Artwork must be PNG, JPG, WebP, GIF, or SVG.")
     destination = destination.lower()
     if destination == "project":
-        folder = settings.project_dir / "Images" / "Loreforge"
+        folder = settings.project_dir / "Images" / "Seeker"
         ref_prefix = "project:"
-        url_prefix = "/project-asset/Images/Loreforge/"
-        ref_path_prefix = "Images/Loreforge/"
+        url_prefix = "/project-asset/Images/Seeker/"
+        ref_path_prefix = "Images/Seeker/"
     else:
         folder = settings.uploads_dir / "codex"
         ref_prefix = "upload:"
@@ -1474,8 +1760,7 @@ async def admin_create_map(request: Request, name: str = Form(...), description:
     if suffix not in {".png",".jpg",".jpeg",".webp"}: raise HTTPException(400,"Map must be PNG, JPG, or WebP")
     map_dir=settings.uploads_dir/"maps"; map_dir.mkdir(parents=True,exist_ok=True)
     filename=f"{int(time.time())}-{secrets.token_hex(4)}{suffix}"; target=map_dir/filename
-    with target.open("wb") as f:
-        while chunk := await image.read(1024*1024): f.write(chunk)
+    await _stream_upload(image,target,100*1024*1024,"Map image is larger than the 100 MB safety limit.")
     return create_map(settings,name,f"maps/{filename}",description)
 
 
@@ -1499,7 +1784,7 @@ def admin_update_marker(request: Request,marker_id:int,payload:dict=Body(...)): 
 def admin_delete_marker(request: Request,marker_id:int): require_admin(request); delete_marker(settings,marker_id); return {"ok":True}
 
 # ---------------------------------------------------------------------------
-# Loreforge 2 campaign-runtime APIs
+# Seeker campaign-runtime APIs
 # ---------------------------------------------------------------------------
 @app.get("/api/admin/campaign/overview")
 def admin_campaign_overview(request: Request):
@@ -1805,17 +2090,12 @@ async def admin_map_layer_upload(request:Request,map_id:int,name:str=Form("Map l
     suffix=Path(image.filename or "layer.png").suffix.lower()
     if suffix not in {".png",".jpg",".jpeg",".webp"}: raise HTTPException(400,"Layer must be PNG, JPG, JPEG, or WebP")
     folder=settings.uploads_dir/"maps"/"layers";folder.mkdir(parents=True,exist_ok=True)
-    filename=f"{int(time.time())}-{secrets.token_hex(4)}{suffix}";target=folder/filename;size=0
-    with target.open("wb") as fh:
-        while chunk:=await image.read(1024*1024):
-            size+=len(chunk)
-            if size>80*1024*1024:
-                target.unlink(missing_ok=True);raise HTTPException(413,"Map layer is larger than 80 MB")
-            fh.write(chunk)
+    filename=f"{int(time.time())}-{secrets.token_hex(4)}{suffix}";target=folder/filename
+    await _stream_upload(image,target,80*1024*1024,"Map layer is larger than 80 MB")
     return save_map_layer(settings,map_id,{"name":name,"kind":kind,"opacity":opacity,"visible_to_players":visible_to_players,"image_path":f"maps/layers/{filename}"})
 
 # ---------------------------------------------------------------------------
-# Loreforge 3 · Living Campaign layer
+# Seeker · Living Campaign layer
 # ---------------------------------------------------------------------------
 
 def _player_label(request: Request) -> str:
@@ -1916,7 +2196,7 @@ def living_admin_overview(request: Request):
         "threads":list_threads(settings,admin=True),"inbox":inbox_items(settings),"submissions":list_submissions(settings,admin=True),"publishing":publishing_states(settings),
         "session_snapshots":session_state_snapshots(settings),"suggestions":scan_suggestions(settings,wiki),"media_meta":list_media_catalog(settings),"assets":_asset_rows(),"media_assets":_media_asset_rows(),
         "notifications":list_notifications(settings,None,admin=True),"characters":list_player_characters(settings,admin=True),"continuity":continuity_report(settings,wiki),
-        "ai_configured":bool(os.getenv("LOREFORGE_AI_API_KEY") and os.getenv("LOREFORGE_AI_MODEL")),"archive_mode":get_setting(settings,"campaign_archive_mode","0") in {"1","true","yes"},
+        "ai_configured":bool((os.getenv("SEEKER_AI_API_KEY") or os.getenv("LOREFORGE_AI_API_KEY")) and (os.getenv("SEEKER_AI_MODEL") or os.getenv("LOREFORGE_AI_MODEL"))),"archive_mode":get_setting(settings,"campaign_archive_mode","0") in {"1","true","yes"},
     }
 
 
@@ -2106,11 +2386,10 @@ async def player_submission_upload(request:Request,file:UploadFile=File(...)):
     ext=Path(file.filename or "asset").suffix.lower()
     allowed={'.png','.jpg','.jpeg','.webp','.gif','.pdf','.mp3','.m4a','.wav','.ogg'}
     if ext not in allowed:raise HTTPException(400,"Use an image, PDF, or common audio file.")
-    data=await file.read(30_000_001)
-    if len(data)>30_000_000:raise HTTPException(413,"Contribution files are limited to 30 MB.")
     folder=settings.uploads_dir/'submissions'/str(iid);folder.mkdir(parents=True,exist_ok=True)
     stem=re.sub(r'[^A-Za-z0-9._-]+','-',Path(file.filename or 'asset').stem).strip('-')[:70] or 'asset'
-    name=f"{int(time.time()*1000)}-{secrets.token_hex(3)}-{stem}{ext}";path=folder/name;path.write_bytes(data)
+    name=f"{int(time.time()*1000)}-{secrets.token_hex(3)}-{stem}{ext}";path=folder/name
+    await _stream_upload(file,path,30_000_000,"Contribution files are limited to 30 MB.")
     rel=path.relative_to(settings.uploads_dir).as_posix();return {"ref":"upload:"+rel,"url":"/uploads/"+quote(rel,safe='/'),"name":file.filename or name}
 
 @app.post("/api/admin/inbox/upload")
@@ -2118,11 +2397,10 @@ async def admin_inbox_upload(request:Request,file:UploadFile=File(...)):
     require_gm(request);ext=Path(file.filename or 'asset').suffix.lower()
     allowed={'.png','.jpg','.jpeg','.webp','.gif','.pdf','.mp3','.m4a','.wav','.ogg','.webm','.txt'}
     if ext not in allowed:raise HTTPException(400,"Unsupported quick-capture file type.")
-    data=await file.read(40_000_001)
-    if len(data)>40_000_000:raise HTTPException(413,"Inbox files are limited to 40 MB.")
     folder=settings.uploads_dir/'gm-inbox';folder.mkdir(parents=True,exist_ok=True)
     stem=re.sub(r'[^A-Za-z0-9._-]+','-',Path(file.filename or 'asset').stem).strip('-')[:70] or 'asset'
-    name=f"{int(time.time()*1000)}-{secrets.token_hex(3)}-{stem}{ext}";path=folder/name;path.write_bytes(data)
+    name=f"{int(time.time()*1000)}-{secrets.token_hex(3)}-{stem}{ext}";path=folder/name
+    await _stream_upload(file,path,40_000_000,"Inbox files are limited to 40 MB.")
     rel=path.relative_to(settings.uploads_dir).as_posix();return {"ref":"upload:"+rel,"url":"/uploads/"+quote(rel,safe='/'),"name":file.filename or name}
 
 
@@ -2254,12 +2532,12 @@ def foundry_character_export(request:Request,character_id:int):
 
 @app.get("/api/admin/portable-archive")
 def portable_archive_download(request:Request):
-    require_admin(request);out=settings.build_dir/'loreforge-portable-campaign.zip';create_portable_archive(settings,out);return FileResponse(out,filename='loreforge-portable-campaign.zip',media_type='application/zip')
+    require_admin(request);out=settings.build_dir/'seeker-portable-campaign.zip';create_portable_archive(settings,out);return FileResponse(out,filename='seeker-portable-campaign.zip',media_type='application/zip')
 @app.post("/api/admin/portable-archive/test")
 async def portable_archive_test(request:Request,file:UploadFile=File(...)):
     require_admin(request)
-    if not str(file.filename or '').lower().endswith('.zip'): raise HTTPException(400,'Choose a Loreforge portable ZIP.')
-    tmp=Path(tempfile.gettempdir())/f"loreforge-backup-test-{secrets.token_hex(8)}.zip"
+    if not str(file.filename or '').lower().endswith('.zip'): raise HTTPException(400,'Choose a Seeker portable ZIP.')
+    tmp=Path(tempfile.gettempdir())/f"seeker-backup-test-{secrets.token_hex(8)}.zip"
     total=0
     try:
         with tmp.open('wb') as out:
@@ -2303,10 +2581,10 @@ def lore_assistant_query(request:Request,payload:dict=Body(...)):
     ranked.sort(key=lambda x:-x[0]);context=[]
     for _,p in ranked[:8]:
         plain=re.sub(r'\s+',' ',p.get('plain_text','')).strip();context.append({'title':p.get('title'),'slug':p.get('slug'),'text':plain[:1600]})
-    api_key=os.getenv('LOREFORGE_AI_API_KEY','').strip();model=os.getenv('LOREFORGE_AI_MODEL','').strip();base=os.getenv('LOREFORGE_AI_BASE_URL','https://api.openai.com/v1').rstrip('/')
+    api_key=(os.getenv('SEEKER_AI_API_KEY') or os.getenv('LOREFORGE_AI_API_KEY','')).strip();model=(os.getenv('SEEKER_AI_MODEL') or os.getenv('LOREFORGE_AI_MODEL','')).strip();base=(os.getenv('SEEKER_AI_BASE_URL') or os.getenv('LOREFORGE_AI_BASE_URL','https://api.openai.com/v1')).rstrip('/')
     if api_key and model and payload.get('use_ai',True):
         try:
-            system='You are the Loreforge campaign assistant. Answer ONLY from the supplied spoiler-filtered campaign context. If the answer is not in the context, say so. Keep fantasy names exact.'
+            system='You are Seeker, the campaign companion. Answer ONLY from the supplied spoiler-filtered campaign context. If the answer is not in the context, say so. Keep fantasy names exact.'
             prompt='QUESTION:\n'+q+'\n\nVISIBLE CAMPAIGN CONTEXT:\n'+'\n\n'.join(f"[{c['title']}] {c['text']}" for c in context)
             body=json.dumps({'model':model,'messages':[{'role':'system','content':system},{'role':'user','content':prompt}],'temperature':0.2}).encode()
             req=UrlRequest(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+api_key,'Content-Type':'application/json'})

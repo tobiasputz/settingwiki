@@ -1,6 +1,6 @@
-# Loreforge — LaTeX-first interactive campaign wiki
+# Seeker — LaTeX-first interactive campaign wiki
 
-Loreforge turns a normal multi-file LaTeX campaign project into **two synchronized views of the same setting**:
+Seeker turns a normal multi-file LaTeX campaign project into **two synchronized views of the same setting**:
 
 1. an Overleaf-style GM authoring workspace with a source tree, LaTeX editor, autosave, revision history, build log and live PDF preview; and
 2. a polished player-facing interactive setting wiki with full-text search, automatic chapter/section navigation and interactive maps.
@@ -10,8 +10,8 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 ## What it does
 
 - **Edit LaTeX in the browser.** `/admin` is a private GM workspace.
-- **Live formatting feedback.** Saving updates the player-wiki preview; after a short idle delay Loreforge compiles the real LaTeX project and refreshes the PDF preview.
-- **Import your existing Overleaf project.** Upload the Overleaf source ZIP from the Project tab. Loreforge backs up the existing project first.
+- **Live formatting feedback.** Saving updates the player-wiki preview; after a short idle delay Seeker compiles the real LaTeX project and refreshes the PDF preview.
+- **Import your existing Overleaf project.** Upload the Overleaf source ZIP from the Project tab. Seeker backs up the existing project first.
 - **Keep your Overleaf workflow if you want it.** Export the entire current project as a ZIP at any time and upload it to Overleaf again.
 - **Understands project structure.** It detects the likely main `.tex` file, resolves `\input{}` / `\include{}`, preserves chapters/sections/subsections, inspects `\newcommand`, custom environments, packages, colors, and `\includegraphics` references.
 - **Fails gracefully on unusual LaTeX.** Unknown commands are unwrapped so their human-readable arguments are not silently discarded. Custom macros whose names look like NPC/location/lore-box commands are rendered as callouts in the wiki. `\pon{...}` is treated specially as a Person-of-Note article root, so its Profile/Biography subsections stay together instead of becoming unrelated wiki pages.
@@ -19,23 +19,23 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Smart imported images.** `\includegraphics` assets are resolved even when extensions are omitted or assets live below graphics folders. Figure/wrapfigure layouts, PDF graphics, captions and common TikZ page-overlay portraits are translated to web-friendly layouts. Players can click rendered images for a full-resolution lightbox, and portrait/landscape/panorama treatment is inferred from the actual image dimensions.
 - **Compiles the original PDF.** The Docker image includes `latexmk`, pdfLaTeX, XeLaTeX, LuaLaTeX, common LaTeX-extra packages, fonts and graphics packages. Project-local `.cls` and `.sty` files work normally.
 - **Codex Studio / art direction.** Every chapter and entry can have its own table-of-contents artwork. Entries can additionally have a cinematic hero, full-page background, focal point, background strength, article width, feature status, and public/teaser/hidden discovery state. By default, the first meaningful image found inside a chapter becomes the darkened atmospheric background of the **whole large chapter/section block** in the Codex. Individual entry headlines and the article sidebar remain clean and text-only. Deliberate chapter artwork overrides the automatic image, and the automatic section backgrounds can be switched off globally in Project settings.
-- **Free-form web artwork without giving up LaTeX.** The **Artwork** tool inserts an ordinary `\includegraphics` figure for the PDF plus a harmless `% loreforge-image:` comment for the wiki. Layouts include centered, floating left/right, wide, breakout, full-bleed, portrait, banner, decorative edge art, and watermark, with independent width, opacity, crop focus, blend mode, frame, caption, and parallax controls. Existing automatic image handling still works when you do not add a directive.
-- **Atmospheric scene panels.** Select any normal LaTeX prose and press **Scene** to place that passage over an image in the player wiki. The source remains valid ordinary LaTeX because Loreforge stores the web presentation as comments around the selected text. Scene tones include dark, light, sepia, arcane, mist, and blood, with focus, image strength, height, and optional parallax.
+- **Free-form web artwork without giving up LaTeX.** The **Artwork** tool inserts an ordinary `\includegraphics` figure for the PDF plus a harmless `% seeker-image:` comment for the wiki. Layouts include centered, floating left/right, wide, breakout, full-bleed, portrait, banner, decorative edge art, and watermark, with independent width, opacity, crop focus, blend mode, frame, caption, and parallax controls. Existing automatic image handling still works when you do not add a directive.
+- **Atmospheric scene panels.** Select any normal LaTeX prose and press **Scene** to place that passage over an image in the player wiki. The source remains valid ordinary LaTeX because Seeker stores the web presentation as comments around the selected text. Scene tones include dark, light, sepia, arcane, mist, and blood, with focus, image strength, height, and optional parallax.
 - **Living lore connections.** Unique codex names mentioned naturally in prose can be cross-linked automatically (optional in Project settings), explicit `\wiki{}` links remain supported, and pages show related lore/backlinks. The **Lore Network** player view turns these relationships into a pan/zoom interactive graph with artwork-backed nodes.
 - **Long-entry navigation.** Section/subsection headings receive stable deep links and long articles get an **On this page** navigator with scroll tracking. Player bookmarks/recently viewed entries form a private browser-side reading trail.
-- **Stable codex sidebar.** Opening another entry no longer throws the player back to the top of the navigation. Loreforge remembers expanded chapter groups, scroll position, and the clicked row position across full page navigation.
-- **Build Doctor.** `latexmk` stale-failure states are detected and repaired automatically, the underlying TeX engine is invoked for a diagnostic pass when `latexmk` only returns a wrapper summary, and the editor surfaces likely fixes rather than only showing `pdflatex: gave an error`. High-confidence source mistakes can be repaired individually or with **Apply all safe fixes**; the full batch is verified before any source is changed and every affected file is revision-backed. Repeated `geometry` package declarations can be consolidated automatically. When TeX returns errors but still creates a fresh PDF, Loreforge keeps that recoverable preview visible while clearly marking the build as not clean.
+- **Stable codex sidebar.** Opening another entry no longer throws the player back to the top of the navigation. Seeker remembers expanded chapter groups, scroll position, and the clicked row position across full page navigation.
+- **Build Doctor.** `latexmk` stale-failure states are detected and repaired automatically, the underlying TeX engine is invoked for a diagnostic pass when `latexmk` only returns a wrapper summary, and the editor surfaces likely fixes rather than only showing `pdflatex: gave an error`. High-confidence source mistakes can be repaired individually or with **Apply all safe fixes**; the full batch is verified before any source is changed and every affected file is revision-backed. Repeated `geometry` package declarations can be consolidated automatically. When TeX returns errors but still creates a fresh PDF, Seeker keeps that recoverable preview visible while clearly marking the build as not clean.
 - **Native PF2e campaign mechanics.** Your existing `\feat`, `\action`, `\itemtemplate`, creature/stat-block commands, action-symbol macros, `\chaptergroup`, `\pon`, and legacy `\image` helper remain authoritative LaTeX for the PDF while receiving dedicated responsive Codex rendering. Nested arguments are parsed safely, and the editor has a PF2e insertion palette for creating new entries with the same command vocabulary.
 - **Interactive atlas.** Upload a map image, enter explicit **＋ Location** placement mode, follow the placement crosshair, click once to place a marker, drag markers into position, attach descriptions and link them to codex pages. A searchable marker directory makes existing locations easy to find/focus. Player maps also expose a searchable location panel and category filters. Markers can be player-visible or GM-only and use distinct symbols for cities, ports, ruins, danger, secrets, temples, portals, quests, and more.
 - **Edge-locked map navigation.** Player maps use a cover-style minimum zoom by default: when you pan, the map cannot be pushed past the viewport and reveal empty space beyond its edges. Wheel, buttons, and touch pinch all zoom around the pointer/fingers.
 - **Fantasy atmosphere studio.** Per-map switches include moving clouds, cloud shadows, rolling fog, valley mist, god rays, rain, lightning, snow, blizzards, ashfall, sand/dust, heat haze, ocean shimmer, moving wave crests, embers, fireflies, pollen, leaves, petals, birds, bats, rare dragon shadows, arcane motes, spectral wisps, cursed miasma, ley lines, rune pulses, glowing spores, aurora, stars, shooting stars, vignette, fogged edges, parchment warmth, moonlight, blood-moon tint, cartographer grid, and compass rose. Presets now include Calm Fantasy, Stormbound, Frozen North, Haunted Realm, Arcane Night, Volcanic Wastes, Ancient Parchment, Coastal Breeze, Autumn Road, Feywild Glade, Scorched Desert, Underdark, Blood Moon, Ancient Ruins, Blighted Realm, and High Fantasy.
-- **Revision safety.** Loreforge keeps up to 40 saved revisions of each file edited in the browser.
+- **Revision safety.** Seeker keeps up to 40 saved revisions of each file edited in the browser.
 - **Personal player invitations.** Player access is invitation-only by default. **Admin → Access** creates one signed link per player; each link can be copied, expired, revoked, restored, rotated, device-limited, or have its remembered devices reset independently. Legacy shared-password and public modes remain available, while the editor continues to use `ADMIN_PASSWORD`.
 - **Read → edit source bridge.** When you browse the player Codex while logged in as GM, a persistent **Edit source** control opens the exact LaTeX file/line in Campaign Studio. On long Person-of-Note pages it follows the section currently being read, and the editor offers **Back to entry** after the correction.
 
-## Loreforge 4: player-first sessions + table QoL
+## Seeker 4: player-first sessions + table QoL
 
-Loreforge 4 focuses on reducing the little bits of friction that interrupt actual play. The main player destinations stay obvious, session bookkeeping understands which PC somebody is playing, and first-time users no longer have to discover the interface by trial and error.
+Seeker 4 focuses on reducing the little bits of friction that interrupt actual play. The main player destinations stay obvious, session bookkeeping understands which PC somebody is playing, and first-time users no longer have to discover the interface by trial and error.
 
 - **Enter a session as a character:** if an invited player owns multiple PCs, Player Session asks which one they are playing tonight. A player can also explicitly enter without a character scope. The choice is tied to the current live session rather than becoming a permanent account setting.
 - **Character-scoped session journals:** private/party journal entries can belong to a specific PC. Switching from one of your characters to another hides the first character's personal notes while retaining explicitly player-wide notes. Older journals are migrated as player-wide so upgrades do not lose or misassign existing writing.
@@ -46,9 +46,9 @@ Loreforge 4 focuses on reducing the little bits of friction that interrupt actua
 - **Useful search before typing:** opening Search immediately offers common destinations plus recently viewed lore, making it useful as a command palette during a session instead of only as full-text search.
 - **PWA-safe upgrade:** v4 uses fresh static/cache versions and retains network-first static fetching so installed/home-screen clients do not get pinned to obsolete JavaScript after deployment.
 
-## Loreforge 3: living world + player agency
+## Seeker 3: living world + player agency
 
-Loreforge 3 deliberately separates **authored lore** from **campaign state**. Your `.tex` files remain the durable setting manuscript; fast-changing table state lives in the database where it can evolve session by session without turning a 300+ page book into application metadata.
+Seeker 3 deliberately separates **authored lore** from **campaign state**. Your `.tex` files remain the durable setting manuscript; fast-changing table state lives in the database where it can evolve session by session without turning a 300+ page book into application metadata.
 
 The central design rule is: **give players agency where bookkeeping benefits from shared ownership, while keeping canonical lore and secrets under GM control.**
 
@@ -71,21 +71,21 @@ The central design rule is: **give players agency where bookkeeping benefits fro
 
 The GM control center is `/admin/living`; the player-facing campaign hub is `/campaign`, with collaborative threads at `/campaign/threads`.
 
-## Loreforge 2.1: worldbuilding and party workflows
+## Seeker 2.1: worldbuilding and party workflows
 
-Loreforge 2.1 focuses on the parts of v2 that should feel effortless at the table and during prep:
+Seeker 2.1 focuses on the parts of v2 that should feel effortless at the table and during prep:
 
 - **Readable Lore Network:** the default Story view is deliberately selective. Explicit relationships and entity-centered references are kept; generic heading-to-heading noise is capped. Labels appear only where useful, selecting a node isolates its neighborhood, and touch users can pan and pinch-zoom naturally. **Curated relationships** shows only GM-authored semantic links; **All references** remains available when you really want the complete graph.
 - **Historical Chronicle:** History is organized into named eras with start/end dates, summaries and visual accents. Historical events support type, date ranges, significance, certainty, related Codex lore and player/GM visibility. Session recaps live in Session Mode rather than pretending to be world history.
 - **Visual World Builder:** months, weekdays and moons use structured editors instead of pipe-delimited text fields. Geography/travel values, lore creation, history, people/factions and maps are presented as task-oriented panels.
-- **Create real lore from a template:** choose Person, Settlement, Faction, Deity, Historical Event, Creature or Handout, name it, and press **Create entry in Campaign Studio**. Loreforge creates an ordinary `.tex` file under `Worldbuilding/`, inserts its `\include{}` into the canonical main source, and opens it in the editor.
+- **Create real lore from a template:** choose Person, Settlement, Faction, Deity, Historical Event, Creature or Handout, name it, and press **Create entry in Campaign Studio**. Seeker creates an ordinary `.tex` file under `Worldbuilding/`, inserts its `\include{}` into the canonical main source, and opens it in the editor.
 - **Tabbed Campaign Studio:** source files open in a reusable tab strip rather than replacing the only editor buffer or opening extra browser windows.
 - **Phone/iPad GM navigation:** Player, GM Session, Studio and Campaign Control are always reachable through persistent mode controls. iPads/tablets use touch-sized single-pane editor switching instead of a cramped desktop layout.
 - **Player Characters:** invited players can create more than one character, maintain their own profiles/biographies/goals, upload portraits and inspiration art, retire old PCs, and decide whether each character is party-visible or private to themselves and the GM. Character search and mobile navigation make the party shelf easy to reach during play.
 
-## Loreforge 2: run the campaign from the wiki
+## Seeker 2: run the campaign from the wiki
 
-Loreforge 2 adds a campaign-runtime layer on top of the LaTeX/PDF workflow rather than replacing it. The canonical source remains ordinary LaTeX, while the live site can now change what each invited player knows and what the table is currently focused on.
+Seeker 2 adds a campaign-runtime layer on top of the LaTeX/PDF workflow rather than replacing it. The canonical source remains ordinary LaTeX, while the live site can now change what each invited player knows and what the table is currently focused on.
 
 - **GM Session Mode:** start/end sessions, spotlight relevant lore and maps, reveal secrets, send discoveries, and surface handouts from a touch-friendly session dashboard.
 - **Player Session Mode:** a phone-first table screen with current location, spotlight lore, live discoveries, open mysteries, handouts, and previous-session recaps.
@@ -104,7 +104,7 @@ The editor's top application bar is persistent while working in long files, and 
 ## Repository layout
 
 ```text
-pf2e-loreforge/
+seeker/
 ├─ app/                 FastAPI backend, LaTeX parsing, compilation, maps, storage
 ├─ campaign/            first-run seed project; replace/import from the editor
 ├─ static/              editor, wiki, and animated-map frontend
@@ -151,28 +151,28 @@ LATEX_ALLOW_SHELL_ESCAPE=0
 
 The default player gate is **Invitation links only**, so normal deployments do not need `PLAYER_PASSWORD`. After logging into `/admin`, open **Access**, create one invitation for each player, and send each player their own link.
 
-If `ADMIN_PASSWORD` is omitted, Loreforge generates one on first startup, stores it in `/data/.admin_password`, and prints it to the service logs. Setting the variable explicitly is cleaner.
+If `ADMIN_PASSWORD` is omitted, Seeker generates one on first startup, stores it in `/data/.admin_password`, and prints it to the service logs. Setting the variable explicitly is cleaner.
 
 ### 5. Open `/admin`
 
 Import the ZIP downloaded from **Overleaf → Download → Source**, or simply start editing the included sample project.
 
-GitHub remains the deployment source for the *application*. Your live campaign source is persistent data inside Loreforge, so updating the application does not require manually copying the campaign PDF anywhere.
+GitHub remains the deployment source for the *application*. Your live campaign source is persistent data inside Seeker, so updating the application does not require manually copying the campaign PDF anywhere.
 
 ## Local development
 
 ### Easiest Windows path
 
-With Docker Desktop installed, double-click `start_local.bat`. The service binds only to `127.0.0.1`, stores its campaign in a named Docker volume, and uses `loreforge` as the local-only editor password unless you set `ADMIN_PASSWORD`.
+With Docker Desktop installed, double-click `start_local.bat`. The service binds only to `127.0.0.1`, stores its campaign in a named Docker volume, and uses `seeker` as the local-only editor password unless you set `ADMIN_PASSWORD`.
 
 ### Docker
 
 ```bash
-docker build -t loreforge .
+docker build -t seeker .
 docker run --rm -p 8000:8000 \
   -e ADMIN_PASSWORD=dev-password \
   -v loreforge-data:/data \
-  loreforge
+  seeker
 ```
 
 Open:
@@ -201,7 +201,7 @@ uvicorn app.main:app --reload
 
 ## How the LaTeX → wiki conversion works
 
-Loreforge deliberately does **not** replace TeX as the authoritative PDF renderer. The PDF preview is generated by your actual LaTeX engine. The player wiki is a semantic companion view.
+Seeker deliberately does **not** replace TeX as the authoritative PDF renderer. The PDF preview is generated by your actual LaTeX engine. The player wiki is a semantic companion view.
 
 The converter:
 
@@ -220,7 +220,7 @@ This is intentionally tolerant. A campaign with a giant custom `.cls` file shoul
 
 ### Pathfinder 2e rule/stat-block macros
 
-Loreforge has native web renderers for the campaign commands you supplied. Your definitions remain unchanged and continue to control the PDF; Loreforge only recognizes their *usage* when building the player Codex:
+Seeker has native web renderers for the campaign commands you supplied. Your definitions remain unchanged and continue to control the PDF; Seeker only recognizes their *usage* when building the player Codex:
 
 ```latex
 \feat{Name}{Level}{Traits}{Description}
@@ -242,11 +242,11 @@ The player site renders these as responsive Pathfinder-style rule cards and crea
 
 The GM editor now includes an **PF2e** button beside **Artwork** and **Scene**. It inserts ready-to-fill feat, action, item, monster, stat-line, and action-symbol snippets using these existing commands.
 
-Custom commands that Loreforge does not know explicitly are now parsed with balanced braces for up to eight arguments, so nested `\textbf{...}`, `\emph{...}`, links, and other formatting inside long arguments are not discarded.
+Custom commands that Seeker does not know explicitly are now parsed with balanced braces for up to eight arguments, so nested `\textbf{...}`, `\emph{...}`, links, and other formatting inside long arguments are not discarded.
 
 ### Optional explicit wiki links
 
-Loreforge recognizes:
+Seeker recognizes:
 
 ```latex
 \wiki{Temple of the Eternal Flame}{the old temple}
@@ -262,7 +262,7 @@ In the player wiki, this becomes a link to the matching slug.
 
 ## Invitation-only player access
 
-Open **Admin → Access**. Loreforge defaults to **Invitation links only**. Create one link per player with a recognizable label such as `Sarah` or `Piotr`. Opening that private URL establishes a signed Loreforge session in that browser and sends the player directly into the campaign—there is no shared player password.
+Open **Admin → Access**. Seeker defaults to **Invitation links only**. Create one link per player with a recognizable label such as `Sarah` or `Piotr`. Opening that private URL establishes a signed Seeker session in that browser and sends the player directly into the campaign—there is no shared player password.
 
 Each invitation shows its state, expiry, last-used time, invitation-open count, and remembered browser/device count. When creating a link you can optionally cap it to 1–5 devices in the UI (the backend accepts up to 20). From the same screen you can:
 
@@ -275,13 +275,13 @@ Each invitation shows its state, expiry, last-used time, invitation-open count, 
 - set an expiry when creating a link; and
 - permanently delete old invitation records.
 
-Invitation tokens are signed with Loreforge's persistent session secret and versioned per player. There is no global player secret to share, and the GM password is never placed in an invitation URL. As with any bearer link, a player can still forward their personal URL to someone else; a low device limit reduces casual sharing but is not identity verification. Treat the URL like a password and revoke/rotate it if it leaks.
+Invitation tokens are signed with Seeker's persistent session secret and versioned per player. There is no global player secret to share, and the GM password is never placed in an invitation URL. As with any bearer link, a player can still forward their personal URL to someone else; a low device limit reduces casual sharing but is not identity verification. Treat the URL like a password and revoke/rotate it if it leaks.
 
 Two fallback modes exist for unusual deployments: **Shared Password** uses the legacy `PLAYER_PASSWORD` environment variable, and **Public** removes the player gate entirely. Creating a new personal invitation automatically switches the site back to invitation-only mode.
 
 ## GM read → edit source bridge
 
-Open the player site from the same browser where you are logged into `/admin`. Codex entries then show an unobtrusive GM-only **Edit source** button plus a floating edit control that remains available while you scroll. Clicking it opens Campaign Studio at the corresponding `.tex` file and line. On long entity pages such as `\pon{...}` entries, Loreforge retains the source line for nested Profile/Biography/etc. headings, so the floating control follows the section currently in view.
+Open the player site from the same browser where you are logged into `/admin`. Codex entries then show an unobtrusive GM-only **Edit source** button plus a floating edit control that remains available while you scroll. Clicking it opens Campaign Studio at the corresponding `.tex` file and line. On long entity pages such as `\pon{...}` entries, Seeker retains the source line for nested Profile/Biography/etc. headings, so the floating control follows the section currently in view.
 
 The editor URL uses `?file=...&line=...&from=...`; CodeMirror jumps to the requested line and the top bar shows **Back to entry**. This makes quick spelling/lore corrections a read → edit → return workflow rather than a manual file-tree search.
 
@@ -300,7 +300,7 @@ For a **chapter**, assign a table-of-contents cover. For an **entry**, you can i
 - featured-home-page status;
 - public, teaser, or hidden discovery state.
 
-For large chapter/section blocks, Loreforge can automatically use the first usable image rendered inside one of that chapter's entries. The Codex Studio chapter inspector labels this `AUTO · SECTION BACKGROUND`, so you can tell the automatic section treatment from manually curated artwork. A manually chosen chapter image always wins. Entry-level artwork remains deliberate and is not automatically painted behind individual navigation headlines.
+For large chapter/section blocks, Seeker can automatically use the first usable image rendered inside one of that chapter's entries. The Codex Studio chapter inspector labels this `AUTO · SECTION BACKGROUND`, so you can tell the automatic section treatment from manually curated artwork. A manually chosen chapter image always wins. Entry-level artwork remains deliberate and is not automatically painted behind individual navigation headlines.
 
 The editor toolbar has two complementary tools:
 
@@ -308,8 +308,10 @@ The editor toolbar has two complementary tools:
 
 **Artwork** inserts a standard LaTeX `figure` plus a web-only comment. The PDF therefore remains portable to Overleaf, while the wiki can use richer responsive placement:
 
+Seeker also continues to understand the older `loreforge-*` comment directives, so existing campaign sources do not need a migration.
+
 ```latex
-% loreforge-image: layout=edge-right width=34 opacity=0.80 blend=soft-light frame=none
+% seeker-image: layout=edge-right width=34 opacity=0.80 blend=soft-light frame=none
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=.34\linewidth]{Images/sigil.png}
@@ -320,19 +322,19 @@ You can also use `watermark`, `fullbleed`, `breakout`, `banner`, `portrait`, `le
 
 ### Scene
 
-Select a paragraph, quotation, subsection introduction, or other ordinary LaTeX and press **Scene**. Loreforge wraps it like this:
+Select a paragraph, quotation, subsection introduction, or other ordinary LaTeX and press **Scene**. Seeker wraps it like this:
 
 ```latex
-% loreforge-panel-start: image="Images/Places/stormgate.jpg" opacity=0.38 x=65 y=42 tone=arcane min_height=360 parallax=true
+% seeker-panel-start: image="Images/Places/stormgate.jpg" opacity=0.38 x=65 y=42 tone=arcane min_height=360 parallax=true
 The gate wakes only when both moons stand above the eastern sea.
-% loreforge-panel-end
+% seeker-panel-end
 ```
 
 TeX sees two comments plus the unchanged prose. The player wiki renders the same passage as an atmospheric image-backed scene. This is useful for chapter openings, dream sequences, major reveals, cities, dungeons, gods, and historical interludes.
 
 ## Lore relationships
 
-Loreforge can automatically link the first natural mention of a **unique** codex entry name in another article. It deliberately ignores ambiguous duplicate titles and generic headings. Disable this globally with **Admin → Project → Automatically cross-link codex names in prose** if you prefer only explicit links.
+Seeker can automatically link the first natural mention of a **unique** codex entry name in another article. It deliberately ignores ambiguous duplicate titles and generic headings. Disable this globally with **Admin → Project → Automatically cross-link codex names in prose** if you prefer only explicit links.
 
 Automatic and explicit links feed three systems:
 
@@ -348,17 +350,17 @@ Every failed build shows a prominent **First blocking error** excerpt. This fall
 
 ### Automatic section-block backgrounds
 
-The large Codex chapter/section cards are image-backed by default without bringing back the old tiny thumbnail icons. Loreforge searches the entries inside each section for the first meaningful rendered image (skipping PF2e action symbols and other utility icons) and uses it as a darkened background across the **whole section block**. Individual entry headlines and the desktop article sidebar remain text-only. A manually chosen chapter **Table-of-contents artwork** image overrides the automatic section image. Disable **Project → Use the first image as section-block background by default** to return the large blocks to the plain treatment.
+The large Codex chapter/section cards are image-backed by default without bringing back the old tiny thumbnail icons. Seeker searches the entries inside each section for the first meaningful rendered image (skipping PF2e action symbols and other utility icons) and uses it as a darkened background across the **whole section block**. Individual entry headlines and the desktop article sidebar remain text-only. A manually chosen chapter **Table-of-contents artwork** image overrides the automatic section image. Disable **Project → Use the first image as section-block background by default** to return the large blocks to the plain treatment.
 
 ## Compile result verification
 
-Loreforge verifies the final PDF rather than trusting only `latexmk`'s process exit code. Some large XeLaTeX projects can finish `xdvipdfmx`, write a valid PDF, and still leave a non-zero wrapper status from an earlier rule. If the PDF is valid, no real TeX source error is present, and the build log explicitly confirms the final target (for example `All targets (main.pdf) are up-to-date`), Loreforge treats the build as successful instead of showing a false `Compilation failed`.
+Seeker verifies the final PDF rather than trusting only `latexmk`'s process exit code. Some large XeLaTeX projects can finish `xdvipdfmx`, write a valid PDF, and still leave a non-zero wrapper status from an earlier rule. If the PDF is valid, no real TeX source error is present, and the build log explicitly confirms the final target (for example `All targets (main.pdf) are up-to-date`), Seeker treats the build as successful instead of showing a false `Compilation failed`.
 
 ## Compile status and large XeLaTeX projects
 
-Loreforge evaluates the **terminal** build state, not merely latexmk's process return code. This matters for large XeLaTeX books where an earlier pass may fail or be retried, while a later `xdvipdfmx` stage successfully writes the final PDF. If the final successful PDF witness occurs after all fatal markers, Loreforge accepts the build and does not mislabel old diagnostics from an earlier pass as the current blocker.
+Seeker evaluates the **terminal** build state, not merely latexmk's process return code. This matters for large XeLaTeX books where an earlier pass may fail or be retried, while a later `xdvipdfmx` stage successfully writes the final PDF. If the final successful PDF witness occurs after all fatal markers, Seeker accepts the build and does not mislabel old diagnostics from an earlier pass as the current blocker.
 
-For large campaign books, Loreforge also avoids duplicating the finished PDF on the persistent volume. The canonical output remains beside the main `.tex` file and `/preview/pdf` serves it directly; `build/campaign.pdf` is only a zero-copy link when the host supports links. Upgrading from older versions automatically removes an obsolete full-copy preview when the canonical PDF still exists. This is important on small Railway volumes, where a 140 MB campaign PDF should consume roughly 140 MB, not roughly 280 MB merely to support the preview pane.
+For large campaign books, Seeker also avoids duplicating the finished PDF on the persistent volume. The canonical output remains beside the main `.tex` file and `/preview/pdf` serves it directly; `build/campaign.pdf` is only a zero-copy link when the host supports links. Upgrading from older versions automatically removes an obsolete full-copy preview when the canonical PDF still exists. This is important on small Railway volumes, where a 140 MB campaign PDF should consume roughly 140 MB, not roughly 280 MB merely to support the preview pane.
 
 ## Live editing behavior
 
@@ -382,7 +384,7 @@ Open **Admin → Maps**:
 
 ### Map movement
 
-The default player setting is **Edge-locked / cover**. Loreforge calculates the minimum zoom needed to cover the viewport and clamps X/Y movement so the user can never pan beyond the physical map boundaries. This fixes the "floating map" behavior where a player could previously shove the image into one corner and expose empty background.
+The default player setting is **Edge-locked / cover**. Seeker calculates the minimum zoom needed to cover the viewport and clamps X/Y movement so the user can never pan beyond the physical map boundaries. This fixes the "floating map" behavior where a player could previously shove the image into one corner and expose empty background.
 
 You can deliberately switch a map to **Show whole map / contain** from its Atmosphere panel. The map remains clamped, but letterboxing is allowed when the image and viewport aspect ratios differ.
 
@@ -427,11 +429,11 @@ pytest -q
 
 ## Why the campaign is not committed back to GitHub on every keystroke
 
-Doing that would create a flood of commits and, with Railway GitHub auto-deploys enabled, could repeatedly redeploy the whole application while you type. Loreforge therefore treats the persistent project volume as the authoring store and provides project ZIP export for backups/Overleaf interchange. GitHub remains the clean application/deployment repository.
+Doing that would create a flood of commits and, with Railway GitHub auto-deploys enabled, could repeatedly redeploy the whole application while you type. Seeker therefore treats the persistent project volume as the authoring store and provides project ZIP export for backups/Overleaf interchange. GitHub remains the clean application/deployment repository.
 
 ## Fontspec / custom font projects
 
-`fontspec` cannot compile under pdfLaTeX. Loreforge now detects `fontspec`, `\setmainfont`, `\setsansfont`, `\setmonofont`, `unicode-math`, and `polyglossia` and automatically chooses XeLaTeX. Lua-only source is switched to LuaLaTeX. This works even if an older Railway deployment still has `LATEX_ENGINE=pdflatex`; `LATEX_ENGINE=auto` is nevertheless the recommended setting.
+`fontspec` cannot compile under pdfLaTeX. Seeker now detects `fontspec`, `\setmainfont`, `\setsansfont`, `\setmonofont`, `unicode-math`, and `polyglossia` and automatically chooses XeLaTeX. Lua-only source is switched to LuaLaTeX. This works even if an older Railway deployment still has `LATEX_ENGINE=pdflatex`; `LATEX_ENGINE=auto` is nevertheless the recommended setting.
 
 The Docker image includes OpenType **TeX Gyre** fonts and **EB Garamond**, so the commonly used:
 
@@ -445,17 +447,17 @@ works after rebuilding the Railway image. For a different private font, keep the
 
 That exact combination is usually a stale failed-build state in `latexmk`: its dependency database remembers a previous engine failure, then a later run decides there is nothing new to compile and only repeats the old failure summary.
 
-Loreforge detects this pattern automatically. It removes only generated LaTeX dependency/auxiliary state (`.fdb_latexmk`, `.fls`, `.aux`, `.toc`, etc.), retries with a forced dependency rebuild, and—if the wrapper still has no useful source diagnostic—runs the selected TeX engine directly once to recover the actual error message. The **Build log** shows a **Build Doctor** card describing any recovery step and likely fixes.
+Seeker detects this pattern automatically. It removes only generated LaTeX dependency/auxiliary state (`.fdb_latexmk`, `.fls`, `.aux`, `.toc`, etc.), retries with a forced dependency rebuild, and—if the wrapper still has no useful source diagnostic—runs the selected TeX engine directly once to recover the actual error message. The **Build log** shows a **Build Doctor** card describing any recovery step and likely fixes.
 
-You can still press **↻ Clean** manually at any time. It does not delete your `.tex`, images, `.sty`, `.cls`, bibliography, maps, or Loreforge metadata; it only clears generated compilation state before rebuilding.
+You can still press **↻ Clean** manually at any time. It does not delete your `.tex`, images, `.sty`, `.cls`, bibliography, maps, or Seeker metadata; it only clears generated compilation state before rebuilding.
 
 If the underlying problem is real rather than stale state—for example a missing package, missing project `.sty`, undefined command, unmatched brace/environment, shell-escape requirement, or unavailable font—Build Doctor will keep the compile failed and show that cause instead of disguising it as the generic `latexmk` summary.
 
 ## Troubleshooting: `No space left on device` while importing
 
-Loreforge v1.0.1+ stages uploaded ZIP archives, extraction, and transactional rollback data in the service's ephemeral temporary filesystem rather than the persistent `/data` volume. This avoids requiring several copies of the same Overleaf project on the Railway volume during import.
+Seeker v1.0.1+ stages uploaded ZIP archives, extraction, and transactional rollback data in the service's ephemeral temporary filesystem rather than the persistent `/data` volume. This avoids requiring several copies of the same Overleaf project on the Railway volume during import.
 
-If you previously attempted an import with an older Loreforge build, open **Admin → Project → Railway persistence** and click **Clean failed-import leftovers**. The cleanup only targets legacy `project-backup-*`, `import-*`, and `upload-*.zip` artifacts; it does not delete the active `/data/project` campaign.
+If you previously attempted an import with an older Seeker build, open **Admin → Project → Railway persistence** and click **Clean failed-import leftovers**. The cleanup only targets legacy `project-backup-*`, `import-*`, and `upload-*.zip` artifacts; it does not delete the active `/data/project` campaign.
 
 The Project screen also reports total, used, and free persistent storage. If the final uncompressed campaign itself does not fit, increase the Railway volume mounted at `/data` (paid Railway plans support live volume resizing) or reduce unused assets in the Overleaf source ZIP.
 
@@ -466,12 +468,12 @@ This build adds regression coverage for longtable column-spec leakage, `\pon` en
 
 ### Build Doctor engine sanity check (v1.3.5)
 
-If the workspace says `Compilation failed · xelatex`, Build Doctor no longer infers a pdfLaTeX/fontspec problem merely because the words `fontspec` and `fatal` occur somewhere in the same long log. It reports that incompatibility only when TeX explicitly says fontspec was run under pdfTeX. Loreforge also compares the selected engine with the engine banner actually seen in the log; a mismatch usually points to a project-local `latexmkrc`/`.latexmkrc` override.
+If the workspace says `Compilation failed · xelatex`, Build Doctor no longer infers a pdfLaTeX/fontspec problem merely because the words `fontspec` and `fatal` occur somewhere in the same long log. It reports that incompatibility only when TeX explicitly says fontspec was run under pdfTeX. Seeker also compares the selected engine with the engine banner actually seen in the log; a mismatch usually points to a project-local `latexmkrc`/`.latexmkrc` override.
 
 ### Large XeLaTeX books and `.xdv` output (v1.3.6)
 
 When `latexmk -xelatex` runs, XeLaTeX deliberately typesets to an intermediate `.xdv` file and `latexmk` then calls `xdvipdfmx` to create the final PDF. Seeing a line such as `Output written on main.xdv (347 pages, ...)` therefore means the **TeX typesetting stage completed**; it is not itself an error.
 
-Loreforge now handles that pipeline explicitly. Large projects receive an adaptive build allowance, AUTO-selected XeLaTeX no longer clears auxiliary files on every compile, and a fresh `.xdv` can be converted to PDF in a separate recovery stage if the outer `latexmk` process stops before conversion. If `xdvipdfmx` fails, its own diagnostic is promoted to **FIRST BLOCKING ERROR**.
+Seeker now handles that pipeline explicitly. Large projects receive an adaptive build allowance, AUTO-selected XeLaTeX no longer clears auxiliary files on every compile, and a fresh `.xdv` can be converted to PDF in a separate recovery stage if the outer `latexmk` process stops before conversion. If `xdvipdfmx` fails, its own diagnostic is promoted to **FIRST BLOCKING ERROR**.
 
 `LATEX_TIMEOUT` is now treated as the minimum per-stage allowance. Large XeLaTeX/LuaLaTeX projects may automatically receive 180–300 seconds so a long illustrated campaign book is not killed by the historical 60-second default.

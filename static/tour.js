@@ -4,23 +4,23 @@
   const visible=el=>!!el&&el.getClientRects().length>0&&getComputedStyle(el).visibility!=='hidden';
   const firstVisible=selector=>[...document.querySelectorAll(selector)].find(visible)||null;
   const commonPlayer=[
-    {selector:'.brand',title:'Welcome to Loreforge',body:'This is your campaign companion: known lore, session memory, characters, maps, mysteries, and everything your GM has revealed.'},
+    {selector:'.brand',title:'Welcome to Seeker',body:'Seeker is the shared table memory: known lore, session context, characters, maps, mysteries, and everything your GM has revealed.'},
     {selector:'[data-tour-target="session"],[data-mobile-nav="session"]',title:'Use Session at the table',body:'Open this during play for the live location, spotlight lore, handouts, new discoveries, mysteries, and your notes.'},
     {selector:'[data-session-character-panel],[data-session-character-open]',title:'Enter as your character',body:'If you play more than one character, choose who you are playing tonight. Your private session notes stay attached to that character.'},
-    {selector:'[data-tour-target="campaign"],[data-mobile-nav="campaign"]',title:'Your campaign memory',body:'Campaign is the party desk for plot threads, journals, rumors, character arcs, and the world state you are allowed to know.'},
+    {selector:'[data-tour-target="campaign"],[data-mobile-nav="campaign"]',title:'Your Chronicle',body:'The Chronicle keeps plot threads, journals, rumors, character arcs, and the current world state together between sessions.'},
     {selector:'[data-tour-target="characters"],a[href="/characters"]',title:'Keep character dossiers here',body:'Your character pages hold biography, goals, arcs, relationships, portraits, and inspiration art.'},
     {selector:'[data-tour-target="search"],[data-open-search]',title:'Jump anywhere fast',body:'Search lore and tools from anywhere. On a keyboard, press / or Ctrl/⌘ K; on phones, use the Search tab.'},
-    {selector:'[data-tour-target="explore"],[data-mobile-more]',title:'Everything else lives under Explore',body:'History, calendar, mysteries, handouts, lore connections, families and orders are grouped here so the main bar stays calm.'},
+    {selector:'[data-tour-target="explore"],[data-mobile-more]',title:'Everything else lives under Discover',body:'History, calendar, mysteries, handouts, the Lore Web, families and orders are grouped here so the main bar stays calm.'},
     {selector:'[data-tour-target="notifications"]',title:'Watch for GM reveals',body:'The star shows campaign notifications and live spotlight pushes without making you reload pages manually.'},
   ];
   const gmSteps=[
-    {selector:'.brand,.studio-brand,.campaign-control-header,.gm-session-topbar',title:'Loreforge 4',body:'The player-facing site stays uncluttered, while GM tools are grouped into dedicated modes you can switch between quickly.'},
-    {selector:'[data-tour-target="gm-tools"],.admin-mode-dock',title:'GM tools are now grouped',body:'Use GM Session while running the table, Studio for source editing, World for campaign control, and Living for evolving state.'},
+    {selector:'.brand,.studio-brand,.campaign-control-header,.gm-session-topbar',title:'Seeker',body:'The player-facing site stays uncluttered, while your GM tools are grouped into dedicated modes you can switch between quickly.'},
+    {selector:'[data-tour-target="gm-tools"],.admin-mode-dock',title:'GM tools are now grouped',body:'Use the Session Console while running the table, Seeker Studio for source editing, Worldcraft for canon and reveals, and World State for what is changing right now.'},
     {selector:'#compileBtn',title:'Studio stays source-first',body:'Edit the LaTeX project, compile, inspect the player result, and use the source bridge from Codex entries when you need exact edits.'},
     {selector:'.gm-live-controls,.gm-session-grid',title:'Run the table from Session Mode',body:'Start or update the live session, spotlight lore and maps, push discoveries, reveal handouts, and advance fronts from one screen.'},
-    {selector:'.cc-sidebar,.campaign-control-nav',title:'World control is organized by job',body:'Sessions, party, chronology, reveals, mysteries, handouts, atlas layers, health, and snapshots stay separated instead of crowding the player UI.'},
+    {selector:'.cc-sidebar,.campaign-control-nav',title:'Worldcraft is organized by job',body:'Sessions, party, chronology, reveals, mysteries, handouts, atlas layers, lore health, and snapshots stay separated instead of crowding the player UI.'},
     {selector:'[data-tour-target="search"],[data-open-search]',title:'Search works as a command palette',body:'Use Ctrl/⌘ K or / to jump through lore and common GM destinations without hunting through menus.'},
-    {selector:'[data-start-tour]',title:'Replay this whenever you want',body:'The Quick tour button is always available in Explore or the GM mode dock. New players can safely learn the tool without a separate manual.'},
+    {selector:'[data-start-tour]',title:'Replay this whenever you want',body:'The Quick tour button is always available in Discover or the GM mode dock. New players can learn Seeker without a separate manual.'},
   ];
   let active=false,index=0,steps=[],backdrop,ring,card,currentTarget;
   const clean=()=>{active=false;currentTarget=null;backdrop?.remove();ring?.remove();card?.remove();backdrop=ring=card=null;document.removeEventListener('keydown',onKey);window.removeEventListener('resize',position);window.removeEventListener('scroll',position,true)};

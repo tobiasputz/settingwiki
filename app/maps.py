@@ -125,14 +125,52 @@ def _normalize_map(row: dict, markers: list[dict]) -> dict:
 
 
 def list_maps(settings: Settings, *, public: bool = False) -> list[dict]:
+    """Load maps and markers in two bulk queries, regardless of map count."""
     with connect(settings) as conn:
         maps = [dict(r) for r in conn.execute("SELECT * FROM maps ORDER BY sort_order, name").fetchall()]
-        result = []
-        for m in maps:
-            q = "SELECT * FROM markers WHERE map_id=?" + (" AND visible_to_players=1" if public else "") + " ORDER BY id"
-            markers = [dict(x) for x in conn.execute(q, (m["id"],)).fetchall()]
-            result.append(_normalize_map(m, markers))
-    return result
+        if not maps:
+            return []
+        q = "SELECT * FROM markers" + (" WHERE visible_to_players=1" if public else "") + " ORDER BY map_id,id"
+        marker_rows = [dict(x) for x in conn.execute(q).fetchall()]
+    markers_by: dict[int, list[dict]] = {int(m["id"]): [] for m in maps}
+    for row in marker_rows:
+        markers_by.setdefault(int(row["map_id"]), []).append(row)
+    return [_normalize_map(m, markers_by.get(int(m["id"]), [])) for m in maps]
+
+
+def map_locations_for_page(settings: Settings, page_slug: str, *, public: bool = False) -> tuple[bool, list[dict]]:
+    """Return whether an atlas exists plus only markers linked to one Codex page.
+
+    Article rendering only needs a yes/no for the global Atlas navigation and the
+    handful of markers attached to the current entry. Loading every marker on
+    every map made Codex navigation slower as campaigns accumulated locations.
+    """
+    with connect(settings) as conn:
+        has_maps = bool(conn.execute("SELECT 1 FROM maps LIMIT 1").fetchone())
+        sql = """
+            SELECT m.id AS map_id, m.name AS map_name, m.slug AS map_slug,
+                   mk.id AS marker_id, mk.title AS marker_title, mk.body AS marker_body,
+                   mk.x, mk.y, mk.kind, mk.page_slug, mk.visible_to_players
+            FROM markers AS mk
+            JOIN maps AS m ON m.id=mk.map_id
+            WHERE mk.page_slug=?
+        """
+        params: list[object] = [str(page_slug)]
+        if public:
+            sql += " AND mk.visible_to_players=1"
+        sql += " ORDER BY m.sort_order,m.name,mk.id"
+        rows=[dict(r) for r in conn.execute(sql, params).fetchall()]
+    out=[]
+    for r in rows:
+        out.append({
+            "map":{"id":r["map_id"],"name":r["map_name"],"slug":r["map_slug"]},
+            "marker":{
+                "id":r["marker_id"],"title":r["marker_title"],"body":r["marker_body"],
+                "x":r["x"],"y":r["y"],"kind":r["kind"],"page_slug":r["page_slug"],
+                "visible_to_players":bool(r["visible_to_players"]),
+            },
+        })
+    return has_maps,out
 
 
 def get_map(settings: Settings, map_id_or_slug: str | int, *, public: bool = False) -> dict | None:
