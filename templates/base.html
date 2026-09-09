@@ -13,17 +13,26 @@
   <link rel="icon" href="/static/seeker-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Seeker' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=4100">
-  <link rel="stylesheet" href="/static/tour.css?v=4100">
+  <link rel="stylesheet" href="/static/wiki.css?v=4200">
+  <link rel="stylesheet" href="/static/tour.css?v=4200">
   {% block head %}{% endblock %}
 </head>
-<body data-admin-view="{{ 'true' if request.session.get('admin') or request.session.get('co_gm') else 'false' }}" data-player-access-key="{{ wiki.player_access_key if wiki else '' }}">
+{% set campaign_ctx = campaign_context(request) %}
+<body data-campaign-id="{{ campaign_ctx.active_campaign_id }}" data-admin-view="{{ 'true' if request.session.get('admin') or request.session.get('co_gm') else 'false' }}" data-player-access-key="{{ wiki.player_access_key if wiki else '' }}">
   <div class="ambient-grain"></div>
   <header class="site-header">
     <a class="brand" href="/">
       <span class="brand-mark">✦</span>
       <span><strong>{{ wiki.title if wiki else 'Seeker' }}</strong><small>{{ wiki.player_label if wiki and wiki.player_label else 'SEEKER' }}</small></span>
     </a>
+    {% if campaign_ctx.multi_campaign %}
+    <label class="campaign-switcher" title="Switch table campaign">
+      <span>TABLE</span>
+      <select data-campaign-select aria-label="Active campaign">
+        {% for c in campaign_ctx.campaigns %}<option value="{{ c.id }}" {% if c.id == campaign_ctx.active_campaign_id %}selected{% endif %}>{{ c.name }}{% if c.status == 'archived' %} · archived{% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
     <nav class="site-nav" aria-label="Primary navigation">
       <a href="/" data-tour-target="codex">Codex</a>
       <a href="/session" class="nav-session" data-tour-target="session">Session{% if wiki and wiki.live_session and wiki.live_session.status == 'live' %}<i class="live-dot"></i>{% endif %}</a>
@@ -84,8 +93,8 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=4100"></script>
-  <script src="/static/tour.js?v=4100"></script>
+  <script src="/static/wiki.js?v=4200"></script>
+  <script src="/static/tour.js?v=4200"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

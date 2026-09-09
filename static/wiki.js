@@ -111,6 +111,14 @@
   const trail=document.getElementById('personalTrail'),trailSection=document.getElementById('personalTrailSection');
   if(trail&&trailSection){const bookmarks=readStore(bookmarkKey).map(x=>({...x,bookmarked:true})),recent=readStore(recentKey),seen=new Set(),items=[];for(const x of [...bookmarks,...recent]){if(!x?.slug||seen.has(x.slug))continue;seen.add(x.slug);items.push(x);if(items.length>=8)break}if(items.length){trailSection.classList.remove('hidden');trail.innerHTML=items.map(x=>`<a class="trail-card ${x.image?'has-image':''}" href="${escapeHtml(x.href||('/wiki/'+x.slug))}" ${x.image?`style="--trail-image:url('${escapeHtml(x.image)}')"`:''}><small>${escapeHtml((x.bookmarked?'★ SAVED · ':'')+(x.chapter||'Setting'))}</small><strong>${escapeHtml(x.title||'Lore')}</strong><i>→</i></a>`).join('')}}
 
+  // A setting can host several table campaigns. Switching table scope is a
+  // server-side session preference so every route/API immediately sees the
+  // same characters, sessions, notes and spoiler state.
+  document.querySelectorAll('[data-campaign-select]').forEach(select=>select.addEventListener('change',async()=>{
+    const previous=document.body.dataset.campaignId||'';select.disabled=true;
+    try{const r=await fetch('/api/campaign/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaign_id:Number(select.value)})});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||'Could not switch campaign.');location.reload()}catch(err){select.value=previous;select.disabled=false;alert(err.message||'Could not switch campaign.')}
+  }));
+
   // Seeker 2 — installable phone/tablet experience.
   if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
   // Browser-local campaign data must not bleed between two personal invitation

@@ -353,51 +353,51 @@ def _json(value: Any, fallback):
         return fallback
 
 
-def knowledge_state(settings: Settings, invite_id: int | None, target_type: str, target_key: str) -> dict | None:
+def knowledge_state(settings: Settings, invite_id: int | None, target_type: str, target_key: str, campaign_id:int|None=None) -> dict | None:
     if invite_id is None:
         return None
-    return _row(settings, 'SELECT * FROM player_knowledge WHERE invite_id=? AND target_type=? AND target_key=?', (int(invite_id), target_type, target_key))
+    from .campaigns import resolve_campaign_id
+    cid=resolve_campaign_id(settings,campaign_id)
+    return _row(settings, 'SELECT * FROM player_knowledge WHERE campaign_id=? AND invite_id=? AND target_type=? AND target_key=?', (cid,int(invite_id), target_type, target_key))
 
-
-def set_knowledge(settings: Settings, invite_id: int, target_type: str, target_key: str, state: str, note: str = '', source: str = 'gm') -> dict:
+def set_knowledge(settings: Settings, invite_id: int, target_type: str, target_key: str, state: str, note: str = '', source: str = 'gm', campaign_id:int|None=None) -> dict:
+    from .campaigns import resolve_campaign_id
+    cid=resolve_campaign_id(settings,campaign_id)
     state = state if state in {'unknown','rumor','known','mastered'} else 'known'
     now = time.time()
     with connect(settings) as conn:
-        conn.execute('''INSERT INTO player_knowledge(invite_id,target_type,target_key,state,note,source,updated_at) VALUES(?,?,?,?,?,?,?)
-            ON CONFLICT(invite_id,target_type,target_key) DO UPDATE SET state=excluded.state,note=excluded.note,source=excluded.source,updated_at=excluded.updated_at''',
-            (int(invite_id), target_type, target_key, state, note, source, now))
-    return knowledge_state(settings, invite_id, target_type, target_key) or {}
+        conn.execute('INSERT INTO player_knowledge(campaign_id,invite_id,target_type,target_key,state,note,source,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(campaign_id,invite_id,target_type,target_key) DO UPDATE SET state=excluded.state,note=excluded.note,source=excluded.source,updated_at=excluded.updated_at',
+            (cid,int(invite_id), target_type, target_key, state, note, source, now))
+    return knowledge_state(settings, invite_id, target_type, target_key, campaign_id=cid) or {}
 
+def list_knowledge(settings: Settings, invite_id: int | None = None, campaign_id:int|None=None) -> list[dict]:
+    if campaign_id is None:
+        if invite_id is None:return _rows(settings, 'SELECT * FROM player_knowledge ORDER BY updated_at DESC')
+        return _rows(settings, 'SELECT * FROM player_knowledge WHERE invite_id=? ORDER BY updated_at DESC', (int(invite_id),))
+    if invite_id is None:return _rows(settings,'SELECT * FROM player_knowledge WHERE campaign_id=? ORDER BY updated_at DESC',(int(campaign_id),))
+    return _rows(settings,'SELECT * FROM player_knowledge WHERE campaign_id=? AND invite_id=? ORDER BY updated_at DESC',(int(campaign_id),int(invite_id)))
 
-def list_knowledge(settings: Settings, invite_id: int | None = None) -> list[dict]:
-    if invite_id is None:
-        return _rows(settings, 'SELECT * FROM player_knowledge ORDER BY updated_at DESC')
-    return _rows(settings, 'SELECT * FROM player_knowledge WHERE invite_id=? ORDER BY updated_at DESC', (int(invite_id),))
-
-def knowledge_index(settings: Settings, invite_id: int | None) -> dict[tuple[str,str], dict]:
+def knowledge_index(settings: Settings, invite_id: int | None, campaign_id:int|None=None) -> dict[tuple[str,str], dict]:
     """Explicit per-player knowledge overrides keyed by (target_type,target_key)."""
-    if invite_id is None:
-        return {}
-    return {(str(r['target_type']), str(r['target_key'])): r for r in list_knowledge(settings, invite_id)}
+    if invite_id is None:return {}
+    return {(str(r['target_type']), str(r['target_key'])): r for r in list_knowledge(settings, invite_id, campaign_id=campaign_id)}
 
-
-def knowledge_allows(settings: Settings, invite_id: int | None, target_type: str, target_key: str, *, default: bool=True) -> tuple[bool,str]:
-    row = knowledge_state(settings, invite_id, target_type, target_key)
-    if not row:
-        return default, 'default'
+def knowledge_allows(settings: Settings, invite_id: int | None, target_type: str, target_key: str, *, default: bool=True, campaign_id:int|None=None) -> tuple[bool,str]:
+    row = knowledge_state(settings, invite_id, target_type, target_key, campaign_id=campaign_id)
+    if not row:return default, 'default'
     state = str(row.get('state') or 'unknown')
     return state != 'unknown', state
 
-
-
-def list_fronts(settings: Settings, *, admin: bool = False, invite_id: int | None = None) -> list[dict]:
+def list_fronts(settings: Settings, *, admin: bool = False, invite_id: int | None = None, campaign_id:int|None=None) -> list[dict]:
     """Load fronts and their event history in two queries, not one query/front."""
     with connect(settings) as conn:
-        rows=[dict(r) for r in conn.execute('SELECT * FROM campaign_fronts ORDER BY status="active" DESC, updated_at DESC').fetchall()]
+        if campaign_id is None:
+            rows=[dict(r) for r in conn.execute('SELECT * FROM campaign_fronts ORDER BY status="active" DESC, updated_at DESC').fetchall()]
+        else:
+            rows=[dict(r) for r in conn.execute('SELECT * FROM campaign_fronts WHERE campaign_id=? ORDER BY status="active" DESC, updated_at DESC',(int(campaign_id),)).fetchall()]
         visible=[]
         for r in rows:
-            if not admin and r['visibility'] not in {'players','party'} and int(r.get('owner_invite_id') or -1) != int(invite_id or -2):
-                continue
+            if not admin and r['visibility'] not in {'players','party'} and int(r.get('owner_invite_id') or -1) != int(invite_id or -2):continue
             visible.append(r)
         if not visible:return []
         ids=[int(r['id']) for r in visible];placeholders=','.join('?' for _ in ids)
@@ -410,17 +410,18 @@ def list_fronts(settings: Settings, *, admin: bool = False, invite_id: int | Non
     for r in visible:r['events']=by.get(int(r['id']),[])
     return visible
 
-
 def save_front(settings: Settings, p: dict) -> dict:
+    from .campaigns import resolve_campaign_id
     now=time.time(); fid=p.get('id'); title=str(p.get('title') or 'Untitled front').strip(); slug=str(p.get('slug') or _slug(title))
-    vals=(title,slug,str(p.get('kind') or 'faction'),str(p.get('summary') or ''),str(p.get('goal') or ''),str(p.get('next_move') or ''),p.get('page_slug') or None,max(0,int(p.get('current_value') or 0)),max(1,int(p.get('max_value') or 6)),str(p.get('status') or 'active'),str(p.get('visibility') or 'gm'),p.get('owner_invite_id'),now)
+    existing=_row(settings,'SELECT campaign_id FROM campaign_fronts WHERE id=?',(int(fid),)) if fid else None
+    cid=resolve_campaign_id(settings,p.get('campaign_id') if p.get('campaign_id') is not None else (existing or {}).get('campaign_id'))
+    vals=(cid,title,slug,str(p.get('kind') or 'faction'),str(p.get('summary') or ''),str(p.get('goal') or ''),str(p.get('next_move') or ''),p.get('page_slug') or None,max(0,int(p.get('current_value') or 0)),max(1,int(p.get('max_value') or 6)),str(p.get('status') or 'active'),str(p.get('visibility') or 'gm'),p.get('owner_invite_id'),now)
     with connect(settings) as conn:
         if fid:
-            conn.execute('UPDATE campaign_fronts SET title=?,slug=?,kind=?,summary=?,goal=?,next_move=?,page_slug=?,current_value=?,max_value=?,status=?,visibility=?,owner_invite_id=?,updated_at=? WHERE id=?',vals+(int(fid),)); out=int(fid)
+            conn.execute('UPDATE campaign_fronts SET campaign_id=?,title=?,slug=?,kind=?,summary=?,goal=?,next_move=?,page_slug=?,current_value=?,max_value=?,status=?,visibility=?,owner_invite_id=?,updated_at=? WHERE id=?',vals+(int(fid),)); out=int(fid)
         else:
-            cur=conn.execute('INSERT INTO campaign_fronts(title,slug,kind,summary,goal,next_move,page_slug,current_value,max_value,status,visibility,owner_invite_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',vals[:-1]+(now,now));out=cur.lastrowid
+            out=conn.execute('INSERT INTO campaign_fronts(campaign_id,title,slug,kind,summary,goal,next_move,page_slug,current_value,max_value,status,visibility,owner_invite_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',vals[:-1]+(now,now)).lastrowid
     return _row(settings,'SELECT * FROM campaign_fronts WHERE id=?',(out,)) or {}
-
 
 def advance_front(settings: Settings, front_id: int, delta: int, label: str, body: str='', session_id: int|None=None, visible: bool=False) -> dict:
     front=_row(settings,'SELECT * FROM campaign_fronts WHERE id=?',(int(front_id),))
@@ -527,37 +528,36 @@ def save_region_history(settings: Settings,region_id:int,p:dict)->dict:
     return _row(settings,'SELECT * FROM map_region_history WHERE id=?',(out,)) or {}
 
 
-def list_rumors(settings: Settings, *, admin:bool=False, location_slug:str='', faction_slug:str='')->list[dict]:
-    rows=_rows(settings,'SELECT * FROM rumors ORDER BY status="unheard" DESC,updated_at DESC')
+def list_rumors(settings: Settings, *, admin:bool=False, location_slug:str='', faction_slug:str='', campaign_id:int|None=None)->list[dict]:
+    rows=_rows(settings,'SELECT * FROM rumors ORDER BY status="unheard" DESC,updated_at DESC') if campaign_id is None else _rows(settings,'SELECT * FROM rumors WHERE campaign_id=? ORDER BY status="unheard" DESC,updated_at DESC',(int(campaign_id),))
     if not admin: rows=[r for r in rows if r['visibility'] not in {'gm','hidden'} and r['status']!='unheard']
     if location_slug: rows=[r for r in rows if not r['location_slug'] or r['location_slug']==location_slug]
     if faction_slug: rows=[r for r in rows if not r['faction_slug'] or r['faction_slug']==faction_slug]
     return rows
 
-
 def save_rumor(settings:Settings,p:dict)->dict:
-    now=time.time();rid=p.get('id');vals=(str(p.get('title') or 'Rumor'),str(p.get('body') or ''),str(p.get('truth_state') or 'unknown'),str(p.get('truth_note') or ''),p.get('location_slug') or None,p.get('faction_slug') or None,p.get('page_slug') or None,str(p.get('status') or 'unheard'),str(p.get('visibility') or 'players'),now)
+    from .campaigns import resolve_campaign_id
+    now=time.time();rid=p.get('id');existing=_row(settings,'SELECT campaign_id FROM rumors WHERE id=?',(int(rid),)) if rid else None
+    cid=resolve_campaign_id(settings,p.get('campaign_id') if p.get('campaign_id') is not None else (existing or {}).get('campaign_id'))
+    vals=(cid,str(p.get('title') or 'Rumor'),str(p.get('body') or ''),str(p.get('truth_state') or 'unknown'),str(p.get('truth_note') or ''),p.get('location_slug') or None,p.get('faction_slug') or None,p.get('page_slug') or None,str(p.get('status') or 'unheard'),str(p.get('visibility') or 'players'),now)
     with connect(settings) as conn:
-        if rid:conn.execute('UPDATE rumors SET title=?,body=?,truth_state=?,truth_note=?,location_slug=?,faction_slug=?,page_slug=?,status=?,visibility=?,updated_at=? WHERE id=?',vals+(int(rid),));out=int(rid)
-        else:out=conn.execute('INSERT INTO rumors(title,body,truth_state,truth_note,location_slug,faction_slug,page_slug,status,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',vals[:-1]+(now,now)).lastrowid
+        if rid:conn.execute('UPDATE rumors SET campaign_id=?,title=?,body=?,truth_state=?,truth_note=?,location_slug=?,faction_slug=?,page_slug=?,status=?,visibility=?,updated_at=? WHERE id=?',vals+(int(rid),));out=int(rid)
+        else:out=conn.execute('INSERT INTO rumors(campaign_id,title,body,truth_state,truth_note,location_slug,faction_slug,page_slug,status,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',vals[:-1]+(now,now)).lastrowid
     return _row(settings,'SELECT * FROM rumors WHERE id=?',(out,)) or {}
 
-def random_rumor(settings:Settings,*,location_slug:str='',faction_slug:str='',include_heard:bool=False)->dict|None:
-    rows=list_rumors(settings,admin=True,location_slug=location_slug,faction_slug=faction_slug)
+def random_rumor(settings:Settings,*,location_slug:str='',faction_slug:str='',include_heard:bool=False,campaign_id:int|None=None)->dict|None:
+    rows=list_rumors(settings,admin=True,location_slug=location_slug,faction_slug=faction_slug,campaign_id=campaign_id)
     rows=[r for r in rows if r.get('visibility') not in {'gm','hidden'} and (include_heard or r.get('status')=='unheard')]
-    if not rows and not include_heard:
-        return random_rumor(settings,location_slug=location_slug,faction_slug=faction_slug,include_heard=True)
-    if not rows:
-        return None
+    if not rows and not include_heard:return random_rumor(settings,location_slug=location_slug,faction_slug=faction_slug,include_heard=True,campaign_id=campaign_id)
+    if not rows:return None
     import random
     return random.SystemRandom().choice(rows)
 
-
-
-def list_threads(settings:Settings,*,admin:bool=False,invite_id:int|None=None)->list[dict]:
+def list_threads(settings:Settings,*,admin:bool=False,invite_id:int|None=None,campaign_id:int|None=None)->list[dict]:
     """Load threads, notes and lore links with three bounded queries total."""
     with connect(settings) as conn:
-        rows=[dict(r) for r in conn.execute('SELECT * FROM campaign_threads ORDER BY status="open" DESC,updated_at DESC').fetchall()]
+        if campaign_id is None:rows=[dict(r) for r in conn.execute('SELECT * FROM campaign_threads ORDER BY status="open" DESC,updated_at DESC').fetchall()]
+        else:rows=[dict(r) for r in conn.execute('SELECT * FROM campaign_threads WHERE campaign_id=? ORDER BY status="open" DESC,updated_at DESC',(int(campaign_id),)).fetchall()]
         visible=[]
         for r in rows:
             if not admin:
@@ -576,7 +576,6 @@ def list_threads(settings:Settings,*,admin:bool=False,invite_id:int|None=None)->
         tid=int(r['id']);r['notes']=notes_by.get(tid,[]);r['links']=links_by.get(tid,[])
     return visible
 
-
 def can_edit_thread(thread:dict,invite_id:int|None,admin:bool)->bool:
     if admin:return True
     if invite_id is None:return False
@@ -585,21 +584,27 @@ def can_edit_thread(thread:dict,invite_id:int|None,admin:bool)->bool:
 
 
 def save_thread(settings:Settings,p:dict,*,invite_id:int|None=None,admin:bool=False)->dict:
-    now=time.time();tid=p.get('id')
+    from .campaigns import invite_has_campaign, resolve_campaign_id
+    now=time.time();tid=p.get('id');current=None
     if tid:
         current=_row(settings,'SELECT * FROM campaign_threads WHERE id=?',(int(tid),))
         if not current:raise ValueError('Thread not found')
         if not can_edit_thread(current,invite_id,admin):raise PermissionError('This thread is GM-managed.')
+    cid=resolve_campaign_id(settings,p.get('campaign_id') if p.get('campaign_id') is not None else (current or {}).get('campaign_id'))
+    if not admin and not invite_has_campaign(settings,invite_id,cid):raise PermissionError('You are not a member of that campaign.')
     title=str(p.get('title') or 'Untitled thread').strip();slug=str(p.get('slug') or _slug(title));created_by=p.get('created_by_invite_id') if admin else invite_id
     visibility=str(p.get('visibility') or 'party');editing=str(p.get('editing') or 'party')
     if not admin:
         visibility='private' if visibility=='private' else 'party'; editing='owner' if editing=='owner' else 'party'
-    vals=(title,slug,str(p.get('summary') or ''),str(p.get('status') or 'open'),str(p.get('priority') or 'normal'),visibility,editing,created_by,p.get('assigned_character_id'),str(p.get('due_label') or ''),now)
+    assigned=p.get('assigned_character_id')
+    if assigned:
+        char=_row(settings,'SELECT campaign_id FROM player_characters WHERE id=?',(int(assigned),))
+        if not char or int(char.get('campaign_id') or -1)!=cid:raise ValueError('Assigned character must belong to this campaign.')
+    vals=(cid,title,slug,str(p.get('summary') or ''),str(p.get('status') or 'open'),str(p.get('priority') or 'normal'),visibility,editing,created_by,assigned,str(p.get('due_label') or ''),now)
     with connect(settings) as conn:
-        if tid:conn.execute('UPDATE campaign_threads SET title=?,slug=?,summary=?,status=?,priority=?,visibility=?,editing=?,created_by_invite_id=COALESCE(created_by_invite_id,?),assigned_character_id=?,due_label=?,updated_at=? WHERE id=?',vals+(int(tid),));out=int(tid)
-        else:out=conn.execute('INSERT INTO campaign_threads(title,slug,summary,status,priority,visibility,editing,created_by_invite_id,assigned_character_id,due_label,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',vals[:-1]+(now,now)).lastrowid
-    return next((x for x in list_threads(settings,admin=True) if int(x['id'])==int(out)),{})
-
+        if tid:conn.execute('UPDATE campaign_threads SET campaign_id=?,title=?,slug=?,summary=?,status=?,priority=?,visibility=?,editing=?,created_by_invite_id=COALESCE(created_by_invite_id,?),assigned_character_id=?,due_label=?,updated_at=? WHERE id=?',vals+(int(tid),));out=int(tid)
+        else:out=conn.execute('INSERT INTO campaign_threads(campaign_id,title,slug,summary,status,priority,visibility,editing,created_by_invite_id,assigned_character_id,due_label,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',vals[:-1]+(now,now)).lastrowid
+    return next((x for x in list_threads(settings,admin=True,campaign_id=cid) if int(x['id'])==int(out)),{})
 
 def add_thread_note(settings:Settings,thread_id:int,p:dict,*,invite_id:int|None=None,author_label:str='',admin:bool=False)->dict:
     t=_row(settings,'SELECT * FROM campaign_threads WHERE id=?',(int(thread_id),))
@@ -662,58 +667,57 @@ def _journal_rows_with_character(settings:Settings,sql:str,params:tuple=())->lis
         "LEFT JOIN campaign_sessions s ON s.id=j.session_id " + sql, params)
 
 
-def list_journals(settings:Settings,invite_id:int,*,admin:bool=False,character_id:int|None=None)->list[dict]:
+def list_journals(settings:Settings,invite_id:int,*,admin:bool=False,character_id:int|None=None,campaign_id:int|None=None)->list[dict]:
     where="WHERE j.invite_id=?";params=[int(invite_id)]
+    if campaign_id is not None:where+=" AND j.campaign_id=?";params.append(int(campaign_id))
     if character_id is not None:
-        if int(character_id)==0:
-            where+=" AND j.character_id IS NULL"
-        else:
-            where+=" AND (j.character_id=? OR j.character_id IS NULL)";params.append(int(character_id))
+        if int(character_id)==0:where+=" AND j.character_id IS NULL"
+        else:where+=" AND (j.character_id=? OR j.character_id IS NULL)";params.append(int(character_id))
     return _journal_rows_with_character(settings,where+" ORDER BY COALESCE(j.session_id,999999) DESC,j.updated_at DESC",tuple(params))
 
-
-def list_party_journals(settings:Settings,invite_id:int|None=None,*,admin:bool=False,character_id:int|None=None)->list[dict]:
+def list_party_journals(settings:Settings,invite_id:int|None=None,*,admin:bool=False,character_id:int|None=None,campaign_id:int|None=None)->list[dict]:
     if admin:
-        return _journal_rows_with_character(settings,"ORDER BY j.updated_at DESC")
+        where="" if campaign_id is None else "WHERE j.campaign_id=?"
+        return _journal_rows_with_character(settings,where+" ORDER BY j.updated_at DESC",(() if campaign_id is None else (int(campaign_id),)))
     iid=int(invite_id or -1)
-    # Party-shared notes from other players stay visible. A player's own
-    # character-scoped notes are filtered to the character they entered the
-    # session as; unassigned legacy/player-wide notes remain available.
     where="WHERE (j.visibility='party' OR j.invite_id=?)";params=[iid]
+    if campaign_id is not None:where+=" AND j.campaign_id=?";params.append(int(campaign_id))
     if character_id is not None:
-        if int(character_id)==0:
-            where+=" AND (j.invite_id!=? OR j.character_id IS NULL)";params.append(iid)
-        else:
-            where+=" AND (j.invite_id!=? OR j.character_id IS NULL OR j.character_id=?)";params.extend([iid,int(character_id)])
+        if int(character_id)==0:where+=" AND (j.invite_id!=? OR j.character_id IS NULL)";params.append(iid)
+        else:where+=" AND (j.invite_id!=? OR j.character_id IS NULL OR j.character_id=?)";params.extend([iid,int(character_id)])
     return _journal_rows_with_character(settings,where+" ORDER BY j.updated_at DESC",tuple(params))
 
-
 def save_journal(settings:Settings,p:dict,invite_id:int)->dict:
-    now=time.time();jid=p.get('id')
+    from .campaigns import invite_has_campaign, resolve_campaign_id
+    now=time.time();jid=p.get('id');current=_row(settings,'SELECT * FROM player_journals WHERE id=?',(int(jid),)) if jid else None
+    if jid and not current:raise ValueError('Journal entry not found.')
+    if current and int(current['invite_id'])!=int(invite_id):raise PermissionError('You can only edit your own journal entries.')
     character_id=p.get('character_id')
-    if character_id in ('',0,'0'): character_id=None
+    if character_id in ('',0,'0'):character_id=None
+    char=None
     if character_id is not None:
-        try: character_id=int(character_id)
-        except (TypeError,ValueError): raise ValueError('Invalid character.')
-        owner=_row(settings,'SELECT id FROM player_characters WHERE id=? AND invite_id=?',(character_id,int(invite_id)))
-        if not owner: raise PermissionError('You can only attach notes to your own character.')
-    visibility=str(p.get('visibility') or 'private')
-    if visibility not in {'private','party'}: visibility='private'
+        try:character_id=int(character_id)
+        except (TypeError,ValueError):raise ValueError('Invalid character.')
+        char=_row(settings,'SELECT id,campaign_id FROM player_characters WHERE id=? AND invite_id=?',(character_id,int(invite_id)))
+        if not char:raise PermissionError('You can only attach notes to your own character.')
     session_id=p.get('session_id')
-    if session_id in ('',0,'0'): session_id=None
-    title=str(p.get('title') or 'Session journal')
-    body=str(p.get('body') or '')
+    if session_id in ('',0,'0'):session_id=None
+    ses=_row(settings,'SELECT id,campaign_id FROM campaign_sessions WHERE id=?',(int(session_id),)) if session_id else None
+    requested=p.get('campaign_id') if p.get('campaign_id') is not None else ((char or {}).get('campaign_id') if char else ((ses or {}).get('campaign_id') if ses else (current or {}).get('campaign_id')))
+    cid=resolve_campaign_id(settings,requested)
+    if not invite_has_campaign(settings,invite_id,cid):raise PermissionError('You are not a member of that campaign.')
+    if char and int(char.get('campaign_id') or -1)!=cid:raise ValueError('Character and journal campaign do not match.')
+    if ses and int(ses.get('campaign_id') or -1)!=cid:raise ValueError('Session and journal campaign do not match.')
+    visibility=str(p.get('visibility') or 'private')
+    if visibility not in {'private','party'}:visibility='private'
+    title=str(p.get('title') or 'Session journal');body=str(p.get('body') or '')
     with connect(settings) as conn:
         if jid:
-            current=conn.execute('SELECT invite_id FROM player_journals WHERE id=?',(int(jid),)).fetchone()
-            if not current: raise ValueError('Journal entry not found.')
-            if int(current['invite_id'])!=int(invite_id): raise PermissionError('You can only edit your own journal entries.')
-            conn.execute('UPDATE player_journals SET character_id=?,session_id=?,title=?,body=?,visibility=?,updated_at=? WHERE id=? AND invite_id=?',(character_id,session_id,title,body,visibility,now,int(jid),int(invite_id)));out=int(jid)
+            conn.execute('UPDATE player_journals SET campaign_id=?,character_id=?,session_id=?,title=?,body=?,visibility=?,updated_at=? WHERE id=? AND invite_id=?',(cid,character_id,session_id,title,body,visibility,now,int(jid),int(invite_id)));out=int(jid)
         else:
-            out=conn.execute('INSERT INTO player_journals(invite_id,character_id,session_id,title,body,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',(int(invite_id),character_id,session_id,title,body,visibility,now,now)).lastrowid
+            out=conn.execute('INSERT INTO player_journals(campaign_id,invite_id,character_id,session_id,title,body,visibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',(cid,int(invite_id),character_id,session_id,title,body,visibility,now,now)).lastrowid
     rows=_journal_rows_with_character(settings,'WHERE j.id=?',(out,))
     return rows[0] if rows else {}
-
 
 def inbox_items(settings:Settings)->list[dict]:return _rows(settings,'SELECT * FROM gm_inbox ORDER BY status="inbox" DESC,created_at DESC')
 def save_inbox(settings:Settings,p:dict)->dict:
@@ -724,15 +728,24 @@ def save_inbox(settings:Settings,p:dict)->dict:
     return _row(settings,'SELECT * FROM gm_inbox WHERE id=?',(out,)) or {}
 
 
-def list_submissions(settings:Settings,*,invite_id:int|None=None,admin:bool=False)->list[dict]:
-    if admin:return _rows(settings,'SELECT s.*,p.label AS player_label FROM player_submissions s LEFT JOIN player_invites p ON p.id=s.invite_id ORDER BY s.status="pending" DESC,s.created_at DESC')
-    return _rows(settings,'SELECT * FROM player_submissions WHERE invite_id=? ORDER BY created_at DESC',(int(invite_id or -1),))
+def list_submissions(settings:Settings,*,invite_id:int|None=None,admin:bool=False,campaign_id:int|None=None)->list[dict]:
+    if admin:
+        if campaign_id is None:return _rows(settings,'SELECT s.*,p.label AS player_label FROM player_submissions s LEFT JOIN player_invites p ON p.id=s.invite_id ORDER BY s.status="pending" DESC,s.created_at DESC')
+        return _rows(settings,'SELECT s.*,p.label AS player_label FROM player_submissions s LEFT JOIN player_invites p ON p.id=s.invite_id WHERE s.campaign_id=? ORDER BY s.status="pending" DESC,s.created_at DESC',(int(campaign_id),))
+    if campaign_id is None:return _rows(settings,'SELECT * FROM player_submissions WHERE invite_id=? ORDER BY created_at DESC',(int(invite_id or -1),))
+    return _rows(settings,'SELECT * FROM player_submissions WHERE campaign_id=? AND invite_id=? ORDER BY created_at DESC',(int(campaign_id),int(invite_id or -1)))
+
 def save_submission(settings:Settings,p:dict,invite_id:int)->dict:
-    now=time.time();sid=p.get('id');vals=(int(invite_id),str(p.get('kind') or 'lore'),str(p.get('title') or 'Submission'),str(p.get('body') or ''),str(p.get('target_key') or ''),str(p.get('asset_ref') or ''),now)
+    from .campaigns import invite_has_campaign, resolve_campaign_id
+    now=time.time();sid=p.get('id');current=_row(settings,'SELECT * FROM player_submissions WHERE id=?',(int(sid),)) if sid else None
+    cid=resolve_campaign_id(settings,p.get('campaign_id') if p.get('campaign_id') is not None else (current or {}).get('campaign_id'))
+    if not invite_has_campaign(settings,invite_id,cid):raise PermissionError('You are not a member of that campaign.')
+    vals=(cid,int(invite_id),str(p.get('kind') or 'lore'),str(p.get('title') or 'Submission'),str(p.get('body') or ''),str(p.get('target_key') or ''),str(p.get('asset_ref') or ''),now)
     with connect(settings) as conn:
-        if sid:conn.execute('UPDATE player_submissions SET kind=?,title=?,body=?,target_key=?,asset_ref=?,updated_at=? WHERE id=? AND invite_id=?',vals[1:]+(int(sid),int(invite_id)));out=int(sid)
-        else:out=conn.execute('INSERT INTO player_submissions(invite_id,kind,title,body,target_key,asset_ref,status,created_at,updated_at) VALUES(?,?,?,?,?,? ,"pending",?,?)',vals[:-1]+(now,now)).lastrowid
+        if sid:conn.execute('UPDATE player_submissions SET campaign_id=?,kind=?,title=?,body=?,target_key=?,asset_ref=?,updated_at=? WHERE id=? AND invite_id=?',(cid,vals[2],vals[3],vals[4],vals[5],vals[6],now,int(sid),int(invite_id)));out=int(sid)
+        else:out=conn.execute('INSERT INTO player_submissions(campaign_id,invite_id,kind,title,body,target_key,asset_ref,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,"pending",?,?)',(cid,int(invite_id),vals[2],vals[3],vals[4],vals[5],vals[6],now,now)).lastrowid
     return _row(settings,'SELECT * FROM player_submissions WHERE id=?',(out,)) or {}
+
 def review_submission(settings:Settings,sid:int,status:str,gm_note:str='')->dict:
     status=status if status in {'approved','rejected','pending'} else 'pending';now=time.time()
     with connect(settings) as conn:conn.execute('UPDATE player_submissions SET status=?,gm_note=?,updated_at=? WHERE id=?',(status,gm_note,now,int(sid)))
@@ -749,11 +762,12 @@ def publishing_states(settings:Settings)->list[dict]:return _rows(settings,'SELE
 
 
 def capture_session_state(settings:Settings,session_id:int|None,phase:str)->dict:
-    payload={'captured_at':time.time(),'knowledge':list_knowledge(settings),'reveals':_rows(settings,'SELECT * FROM lore_reveals'),'runtime_states':runtime_states(settings,admin=True),'threads':list_threads(settings,admin=True),'fronts':list_fronts(settings,admin=True),'publishing':publishing_states(settings)}
+    session=_row(settings,'SELECT campaign_id FROM campaign_sessions WHERE id=?',(int(session_id),)) if session_id else None
+    cid=(session or {}).get('campaign_id')
+    payload={'captured_at':time.time(),'campaign_id':cid,'knowledge':list_knowledge(settings,campaign_id=cid),'reveals':(_rows(settings,'SELECT * FROM lore_reveals WHERE campaign_id=?',(int(cid),)) if cid is not None else _rows(settings,'SELECT * FROM lore_reveals')),'runtime_states':runtime_states(settings,admin=True),'threads':list_threads(settings,admin=True,campaign_id=cid),'fronts':list_fronts(settings,admin=True,campaign_id=cid),'publishing':publishing_states(settings)}
     now=time.time()
     with connect(settings) as conn:conn.execute('INSERT INTO session_state_snapshots(session_id,phase,state_json,created_at) VALUES(?,?,?,?) ON CONFLICT(session_id,phase) DO UPDATE SET state_json=excluded.state_json,created_at=excluded.created_at',(session_id,phase,json.dumps(payload),now))
     return {'session_id':session_id,'phase':phase,'created_at':now}
-
 
 def session_state_snapshots(settings:Settings,session_id:int|None=None)->list[dict]:
     rows=_rows(settings,'SELECT id,session_id,phase,created_at FROM session_state_snapshots'+(' WHERE session_id=?' if session_id is not None else '')+' ORDER BY created_at DESC',((int(session_id),) if session_id is not None else ()))
@@ -836,18 +850,18 @@ def replace_media_reference(settings:Settings,old_ref:str,new_ref:str)->dict:
 
 
 def create_notification(settings:Settings,p:dict)->dict:
-    now=time.time();aud=p.get('audience') or [];expires=p.get('expires_at')
-    with connect(settings) as conn:nid=conn.execute('INSERT INTO campaign_notifications(title,body,target_type,target_key,kind,audience_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)',(str(p.get('title') or 'Campaign update'),str(p.get('body') or ''),str(p.get('target_type') or ''),str(p.get('target_key') or ''),str(p.get('kind') or 'notice'),json.dumps(aud),expires,now)).lastrowid
+    from .campaigns import resolve_campaign_id
+    now=time.time();aud=p.get('audience') or [];expires=p.get('expires_at');cid=resolve_campaign_id(settings,p.get('campaign_id'))
+    with connect(settings) as conn:nid=conn.execute('INSERT INTO campaign_notifications(campaign_id,title,body,target_type,target_key,kind,audience_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)',(cid,str(p.get('title') or 'Campaign update'),str(p.get('body') or ''),str(p.get('target_type') or ''),str(p.get('target_key') or ''),str(p.get('kind') or 'notice'),json.dumps(aud),expires,now)).lastrowid
     return _row(settings,'SELECT * FROM campaign_notifications WHERE id=?',(nid,)) or {}
-def list_notifications(settings:Settings,invite_id:int|None,*,admin:bool=False,since:float=0)->list[dict]:
-    # One LEFT JOIN replaces the old per-notification read-status query.
+
+def list_notifications(settings:Settings,invite_id:int|None,*,admin:bool=False,since:float=0,campaign_id:int|None=None)->list[dict]:
     iid=int(invite_id) if invite_id is not None else -1
-    sql=("SELECT n.*, CASE WHEN nr.read_at IS NULL THEN 0 ELSE 1 END AS read "
-         "FROM campaign_notifications n "
-         "LEFT JOIN notification_reads nr ON nr.notification_id=n.id AND nr.invite_id=? "
-         "WHERE n.created_at>? ORDER BY n.created_at DESC LIMIT 100")
-    with connect(settings) as conn:
-        rows=[dict(r) for r in conn.execute(sql,(iid,float(since or 0))).fetchall()]
+    sql=("SELECT n.*, CASE WHEN nr.read_at IS NULL THEN 0 ELSE 1 END AS read FROM campaign_notifications n LEFT JOIN notification_reads nr ON nr.notification_id=n.id AND nr.invite_id=? WHERE n.created_at>?")
+    params=[iid,float(since or 0)]
+    if campaign_id is not None:sql+=' AND n.campaign_id=?';params.append(int(campaign_id))
+    sql+=' ORDER BY n.created_at DESC LIMIT 100'
+    with connect(settings) as conn:rows=[dict(r) for r in conn.execute(sql,params).fetchall()]
     now=time.time();out=[]
     for r in rows:
         if r.get('expires_at') and float(r['expires_at'])<now:continue
@@ -855,6 +869,7 @@ def list_notifications(settings:Settings,invite_id:int|None,*,admin:bool=False,s
         if not admin and aud and iid not in {int(x) for x in aud}:continue
         r['read']=bool(r.get('read'));out.append(r)
     return out
+
 def mark_notification_read(settings:Settings,nid:int,invite_id:int)->None:
     with connect(settings) as conn:conn.execute('INSERT OR REPLACE INTO notification_reads(notification_id,invite_id,read_at) VALUES(?,?,?)',(int(nid),int(invite_id),time.time()))
 
@@ -877,26 +892,31 @@ def save_character_arc(settings:Settings,character_id:int,p:dict)->dict:
     return _row(settings,'SELECT * FROM character_arcs WHERE id=?',(out,)) or {}
 
 
-def entity_provenance(settings:Settings,page_slug:str)->list[dict]:
+def entity_provenance(settings:Settings,page_slug:str,campaign_id:int|None=None)->list[dict]:
     # One compound query replaces the old N+1 pattern where every matching
     # session update caused another SQLite connection and session lookup during
-    # article renders. SQLite only permits compound SELECT ORDER BY terms that
-    # directly match result columns, so wrap the UNION before applying the
-    # COALESCE sort expression.
-    sql='''
+    # article renders. Keep provenance table-local so another campaign cannot
+    # reveal that a page appeared at a different table.
+    campaign_a='' if campaign_id is None else ' AND s.campaign_id=?'
+    campaign_b='' if campaign_id is None else ' AND s.campaign_id=?'
+    sql=f'''
         SELECT id,session_number,title,session_date,status
         FROM (
             SELECT DISTINCT s.id,s.session_number,s.title,s.session_date,s.status
             FROM campaign_sessions s JOIN session_lore l ON l.session_id=s.id
-            WHERE l.page_slug=?
+            WHERE l.page_slug=? {campaign_a}
             UNION
             SELECT DISTINCT s.id,s.session_number,s.title,s.session_date,s.status
             FROM campaign_sessions s JOIN session_updates u ON u.session_id=s.id
-            WHERE u.target_key=? AND u.session_id IS NOT NULL
+            WHERE u.target_key=? AND u.session_id IS NOT NULL {campaign_b}
         ) AS provenance_sessions
         ORDER BY COALESCE(session_number,999999),session_date,id
     '''
-    return _rows(settings,sql,(page_slug,page_slug))
+    params:list[object]=[page_slug]
+    if campaign_id is not None:params.append(int(campaign_id))
+    params.append(page_slug)
+    if campaign_id is not None:params.append(int(campaign_id))
+    return _rows(settings,sql,tuple(params))
 
 
 def continuity_report(settings:Settings,wiki:dict)->dict:

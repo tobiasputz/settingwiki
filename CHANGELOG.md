@@ -1,3 +1,16 @@
+# Seeker 4.2.0 — multi-campaign setting support
+
+- Added first-class **Campaigns** so one Seeker setting can host several simultaneous tables without duplicating the Codex or Atlas.
+- Existing single-campaign installations migrate automatically into a preserved **Main Campaign**; existing invitations, characters, sessions, journals, reveals and knowledge remain attached to it.
+- Added campaign membership: one player invitation may participate in one or several campaigns. The owner assigns players per campaign from **Worldcraft → Campaigns**.
+- Scoped player characters, live/session history, session updates, character/player journals, mysteries, handouts, fronts, rumors, plot threads, submissions, notifications, per-player knowledge and progressive lore reveals by campaign.
+- Kept canonical setting material shared: LaTeX/Codex lore, Atlas maps, historical chronology, semantic relationships and other setting-level authoring remain one source of truth.
+- Added a compact table switcher for players and GMs. Character identity is cleared when switching campaigns so a PC from one table can never leak into another table's session notes.
+- Added a campaign manager with description/accent, active/archive state, default campaign, member assignment, and quick table switching. Archived campaigns remain preserved but disappear from player switching.
+- Campaign access fails closed: if an invitation is removed from every active campaign, it cannot fall through into the default table or see another party's state.
+- Made Codex spoiler filtering, article provenance, live-session heartbeat, notifications and character search campaign-aware while retaining the v4.1 caching/resource optimizations.
+- Bumped PWA/static assets to **v4200** and added regression coverage for migration, campaign isolation, membership enforcement and player switching.
+
 # Seeker 4.1.1 — Codex navigation hotfix
 
 - Fixed a SQLite compound-query regression in article provenance lookup that caused `/wiki/<slug>` pages to return HTTP 500 after the v4.1 backend optimization.

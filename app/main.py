@@ -51,6 +51,10 @@ from .living import (
     character_relationships, save_character_relationship, character_arcs, save_character_arc, entity_provenance, continuity_report,
     export_foundry_journal, create_portable_archive, validate_portable_archive_file, media_usage, replace_media_reference,
 )
+from .campaigns import (
+    list_campaigns, get_campaign, campaign_members, save_campaign, archive_campaign, make_default_campaign,
+    set_campaign_members, invite_has_campaign, resolve_campaign_id, default_campaign_id,
+)
 
 settings = load_settings()
 BUILD_LOCK = threading.Lock()
@@ -139,7 +143,7 @@ def require_player_author(request: Request) -> None:
 def knowledge_visible(request: Request, target_type: str, target_key: str, *, default: bool=True) -> tuple[bool,str]:
     if is_gm(request):
         return True,"gm"
-    return knowledge_allows(settings,_invite_id(request),target_type,str(target_key),default=default)
+    return knowledge_allows(settings,_invite_id(request),target_type,str(target_key),default=default,campaign_id=_active_campaign_id(request))
 
 
 def _knowledge_visible_from_index(index: dict[tuple[str,str],dict], target_type: str, target_key: str, *, default: bool=True) -> tuple[bool,str]:
@@ -223,12 +227,65 @@ def ensure_built() -> dict:
     try:
         return load_wiki(settings)
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 4100}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 4200}
 
 
 def _invite_id(request: Request) -> int | None:
     invite = current_player_invite(request)
     return int(invite["id"]) if invite else None
+
+def _campaign_context(request: Request) -> dict:
+    """Resolve the table campaign for this request and cache it on request.state.
+
+    The Codex/Atlas are shared setting material. Party-owned state is filtered by
+    this campaign id, allowing the same person/invitation to participate in more
+    than one table without mixing characters, sessions, notes or spoilers.
+    """
+    state=getattr(request,'state',None)
+    if state is not None and getattr(state,'_seeker_campaign_checked',False):
+        return getattr(state,'_seeker_campaign_context')
+    gm=is_gm(request);iid=_invite_id(request)
+    campaigns=list_campaigns(settings,invite_id=iid,admin=gm,include_archived=gm)
+    # A named player invitation must never silently fall back into another
+    # table when all of its active campaign memberships were removed or
+    # archived. Without this guard, read routes would inherit the default
+    # campaign id and could expose that party's session state. Public/password
+    # access has no invitation membership to resolve, so it intentionally uses
+    # the default campaign as the setting's public table.
+    if not campaigns and iid is not None and not gm:
+        raise HTTPException(403, "This invitation is not assigned to an active campaign. Ask the GM to add you to a campaign.")
+    if not campaigns:
+        cid=default_campaign_id(settings);campaigns=[get_campaign(settings,cid) or {'id':cid,'name':'Main Campaign','slug':'main-campaign','status':'active','is_default':1}]
+    allowed={int(c['id']) for c in campaigns if c and (gm or c.get('status')=='active')}
+    requested=request.session.get('active_campaign_id')
+    try:requested=int(requested)
+    except (TypeError,ValueError):requested=0
+    if requested not in allowed:
+        preferred=next((c for c in campaigns if c and int(c.get('is_default') or 0) and int(c['id']) in allowed),None)
+        active=preferred or next((c for c in campaigns if c and int(c['id']) in allowed),campaigns[0])
+        requested=int(active['id']);request.session['active_campaign_id']=requested
+    active=next((c for c in campaigns if c and int(c['id'])==requested),None) or campaigns[0]
+    ctx={'campaigns':[c for c in campaigns if c],'active_campaign':active,'active_campaign_id':int(active['id']),'multi_campaign':len([c for c in campaigns if c and c.get('status')=='active'])>1}
+    if state is not None:
+        state._seeker_campaign_checked=True;state._seeker_campaign_context=ctx
+    return ctx
+
+
+def _active_campaign_id(request: Request) -> int:
+    return int(_campaign_context(request)['active_campaign_id'])
+
+def _campaign_payload(request: Request, payload: dict) -> dict:
+    out=dict(payload or {})
+    out.setdefault('campaign_id',_active_campaign_id(request))
+    return out
+
+
+def _template_campaign_context(request: Request) -> dict:
+    return _campaign_context(request)
+
+# Base and standalone GM templates can resolve campaign context without every
+# route having to repeat the same three context variables.
+templates.env.globals['campaign_context']=_template_campaign_context
 
 
 def _asset_ref_url(ref: str) -> str:
@@ -302,27 +359,23 @@ def _effective_reveal(row: dict | None, invite_id: int | None, now: float) -> di
     return out
 
 
-def _wiki_dynamic_state(invite_id: int | None, admin: bool) -> dict:
-    """Load all per-player Codex state in one SQLite connection.
-
-    v4 performed several new connections for every single Codex page (reveal,
-    publishing, knowledge, dossier style, relationships and variants). On a
-    large setting this made ordinary page navigation scale with page count.
-    """
+def _wiki_dynamic_state(invite_id: int | None, admin: bool, campaign_id:int) -> dict:
+    """Load Codex state for one table campaign in one SQLite connection."""
+    cid=int(campaign_id)
     with connect(settings) as conn:
-        reveals=[dict(r) for r in conn.execute("SELECT * FROM lore_reveals").fetchall()]
+        reveals=[dict(r) for r in conn.execute("SELECT * FROM lore_reveals WHERE campaign_id=?",(cid,)).fetchall()]
         publishing=[dict(r) for r in conn.execute("SELECT * FROM publishing_states").fetchall()]
         if invite_id is None:
             knowledge=[]
         else:
             knowledge=[dict(r) for r in conn.execute(
-                "SELECT * FROM player_knowledge WHERE invite_id=?", (int(invite_id),)
+                "SELECT * FROM player_knowledge WHERE campaign_id=? AND invite_id=?", (cid,int(invite_id))
             ).fetchall()]
         styles=[dict(r) for r in conn.execute("SELECT * FROM entity_styles").fetchall()]
         relationships=[dict(r) for r in conn.execute("SELECT * FROM lore_relationships").fetchall()]
         variants=[dict(r) for r in conn.execute("SELECT * FROM lore_variants ORDER BY id").fetchall()]
         alias_rows=[dict(r) for r in conn.execute("SELECT alias,page_slug FROM page_aliases").fetchall()]
-        live_row=conn.execute("SELECT id,session_number,title,status,updated_at FROM campaign_sessions WHERE status='live' ORDER BY updated_at DESC,id DESC LIMIT 1").fetchone()
+        live_row=conn.execute("SELECT id,session_number,title,status,updated_at FROM campaign_sessions WHERE campaign_id=? AND status='live' ORDER BY updated_at DESC,id DESC LIMIT 1",(cid,)).fetchone()
     if not admin:
         relationships=[r for r in relationships if r.get("visibility") not in {"gm","hidden"}]
         variants=[r for r in variants if r.get("visibility") not in {"gm","hidden"}]
@@ -331,22 +384,16 @@ def _wiki_dynamic_state(invite_id: int | None, admin: bool) -> dict:
         rel_by.setdefault(str(r.get("source_slug") or ""),[]).append(r)
         rel_by.setdefault(str(r.get("target_slug") or ""),[]).append(r)
     variants_by: dict[str,list[dict]]={}
-    for r in variants:
-        variants_by.setdefault(str(r.get("page_slug") or ""),[]).append(r)
+    for r in variants:variants_by.setdefault(str(r.get("page_slug") or ""),[]).append(r)
     return {
         "reveals": {(str(r.get("target_type")),str(r.get("target_key"))):r for r in reveals},
         "publishing": {str(r.get("page_slug")):str(r.get("state") or "published") for r in publishing},
         "knowledge": {(str(r.get("target_type")),str(r.get("target_key"))):r for r in knowledge},
         "styles": {str(r.get("page_slug")):r for r in styles},
-        "relationships": rel_by,
-        "variants": variants_by,
+        "relationships": rel_by,"variants": variants_by,
         "aliases": {str(r.get("alias") or "").casefold():str(r.get("page_slug") or "") for r in alias_rows},
         "live_session": dict(live_row) if live_row else None,
     }
-
-
-_REVEAL_SECTION_RE = re.compile(r'<section class="lore-reveal" data-lore-reveal="([^"]+)"(?: data-rumor="([^"]*)")?>(.*?)</section>', re.S)
-
 
 def _apply_reveals_from_index(html_text: str, page_slug: str, state: dict, invite_id: int | None, now: float) -> str:
     def repl(match):
@@ -366,22 +413,17 @@ def _path_signature(path: Path) -> tuple[int,int]:
         return 0,0
 
 
-def _visible_wiki_signature(invite_id: int | None, admin: bool) -> tuple:
-    """Return a compact revision fingerprint for data that changes Codex output.
-
-    Do not key this cache from the SQLite WAL file itself: ordinary activity
-    logging/bookmarks also write to the WAL and would invalidate the Codex on
-    every page view. One small aggregate query is substantially cheaper than
-    reconstructing every reveal, variant, relationship and style on each click.
-    """
-    index=settings.build_dir / "wiki_index.json"
+def _visible_wiki_signature(invite_id: int | None, admin: bool, campaign_id:int) -> tuple:
+    """Return a compact revision fingerprint for one campaign's Codex state."""
+    index=settings.build_dir / "wiki_index.json";cid=int(campaign_id)
     with connect(settings) as conn:
-        knowledge_clause = "WHERE invite_id=?" if (invite_id is not None and not admin) else "WHERE 0"
-        params = (int(invite_id),) if (invite_id is not None and not admin) else ()
+        knowledge_clause = "WHERE campaign_id=? AND invite_id=?" if (invite_id is not None and not admin) else "WHERE campaign_id=? AND 0"
+        kparams=(cid,int(invite_id)) if (invite_id is not None and not admin) else (cid,)
+        # Keep campaign-scoped subqueries separate from shared setting metadata.
         row=conn.execute(f"""
             SELECT
-              (SELECT COUNT(*) FROM lore_reveals),
-              (SELECT COALESCE(MAX(updated_at),0) FROM lore_reveals),
+              (SELECT COUNT(*) FROM lore_reveals WHERE campaign_id=?),
+              (SELECT COALESCE(MAX(updated_at),0) FROM lore_reveals WHERE campaign_id=?),
               (SELECT COUNT(*) FROM publishing_states),
               (SELECT COALESCE(MAX(updated_at),0) FROM publishing_states),
               (SELECT COUNT(*) FROM player_knowledge {knowledge_clause}),
@@ -394,20 +436,19 @@ def _visible_wiki_signature(invite_id: int | None, admin: bool) -> tuple:
               (SELECT COALESCE(MAX(updated_at),0) FROM lore_variants),
               (SELECT COUNT(*) FROM page_aliases),
               (SELECT COALESCE(MAX(updated_at),0) FROM page_aliases),
-              (SELECT COUNT(*) FROM campaign_sessions WHERE status='live'),
-              (SELECT COALESCE(MAX(updated_at),0) FROM campaign_sessions WHERE status='live')
-        """, params + params).fetchone()
-    return (str(index), *_path_signature(index), *(tuple(row) if row else ()))
-
+              (SELECT COUNT(*) FROM campaign_sessions WHERE campaign_id=? AND status='live'),
+              (SELECT COALESCE(MAX(updated_at),0) FROM campaign_sessions WHERE campaign_id=? AND status='live')
+        """, (cid,cid)+kparams+kparams+(cid,cid)).fetchone()
+    return (str(index), *_path_signature(index), cid, *(tuple(row) if row else ()))
 
 @functools.lru_cache(maxsize=12)
-def _visible_wiki_cached(admin: bool, invite_id: int | None, player_label: str, player_access_key: str, signature: tuple) -> dict:
+def _visible_wiki_cached(admin: bool, invite_id: int | None, player_label: str, player_access_key: str, campaign_id:int, signature: tuple) -> dict:
     # ``signature`` is intentionally unused inside the body: it is part of the
     # cache key and changes whenever the generated Codex or SQLite state changes.
     del signature
     base = ensure_built()
     wiki = {k:v for k,v in base.items() if k not in {"pages","categories"}}
-    dynamic = _wiki_dynamic_state(invite_id, admin)
+    dynamic = _wiki_dynamic_state(invite_id, admin, campaign_id)
     now=time.time()
     visible_pages = []
     allowed_slugs = set()
@@ -472,20 +513,18 @@ def _visible_wiki_cached(admin: bool, invite_id: int | None, player_label: str, 
     wiki["player_label"] = player_label
     wiki["gm_view"] = admin
     wiki["player_access_key"] = player_access_key
+    wiki["active_campaign_id"] = int(campaign_id)
     return wiki
 
 
 def _visible_wiki(request: Request, *, include_hidden_for_admin: bool = True) -> dict:
-    # ``include_hidden_for_admin`` remains for API compatibility with older
-    # integrations; GM views always include hidden material.
     del include_hidden_for_admin
-    admin=is_gm(request)
+    admin=is_gm(request);cid=_active_campaign_id(request)
     invite=None if admin else current_player_invite(request)
     invite_id=int(invite["id"]) if invite else None
     player_label=("Co-GM" if is_co_gm(request) else "GM") if admin else str((invite or {}).get("label") or "")
     access_key=("admin" if is_admin(request) else "co-gm") if admin else (f"invite:{invite.get('id')}:{invite.get('access_version')}" if invite else player_access_mode())
-    return _visible_wiki_cached(admin, invite_id, player_label, access_key, _visible_wiki_signature(invite_id, admin))
-
+    return _visible_wiki_cached(admin, invite_id, player_label, access_key, cid, _visible_wiki_signature(invite_id, admin, cid))
 
 def _asset_rows() -> list[dict]:
     allowed = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
@@ -512,7 +551,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 4100
+                    needs_build=int(existing.get("renderer_version") or 0) < 4200
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -627,21 +666,67 @@ def admin_login(request: Request, password: str = Form(...)):
 def logout(request: Request):
     request.session.clear(); return {"ok": True}
 
+@app.get("/api/campaign/context")
+def campaign_context_api(request: Request):
+    if not player_allowed(request): raise HTTPException(401)
+    return _campaign_context(request)
+
+
+@app.post("/api/campaign/select")
+def campaign_select_api(request: Request,payload:dict=Body(...)):
+    if not player_allowed(request): raise HTTPException(401)
+    try: cid=int(payload.get("campaign_id"))
+    except (TypeError,ValueError): raise HTTPException(400,"Choose a valid campaign.")
+    if is_gm(request):
+        campaign=get_campaign(settings,cid)
+        if not campaign: raise HTTPException(404,"Campaign not found.")
+    else:
+        iid=_invite_id(request)
+        campaign=get_campaign(settings,cid)
+        if not campaign or campaign.get("status")!="active" or not invite_has_campaign(settings,iid,cid):
+            raise HTTPException(403,"This invitation does not have access to that campaign.")
+    request.session["active_campaign_id"]=cid
+    # Character identity is table-specific. Never carry it across campaigns.
+    request.session.pop("session_character_id",None)
+    request.session.pop("session_character_session_id",None)
+    return {"ok":True,"campaign":campaign}
+
+
+@app.post("/api/admin/campaigns")
+def admin_campaign_save_api(request:Request,payload:dict=Body(...)):
+    require_admin(request)
+    try:return save_campaign(settings,payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.post("/api/admin/campaigns/{campaign_id}/default")
+def admin_campaign_default_api(request:Request,campaign_id:int):
+    require_admin(request)
+    try:return make_default_campaign(settings,campaign_id)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete("/api/admin/campaigns/{campaign_id}")
+def admin_campaign_archive_api(request:Request,campaign_id:int):
+    require_admin(request)
+    try:return archive_campaign(settings,campaign_id)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
     wiki = _visible_wiki(request); maps = list_maps(settings, public=True)
     featured = [p for p in wiki.get("pages", []) if p.get("presentation", {}).get("featured")][:6]
-    iid=_invite_id(request); gm=is_gm(request); updates=recent_updates(settings,iid,6,admin=gm);live=get_live_session(settings,invite_id=iid,admin=gm)
+    iid=_invite_id(request); gm=is_gm(request); cid=_active_campaign_id(request); updates=recent_updates(settings,iid,6,admin=gm,campaign_id=cid);live=get_live_session(settings,invite_id=iid,admin=gm,campaign_id=cid)
     if not gm:
         allowed={p.get("slug") for p in wiki.get("pages",[])}
         updates=[u for u in updates if u.get("target_type")!="lore" or not u.get("target_key") or u.get("target_key") in allowed]
-    home_threads=list_threads(settings,admin=gm,invite_id=iid)[:5]
-    home_chars=list_player_characters(settings,invite_id=iid,admin=gm)[:5]
-    home_fronts=list_fronts(settings,admin=gm,invite_id=iid)[:4]
-    home_notifications=list_notifications(settings,iid,admin=gm)[:6]
-    return templates.TemplateResponse("home.html", {"request": request, "wiki": wiki, "maps": maps, "featured": featured,"updates":updates,"live_session":live,"mysteries":list_mysteries(settings,admin=gm)[:4],"threads":home_threads,"characters":home_chars,"fronts":home_fronts,"notifications":home_notifications,"calendar":_calendar_config()})
+    home_threads=list_threads(settings,admin=gm,invite_id=iid,campaign_id=cid)[:5]
+    home_chars=list_player_characters(settings,invite_id=iid,admin=gm,campaign_id=cid)[:5]
+    home_fronts=list_fronts(settings,admin=gm,invite_id=iid,campaign_id=cid)[:4]
+    home_notifications=list_notifications(settings,iid,admin=gm,campaign_id=cid)[:6]
+    return templates.TemplateResponse("home.html", {"request": request, "wiki": wiki, "maps": maps, "featured": featured,"updates":updates,"live_session":live,"mysteries":list_mysteries(settings,admin=gm,campaign_id=cid)[:4],"threads":home_threads,"characters":home_chars,"fronts":home_fronts,"notifications":home_notifications,"calendar":_calendar_config()})
 
 
 @app.get("/wiki/{slug}", response_class=HTMLResponse)
@@ -668,7 +753,7 @@ def wiki_page(request: Request, slug: str):
     next_page = pages[idx+1] if idx + 1 < len(pages) else None
     page_locked = (not is_gm(request) and page.get("presentation", {}).get("visibility") == "teaser")
     has_maps,map_locations=map_locations_for_page(settings,slug,public=not is_gm(request))
-    appearances=session_appearances_for_page(settings,slug,public=not is_gm(request))
+    cid=_active_campaign_id(request); appearances=session_appearances_for_page(settings,slug,public=not is_gm(request),campaign_id=cid)
     by_slug={p["slug"]:p for p in pages}
     for rel in page.get("explicit_relationships",[]):
         other=rel["target_slug"] if rel["source_slug"]==slug else rel["source_slug"]
@@ -682,7 +767,7 @@ def wiki_page(request: Request, slug: str):
         {
             "request": request, "wiki": wiki, "page": page, "prev_page": prev_page, "next_page": next_page,
             "page_locked": page_locked, "admin_view": is_gm(request),"maps":([{"id":1}] if has_maps else []),"map_locations":map_locations,"appearances":appearances,
-            "runtime_state": runtime_state_for_page(settings,slug,admin=is_gm(request)),"provenance":entity_provenance(settings,slug),
+            "runtime_state": runtime_state_for_page(settings,slug,admin=is_gm(request)),"provenance":entity_provenance(settings,slug,campaign_id=cid),
         },
     )
 
@@ -755,7 +840,7 @@ def map_page(request: Request, slug: str):
     map_data["layers"] = map_layers(settings, int(map_data["id"]), public=True)
     map_data["fog_regions"] = fog_regions(settings, int(map_data["id"]), public=True)
     if not is_gm(request):
-        kidx=knowledge_index(settings,_invite_id(request))
+        kidx=knowledge_index(settings,_invite_id(request),campaign_id=_active_campaign_id(request))
         map_data["markers"]=[m for m in map_data.get("markers",[]) if _knowledge_visible_from_index(kidx,"map_marker",f"{map_data['id']}:{m.get('id')}")[0]]
     else:
         kidx={}
@@ -807,7 +892,7 @@ def public_search(request: Request, q: str = ""):
     # Player-owned character dossiers participate in the same command/search
     # palette as campaign lore. Private characters are returned only to their
     # owner (and the GM) by list_player_characters.
-    for character in list_player_characters(settings, invite_id=_invite_id(request), admin=is_gm(request)):
+    for character in list_player_characters(settings, invite_id=_invite_id(request), admin=is_gm(request),campaign_id=_active_campaign_id(request)):
         title=(character.get("name") or "").lower(); body=" ".join(str(character.get(k) or "") for k in ("summary","biography","goals","ancestry","class_name")).lower(); score=0
         if qn==title: score+=100
         if qn in title: score+=34
@@ -871,19 +956,19 @@ def service_worker():
 @app.get("/session", response_class=HTMLResponse)
 def player_session_screen(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
-    wiki = _visible_wiki(request); maps = list_maps(settings, public=True); iid=_invite_id(request); live = get_live_session(settings,invite_id=iid,admin=is_gm(request))
+    wiki = _visible_wiki(request); maps = list_maps(settings, public=True); iid=_invite_id(request); cid=_active_campaign_id(request); live = get_live_session(settings,invite_id=iid,admin=is_gm(request),campaign_id=cid)
     by_slug = {p["slug"]: p for p in wiki.get("pages", [])}
     if live:
         live["lore_pages"] = [by_slug[x["page_slug"]] for x in live.get("lore", []) if x.get("page_slug") in by_slug]
         live["spotlight_map"] = next((m for m in maps if m.get("slug") == live.get("spotlight_map_slug")), None)
     invite = current_player_invite(request)
     notes = []
-    history=[x for x in list_sessions(settings,public=True,invite_id=iid) if x.get("status")=="ended"][-12:]
+    history=[x for x in list_sessions(settings,public=True,invite_id=iid,campaign_id=cid) if x.get("status")=="ended"][-12:]
     if not is_gm(request):
         allowed={p.get("slug") for p in wiki.get("pages",[])}
         if live: live["lore"]=[x for x in live.get("lore",[]) if x.get("page_slug") in allowed]
         for row in history: row["lore"]=[x for x in row.get("lore",[]) if x.get("page_slug") in allowed]
-    mysteries=list_mysteries(settings, admin=is_gm(request))[:6]
+    mysteries=list_mysteries(settings, admin=is_gm(request),campaign_id=cid)[:6]
     if not is_gm(request):
         allowed={p.get("slug") for p in wiki.get("pages",[])}
         for mystery in mysteries:
@@ -895,12 +980,12 @@ def player_session_screen(request: Request):
     journal_character_filter=None
     if not is_gm(request) and character_selection_made:
         journal_character_filter=int((active_character or {}).get("id") or 0)
-    party_journals=list_party_journals(settings,iid,admin=is_gm(request),character_id=journal_character_filter)
+    party_journals=list_party_journals(settings,iid,admin=is_gm(request),character_id=journal_character_filter,campaign_id=cid)
     return templates.TemplateResponse("session.html", {
         "request": request, "wiki": wiki, "maps": maps, "session": live, "player": invite,
-        "updates": recent_updates(settings, iid, 12,admin=is_gm(request)), "mysteries": mysteries,
+        "updates": recent_updates(settings, iid, 12,admin=is_gm(request),campaign_id=cid), "mysteries": mysteries,
         "session_history":list(reversed(history)),"calendar":_calendar_config(),
-        "threads":list_threads(settings,admin=is_gm(request),invite_id=iid),"party_journals":party_journals,
+        "threads":list_threads(settings,admin=is_gm(request),invite_id=iid,campaign_id=cid),"party_journals":party_journals,
         "gm_view":is_gm(request),"can_author":can_author,"archive_mode":archive_mode(),
         "session_characters":session_characters,"active_character":active_character,
         "character_selection_made":character_selection_made,
@@ -913,14 +998,14 @@ def player_session_character(request:Request,payload:dict=Body(...)):
     if is_gm(request): raise HTTPException(403,"GM view does not use a player character identity.")
     iid=_invite_id(request)
     if iid is None: raise HTTPException(403,"A personal invitation is required to choose a session character.")
-    live=get_live_session(settings,invite_id=iid,admin=False);session_key=int((live or {}).get("id") or 0)
+    cid_active=_active_campaign_id(request);live=get_live_session(settings,invite_id=iid,admin=False,campaign_id=cid_active);session_key=int((live or {}).get("id") or 0)
     requested=payload.get("character_id")
     if requested in (None,"",0,"0"):
         request.session["session_character_id"]=0;request.session["session_character_session_id"]=session_key
         return {"ok":True,"character":None,"session_id":session_key}
     try: cid=int(requested)
     except (TypeError,ValueError): raise HTTPException(400,"Invalid character.")
-    char=get_player_character(settings,cid,invite_id=iid,admin=False)
+    char=get_player_character(settings,cid,invite_id=iid,admin=False,campaign_id=cid_active)
     if not char or int(char.get("invite_id") or -1)!=int(iid): raise HTTPException(403,"You can only enter a session as one of your own characters.")
     request.session["session_character_id"]=cid;request.session["session_character_session_id"]=session_key
     return {"ok":True,"character":{"id":cid,"name":char.get("name"),"portrait_url":char.get("portrait_url","")},"session_id":session_key}
@@ -933,7 +1018,7 @@ def timeline_page(request: Request):
     events=list_timeline(settings,admin=is_gm(request),historical_only=True)
     eras=list_timeline_eras(settings,admin=is_gm(request))
     if not is_gm(request):
-        kidx=knowledge_index(settings,_invite_id(request))
+        kidx=knowledge_index(settings,_invite_id(request),campaign_id=_active_campaign_id(request))
         events=[e for e in events if _knowledge_visible_from_index(kidx,"timeline_event",str(e.get('id')))[0]]
     allowed={p.get("slug") for p in wiki.get("pages",[])}
     for event in events:
@@ -964,15 +1049,15 @@ def updates_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
     wiki=_visible_wiki(request); maps=list_maps(settings,public=True)
     allowed={p.get("slug") for p in wiki.get("pages",[])}
-    updates=recent_updates(settings,_invite_id(request),100,admin=is_gm(request))
+    cid=_active_campaign_id(request); updates=recent_updates(settings,_invite_id(request),100,admin=is_gm(request),campaign_id=cid)
     if not is_gm(request): updates=[u for u in updates if u.get("target_type")!="lore" or not u.get("target_key") or u.get("target_key") in allowed]
-    return templates.TemplateResponse("updates.html", {"request":request,"wiki":wiki,"maps":maps,"updates":updates,"sessions":list_sessions(settings,public=True,invite_id=_invite_id(request))})
+    return templates.TemplateResponse("updates.html", {"request":request,"wiki":wiki,"maps":maps,"updates":updates,"sessions":list_sessions(settings,public=True,invite_id=_invite_id(request),campaign_id=cid)})
 
 
 @app.get("/mysteries", response_class=HTMLResponse)
 def mysteries_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
-    wiki=_visible_wiki(request); maps=list_maps(settings,public=True); rows=list_mysteries(settings,admin=is_gm(request))
+    wiki=_visible_wiki(request); maps=list_maps(settings,public=True); cid=_active_campaign_id(request); rows=list_mysteries(settings,admin=is_gm(request),campaign_id=cid)
     if not is_gm(request):
         allowed={p.get("slug") for p in wiki.get("pages",[])}
         for mystery in rows:
@@ -986,7 +1071,7 @@ def mysteries_page(request: Request):
 def handouts_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
     wiki=_visible_wiki(request); maps=list_maps(settings,public=True)
-    rows=list_handouts(settings,admin=is_gm(request)); allowed={p.get("slug") for p in wiki.get("pages",[])}
+    cid=_active_campaign_id(request); rows=list_handouts(settings,admin=is_gm(request),campaign_id=cid); allowed={p.get("slug") for p in wiki.get("pages",[])}
     for h in rows:
         h["image_url"]=_asset_ref_url(h.get("image_ref",""))
         if not is_gm(request) and h.get("page_slug") not in allowed: h["page_slug"]=None
@@ -996,7 +1081,7 @@ def handouts_page(request: Request):
 @app.get("/handout/{slug}", response_class=HTMLResponse)
 def handout_page(request: Request, slug: str):
     if not player_allowed(request): return player_gate_redirect(request)
-    row=next((x for x in list_handouts(settings,admin=is_gm(request)) if x["slug"]==slug),None)
+    cid=_active_campaign_id(request); row=next((x for x in list_handouts(settings,admin=is_gm(request),campaign_id=cid) if x["slug"]==slug),None)
     if not row: raise HTTPException(404,"Handout not found")
     row["image_url"]=_asset_ref_url(row.get("image_ref","")); wiki=_visible_wiki(request); maps=list_maps(settings,public=True)
     if not is_admin(request) and row.get("page_slug") not in {p.get("slug") for p in wiki.get("pages",[])}: row["page_slug"]=None
@@ -1012,30 +1097,30 @@ def public_session_pulse(request: Request):
     returns only the timestamps the browser actually compares.
     """
     if not player_allowed(request): raise HTTPException(401)
-    iid=_invite_id(request); admin=is_gm(request)
+    iid=_invite_id(request); admin=is_gm(request); cid=_active_campaign_id(request)
     with connect(settings) as conn:
-        live_row=conn.execute("SELECT id,updated_at FROM campaign_sessions WHERE status='live' ORDER BY updated_at DESC,id DESC LIMIT 1").fetchone()
-        handout_row=conn.execute("SELECT MAX(updated_at) AS value FROM handouts WHERE visibility!='gm'").fetchone()
+        live_row=conn.execute("SELECT id,updated_at FROM campaign_sessions WHERE campaign_id=? AND status='live' ORDER BY updated_at DESC,id DESC LIMIT 1",(cid,)).fetchone()
+        handout_row=conn.execute("SELECT MAX(updated_at) AS value FROM handouts WHERE campaign_id=? AND visibility!='gm'",(cid,)).fetchone()
         if admin:
-            update_row=conn.execute("SELECT MAX(created_at) AS value FROM session_updates WHERE visibility!='gm'").fetchone()
-            reveal_row=conn.execute("SELECT MAX(updated_at) AS value FROM lore_reveals").fetchone()
+            update_row=conn.execute("SELECT MAX(created_at) AS value FROM session_updates WHERE campaign_id=? AND visibility!='gm'",(cid,)).fetchone()
+            reveal_row=conn.execute("SELECT MAX(updated_at) AS value FROM lore_reveals WHERE campaign_id=?",(cid,)).fetchone()
         elif iid is None:
-            update_row=conn.execute("SELECT MAX(created_at) AS value FROM session_updates WHERE visibility!='gm' AND COALESCE(audience_json,'[]')='[]'").fetchone()
-            reveal_row=conn.execute("SELECT MAX(updated_at) AS value FROM lore_reveals WHERE COALESCE(audience_json,'[]')='[]'").fetchone()
+            update_row=conn.execute("SELECT MAX(created_at) AS value FROM session_updates WHERE campaign_id=? AND visibility!='gm' AND COALESCE(audience_json,'[]')='[]'",(cid,)).fetchone()
+            reveal_row=conn.execute("SELECT MAX(updated_at) AS value FROM lore_reveals WHERE campaign_id=? AND COALESCE(audience_json,'[]')='[]'",(cid,)).fetchone()
         else:
             try:
                 # JSON1 lets SQLite calculate the newest event visible to this
                 # invitation instead of shipping whole reveal/update tables to
                 # Python every five seconds for every player at the table.
                 audience_clause="(COALESCE(audience_json,'[]')='[]' OR EXISTS (SELECT 1 FROM json_each(audience_json) WHERE CAST(json_each.value AS INTEGER)=?))"
-                update_row=conn.execute(f"SELECT MAX(created_at) AS value FROM session_updates WHERE visibility!='gm' AND {audience_clause}",(int(iid),)).fetchone()
-                reveal_row=conn.execute(f"SELECT MAX(updated_at) AS value FROM lore_reveals WHERE {audience_clause}",(int(iid),)).fetchone()
+                update_row=conn.execute(f"SELECT MAX(created_at) AS value FROM session_updates WHERE campaign_id=? AND visibility!='gm' AND {audience_clause}",(cid,int(iid))).fetchone()
+                reveal_row=conn.execute(f"SELECT MAX(updated_at) AS value FROM lore_reveals WHERE campaign_id=? AND {audience_clause}",(cid,int(iid))).fetchone()
             except Exception:
                 # Conservative compatibility fallback for SQLite builds without
                 # JSON1. It is bounded so a malformed/ancient database cannot
                 # turn the heartbeat into an unbounded allocation.
-                update_rows=[dict(r) for r in conn.execute("SELECT created_at,audience_json FROM session_updates WHERE visibility!='gm' ORDER BY created_at DESC LIMIT 250").fetchall()]
-                reveal_rows=[dict(r) for r in conn.execute("SELECT updated_at,audience_json FROM lore_reveals ORDER BY updated_at DESC LIMIT 250").fetchall()]
+                update_rows=[dict(r) for r in conn.execute("SELECT created_at,audience_json FROM session_updates WHERE campaign_id=? AND visibility!='gm' ORDER BY created_at DESC LIMIT 250",(cid,)).fetchall()]
+                reveal_rows=[dict(r) for r in conn.execute("SELECT updated_at,audience_json FROM lore_reveals WHERE campaign_id=? ORDER BY updated_at DESC LIMIT 250",(cid,)).fetchall()]
                 def audience_ok(row):
                     try: audience=json.loads(row.get("audience_json") or "[]")
                     except Exception: audience=[]
@@ -1125,10 +1210,10 @@ def share_qr(request: Request, path: str = "/"):
 @app.get("/gm/session", response_class=HTMLResponse)
 def gm_session_screen(request: Request):
     require_gm(request)
-    wiki=_visible_wiki(request); maps=list_maps(settings,public=False); live=get_live_session(settings,admin=True)
-    chars=list_player_characters(settings,admin=True)
+    wiki=_visible_wiki(request); maps=list_maps(settings,public=False); cid=_active_campaign_id(request); live=get_live_session(settings,admin=True,campaign_id=cid)
+    chars=list_player_characters(settings,admin=True,campaign_id=cid)
     for c in chars:c["arcs"]=character_arcs(settings,int(c["id"]),owner=True)
-    return templates.TemplateResponse("gm_session.html", {"request":request,"wiki":wiki,"maps":maps,"session":live,"sessions":list_sessions(settings),"reveals":list_reveal_blocks_from_wiki(ensure_built()),"mysteries":list_mysteries(settings,admin=True),"handouts":list_handouts(settings,admin=True),"updates":recent_updates(settings,None,20,admin=True),"fronts":list_fronts(settings,admin=True),"characters":chars,"rumors":list_rumors(settings,admin=True)})
+    return templates.TemplateResponse("gm_session.html", {"request":request,"wiki":wiki,"maps":maps,"session":live,"sessions":list_sessions(settings,campaign_id=cid),"reveals":list_reveal_blocks_from_wiki(ensure_built()),"mysteries":list_mysteries(settings,admin=True,campaign_id=cid),"handouts":list_handouts(settings,admin=True,campaign_id=cid),"updates":recent_updates(settings,None,20,admin=True,campaign_id=cid),"fronts":list_fronts(settings,admin=True,campaign_id=cid),"characters":chars,"rumors":list_rumors(settings,admin=True,campaign_id=cid)})
 
 
 @app.get("/admin/campaign", response_class=HTMLResponse)
@@ -1153,14 +1238,14 @@ def project_asset(request: Request, asset_path: str):
 def characters_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
     wiki=_visible_wiki(request); maps=list_maps(settings,public=True); iid=_invite_id(request); admin_view=is_gm(request)
-    chars=list_player_characters(settings,invite_id=iid,admin=admin_view)
+    cid=_active_campaign_id(request); chars=list_player_characters(settings,invite_id=iid,admin=admin_view,campaign_id=cid)
     return templates.TemplateResponse("characters.html",{"request":request,"wiki":wiki,"maps":maps,"characters":chars,"player":current_player_invite(request),"admin_view":admin_view})
 
 @app.get("/characters/{character_id}", response_class=HTMLResponse)
 def character_page(request: Request, character_id:int):
     if not player_allowed(request): return player_gate_redirect(request)
     wiki=_visible_wiki(request); maps=list_maps(settings,public=True); iid=_invite_id(request); admin_view=is_gm(request)
-    char=get_player_character(settings,character_id,invite_id=iid,admin=admin_view)
+    cid=_active_campaign_id(request); char=get_player_character(settings,character_id,invite_id=iid,admin=admin_view,campaign_id=cid)
     if not char: raise HTTPException(404,"Character not found")
     owner=admin_view or (iid is not None and int(char.get("invite_id") or 0)==int(iid))
     char["arcs"]=character_arcs(settings,character_id,owner=owner)
@@ -1171,7 +1256,7 @@ def character_page(request: Request, character_id:int):
 @app.get("/api/player/characters")
 def player_characters_api(request:Request):
     if not player_allowed(request): raise HTTPException(401)
-    return list_player_characters(settings,invite_id=_invite_id(request),admin=is_gm(request))
+    return list_player_characters(settings,invite_id=_invite_id(request),admin=is_gm(request),campaign_id=_active_campaign_id(request))
 
 @app.post("/api/player/characters")
 def player_character_create(request:Request,payload:dict=Body(...)):
@@ -1179,7 +1264,7 @@ def player_character_create(request:Request,payload:dict=Body(...)):
     require_player_author(request)
     iid=_invite_id(request)
     if not is_gm(request) and iid is None: raise HTTPException(403,"An invitation is required to create a character.")
-    try: return save_player_character(settings,payload,invite_id=iid,admin=is_gm(request))
+    try: return save_player_character(settings,_campaign_payload(request,payload),invite_id=iid,admin=is_gm(request))
     except PermissionError as exc: raise HTTPException(403,str(exc))
     except ValueError as exc: raise HTTPException(400,str(exc))
 
@@ -1187,7 +1272,7 @@ def player_character_create(request:Request,payload:dict=Body(...)):
 def player_character_update(request:Request,character_id:int,payload:dict=Body(...)):
     if not player_allowed(request): raise HTTPException(401)
     require_player_author(request)
-    payload=dict(payload); payload["id"]=character_id
+    payload=_campaign_payload(request,payload); payload["id"]=character_id
     try: return save_player_character(settings,payload,invite_id=_invite_id(request),admin=is_gm(request))
     except PermissionError as exc: raise HTTPException(403,str(exc))
     except ValueError as exc: raise HTTPException(400,str(exc))
@@ -1196,6 +1281,7 @@ def player_character_update(request:Request,character_id:int,payload:dict=Body(.
 def player_character_delete(request:Request,character_id:int):
     if not player_allowed(request): raise HTTPException(401)
     require_player_author(request)
+    _character_owned(request,character_id)
     try: paths=delete_player_character(settings,character_id,invite_id=_invite_id(request),admin=is_gm(request))
     except PermissionError as exc: raise HTTPException(403,str(exc))
     for rel in paths:
@@ -1210,7 +1296,7 @@ async def player_character_image_upload(request:Request,character_id:int,image:U
     if not player_allowed(request): raise HTTPException(401)
     require_player_author(request)
     iid=_invite_id(request); admin_view=is_gm(request)
-    char=get_player_character(settings,character_id,invite_id=iid,admin=admin_view)
+    cid=_active_campaign_id(request); char=get_player_character(settings,character_id,invite_id=iid,admin=admin_view,campaign_id=cid)
     if not char: raise HTTPException(404,"Character not found")
     if not admin_view and int(char.get("invite_id") or 0)!=int(iid or -1): raise HTTPException(403,"You can only upload art for your own characters.")
     ext=Path(image.filename or "image.jpg").suffix.lower()
@@ -1260,7 +1346,7 @@ def uploaded_asset(request: Request, asset_path: str):
     if len(parts)>=4 and parts[0]=="characters":
         try: character_id=int(parts[2])
         except (TypeError,ValueError): raise HTTPException(404)
-        char=get_player_character(settings,character_id,invite_id=_invite_id(request),admin=is_gm(request))
+        char=get_player_character(settings,character_id,invite_id=_invite_id(request),admin=is_gm(request),campaign_id=_active_campaign_id(request))
         if not char: raise HTTPException(404)
         try:
             if int(char.get("invite_id") or 0)!=int(parts[1]): raise HTTPException(404)
@@ -1789,23 +1875,23 @@ def admin_delete_marker(request: Request,marker_id:int): require_admin(request);
 @app.get("/api/admin/campaign/overview")
 def admin_campaign_overview(request: Request):
     require_gm(request)
-    wiki=ensure_built(); maps=list_maps(settings,public=False)
+    wiki=ensure_built(); maps=list_maps(settings,public=False); cid=_active_campaign_id(request)
     for m in maps:
         m["layers"] = map_layers(settings, int(m["id"]), public=False)
         m["fog_regions"] = fog_regions(settings, int(m["id"]), public=False)
     return {
         "maps":maps,
-        "sessions":list_sessions(settings),"timeline":list_timeline(settings,admin=True),"timeline_eras":list_timeline_eras(settings,admin=True),
+        "sessions":list_sessions(settings,campaign_id=cid),"timeline":list_timeline(settings,admin=True),"timeline_eras":list_timeline_eras(settings,admin=True),
         "relationships":list_relationships(settings,admin=True),"reveals":list_reveal_blocks_from_wiki(wiki),
-        "mysteries":list_mysteries(settings,admin=True),"handouts":list_handouts(settings,admin=True),
+        "mysteries":list_mysteries(settings,admin=True,campaign_id=cid),"handouts":list_handouts(settings,admin=True,campaign_id=cid),
         "snapshots":list_snapshots(settings),"health":campaign_health(settings,wiki,maps),
-        "reveal_states":list_reveal_states(settings),"recent_updates":recent_updates(settings,None,12,admin=True),
+        "reveal_states":list_reveal_states(settings,campaign_id=cid),"recent_updates":recent_updates(settings,None,12,admin=True,campaign_id=cid),
         "calendar":_calendar_config(),
-        "aliases":aliases(settings),"invitations":list_player_invites(settings),
+        "aliases":aliases(settings),"invitations":list_player_invites(settings),"campaigns":[{**c,"member_ids":[int(m["id"]) for m in campaign_members(settings,int(c["id"])) if m.get("campaign_member")]} for c in list_campaigns(settings,admin=True,include_archived=True)],"active_campaign":get_campaign(settings,cid),
         "variants":[v for p in wiki.get("pages",[]) for v in list_variants(settings,p.get("slug",""),admin=True)],
         "entity_styles":{p.get("slug",""):entity_style(settings,p.get("slug","")) for p in wiki.get("pages",[])},
         "assets":_asset_rows(),"media_assets":_media_asset_rows(),
-        "player_characters":list_player_characters(settings,admin=True),
+        "player_characters":list_player_characters(settings,admin=True,campaign_id=cid),
     }
 
 
@@ -1814,8 +1900,8 @@ def admin_save_session(request: Request,payload:dict=Body(...)):
     require_gm(request)
     before=None
     if payload.get("id"):
-        before=next((x for x in list_sessions(settings) if int(x.get("id"))==int(payload["id"])),None)
-    row=save_session(settings,payload)
+        before=next((x for x in list_sessions(settings,campaign_id=_active_campaign_id(request)) if int(x.get("id"))==int(payload["id"])),None)
+    row=save_session(settings,_campaign_payload(request,payload))
     # Lightweight knowledge/state checkpoints answer “what did the party know before/after this session?”
     # without duplicating the multi-hundred-megabyte campaign archive.
     if row.get("status")=="live" and (not before or before.get("status")!="live"):
@@ -1837,7 +1923,7 @@ def admin_session_lore(request:Request,session_id:int,payload:dict=Body(...)):
 
 @app.post("/api/admin/session-updates")
 def admin_session_update(request:Request,payload:dict=Body(...)):
-    require_gm(request);return add_session_update(settings,payload)
+    require_gm(request);return add_session_update(settings,_campaign_payload(request,payload))
 
 
 @app.post("/api/admin/timeline")
@@ -1877,10 +1963,10 @@ def admin_relationship_delete(request:Request,relationship_id:int):
 
 @app.post("/api/admin/reveals")
 def admin_reveal_save(request:Request,payload:dict=Body(...)):
-    require_gm(request);row=set_reveal(settings,payload)
+    require_gm(request);payload=_campaign_payload(request,payload);row=set_reveal(settings,payload)
     if row.get("state") in {"rumor","discovered","public"}:
         title=str(payload.get("title") or payload.get("target_key") or "Lore discovered")
-        add_session_update(settings,{"session_id":payload.get("session_id"),"title":title,"body":str(payload.get("update_body") or "New lore has been revealed."),"target_type":payload.get("target_type") or "lore","target_key":payload.get("target_key") or "","visibility":"players","audience":payload.get("audience") or []})
+        add_session_update(settings,{"campaign_id":_active_campaign_id(request),"session_id":payload.get("session_id"),"title":title,"body":str(payload.get("update_body") or "New lore has been revealed."),"target_type":payload.get("target_type") or "lore","target_key":payload.get("target_key") or "","visibility":"players","audience":payload.get("audience") or []})
     return row
 
 
@@ -1906,7 +1992,7 @@ def admin_entity_style_save(request:Request,slug:str,payload:dict=Body(...)):
 
 @app.post("/api/admin/mysteries")
 def admin_mystery_save(request:Request,payload:dict=Body(...)):
-    require_gm(request);return save_mystery(settings,payload)
+    require_gm(request);return save_mystery(settings,_campaign_payload(request,payload))
 
 
 @app.post("/api/admin/mysteries/{mystery_id}/pins")
@@ -1941,7 +2027,7 @@ def admin_mystery_delete(request:Request,mystery_id:int):
 
 @app.post("/api/admin/handouts")
 def admin_handout_save(request:Request,payload:dict=Body(...)):
-    require_gm(request);return save_handout(settings,payload)
+    require_gm(request);return save_handout(settings,_campaign_payload(request,payload))
 
 
 @app.delete("/api/admin/handouts/{handout_id}")
@@ -2105,7 +2191,7 @@ def _player_label(request: Request) -> str:
 
 
 def _character_owned(request: Request, character_id: int) -> dict:
-    iid=_invite_id(request); char=get_player_character(settings,character_id,invite_id=iid,admin=is_gm(request))
+    iid=_invite_id(request); char=get_player_character(settings,character_id,invite_id=iid,admin=is_gm(request),campaign_id=_active_campaign_id(request))
     if not char: raise HTTPException(404,"Character not found")
     if not is_gm(request) and int(char.get("invite_id") or -1)!=int(iid or -2): raise HTTPException(403,"You can only edit your own character.")
     return char
@@ -2114,7 +2200,7 @@ def _character_owned(request: Request, character_id: int) -> dict:
 def _own_player_characters(request: Request) -> list[dict]:
     iid=_invite_id(request)
     if iid is None or is_gm(request): return []
-    rows=list_player_characters(settings,invite_id=iid,admin=False)
+    rows=list_player_characters(settings,invite_id=iid,admin=False,campaign_id=_active_campaign_id(request))
     own=[c for c in rows if int(c.get("invite_id") or -1)==int(iid)]
     return sorted(own,key=lambda c:(str(c.get("status") or "active")!="active",str(c.get("name") or "").lower()))
 
@@ -2143,8 +2229,8 @@ def _session_character_context(request: Request, live: dict|None) -> tuple[list[
 @app.get("/campaign", response_class=HTMLResponse)
 def living_campaign_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
-    iid=_invite_id(request); gm=is_gm(request); wiki=_visible_wiki(request); maps=list_maps(settings,public=not gm)
-    chars=list_player_characters(settings,invite_id=iid,admin=gm)
+    iid=_invite_id(request); gm=is_gm(request); cid=_active_campaign_id(request); wiki=_visible_wiki(request); maps=list_maps(settings,public=not gm)
+    chars=list_player_characters(settings,invite_id=iid,admin=gm,campaign_id=cid)
     for c in chars:
         owner=gm or int(c.get("invite_id") or -1)==int(iid or -2)
         c["arcs"]=character_arcs(settings,int(c["id"]),owner=owner)
@@ -2152,12 +2238,12 @@ def living_campaign_page(request: Request):
     can_author = gm or (not archive_mode() and bool(current_player_invite(request)) and player_role(request) == "player")
     return templates.TemplateResponse("living.html",{
         "request":request,"wiki":wiki,"maps":maps,"gm_view":gm,"player":current_player_invite(request),
-        "threads":list_threads(settings,admin=gm,invite_id=iid),"fronts":list_fronts(settings,admin=gm,invite_id=iid),
-        "rumors":list_rumors(settings,admin=gm),"journals":([] if iid is None else list_journals(settings,iid,admin=gm)),
-        "characters":chars,"notifications":list_notifications(settings,iid,admin=gm),"runtime_states":runtime_states(settings,admin=gm),
-        "submissions":list_submissions(settings,invite_id=iid,admin=gm),"calendar":_calendar_config(),"can_author":can_author,"archive_mode":archive_mode(),
+        "threads":list_threads(settings,admin=gm,invite_id=iid,campaign_id=cid),"fronts":list_fronts(settings,admin=gm,invite_id=iid,campaign_id=cid),
+        "rumors":list_rumors(settings,admin=gm,campaign_id=cid),"journals":([] if iid is None else list_journals(settings,iid,admin=gm,campaign_id=cid)),
+        "characters":chars,"notifications":list_notifications(settings,iid,admin=gm,campaign_id=cid),"runtime_states":runtime_states(settings,admin=gm),
+        "submissions":list_submissions(settings,invite_id=iid,admin=gm,campaign_id=cid),"calendar":_calendar_config(),"can_author":can_author,"archive_mode":archive_mode(),
         "journal_characters":[c for c in chars if iid is not None and int(c.get("invite_id") or -1)==int(iid)],
-        "journal_sessions":list_sessions(settings,public=not gm,invite_id=iid),
+        "journal_sessions":list_sessions(settings,public=not gm,invite_id=iid,campaign_id=cid),
     })
 
 
@@ -2177,37 +2263,37 @@ def living_admin_page(request: Request):
 @app.get("/api/living/overview")
 def living_overview(request: Request):
     if not player_allowed(request): raise HTTPException(401)
-    iid=_invite_id(request);gm=is_gm(request)
-    chars=list_player_characters(settings,invite_id=iid,admin=gm)
+    iid=_invite_id(request);gm=is_gm(request);cid=_active_campaign_id(request)
+    chars=list_player_characters(settings,invite_id=iid,admin=gm,campaign_id=cid)
     for c in chars:
         owner=gm or int(c.get("invite_id") or -1)==int(iid or -2);c["arcs"]=character_arcs(settings,int(c["id"]),owner=owner);c["relationships"]=character_relationships(settings,int(c["id"]),owner=owner)
-    return {"threads":list_threads(settings,admin=gm,invite_id=iid),"fronts":list_fronts(settings,admin=gm,invite_id=iid),"rumors":list_rumors(settings,admin=gm),"journals":([] if iid is None else list_journals(settings,iid,admin=gm)),"characters":chars,"notifications":list_notifications(settings,iid,admin=gm),"runtime_states":runtime_states(settings,admin=gm),"submissions":list_submissions(settings,invite_id=iid,admin=gm)}
+    return {"threads":list_threads(settings,admin=gm,invite_id=iid,campaign_id=cid),"fronts":list_fronts(settings,admin=gm,invite_id=iid,campaign_id=cid),"rumors":list_rumors(settings,admin=gm,campaign_id=cid),"journals":([] if iid is None else list_journals(settings,iid,admin=gm,campaign_id=cid)),"characters":chars,"notifications":list_notifications(settings,iid,admin=gm,campaign_id=cid),"runtime_states":runtime_states(settings,admin=gm),"submissions":list_submissions(settings,invite_id=iid,admin=gm,campaign_id=cid),"active_campaign":get_campaign(settings,cid)}
 
 
 @app.get("/api/admin/living/overview")
 def living_admin_overview(request: Request):
-    require_gm(request);wiki=ensure_built();maps=list_maps(settings,public=False)
+    require_gm(request);wiki=ensure_built();maps=list_maps(settings,public=False);cid=_active_campaign_id(request)
     region_rows=[]
     for m in maps: region_rows.extend([{**r,"map_name":m.get("name"),"map_slug":m.get("slug")} for r in map_regions(settings,int(m["id"]),admin=True)])
     return {
         "pages":[{"slug":p.get("slug"),"title":p.get("title"),"chapter":p.get("chapter")} for p in wiki.get("pages",[])],"maps":maps,
-        "invitations":list_player_invites(settings),"knowledge":list_knowledge(settings),"fronts":list_fronts(settings,admin=True),"runtime_states":runtime_states(settings,admin=True),
-        "relationship_history":relationship_history(settings,admin=True),"hierarchies":hierarchies(settings,admin=True),"regions":region_rows,"rumors":list_rumors(settings,admin=True),
-        "threads":list_threads(settings,admin=True),"inbox":inbox_items(settings),"submissions":list_submissions(settings,admin=True),"publishing":publishing_states(settings),
+        "invitations":list_player_invites(settings),"knowledge":list_knowledge(settings,campaign_id=cid),"fronts":list_fronts(settings,admin=True,campaign_id=cid),"runtime_states":runtime_states(settings,admin=True),
+        "relationship_history":relationship_history(settings,admin=True),"hierarchies":hierarchies(settings,admin=True),"regions":region_rows,"rumors":list_rumors(settings,admin=True,campaign_id=cid),
+        "threads":list_threads(settings,admin=True,campaign_id=cid),"inbox":inbox_items(settings),"submissions":list_submissions(settings,admin=True,campaign_id=cid),"publishing":publishing_states(settings),
         "session_snapshots":session_state_snapshots(settings),"suggestions":scan_suggestions(settings,wiki),"media_meta":list_media_catalog(settings),"assets":_asset_rows(),"media_assets":_media_asset_rows(),
-        "notifications":list_notifications(settings,None,admin=True),"characters":list_player_characters(settings,admin=True),"continuity":continuity_report(settings,wiki),
+        "notifications":list_notifications(settings,None,admin=True,campaign_id=cid),"characters":list_player_characters(settings,admin=True,campaign_id=cid),"continuity":continuity_report(settings,wiki),
         "ai_configured":bool((os.getenv("SEEKER_AI_API_KEY") or os.getenv("LOREFORGE_AI_API_KEY")) and (os.getenv("SEEKER_AI_MODEL") or os.getenv("LOREFORGE_AI_MODEL"))),"archive_mode":get_setting(settings,"campaign_archive_mode","0") in {"1","true","yes"},
     }
 
 
 @app.post("/api/admin/knowledge")
 def admin_set_knowledge(request:Request,payload:dict=Body(...)):
-    require_gm(request);return set_knowledge(settings,int(payload.get("invite_id")),str(payload.get("target_type") or "page"),str(payload.get("target_key") or ""),str(payload.get("state") or "known"),str(payload.get("note") or ""),"gm")
+    require_gm(request);return set_knowledge(settings,int(payload.get("invite_id")),str(payload.get("target_type") or "page"),str(payload.get("target_key") or ""),str(payload.get("state") or "known"),str(payload.get("note") or ""),"gm",campaign_id=_active_campaign_id(request))
 
 
 @app.post("/api/admin/fronts")
 def admin_save_front(request:Request,payload:dict=Body(...)):
-    require_gm(request);return save_front(settings,payload)
+    require_gm(request);return save_front(settings,_campaign_payload(request,payload))
 @app.post("/api/admin/fronts/{front_id}/advance")
 def admin_advance_front(request:Request,front_id:int,payload:dict=Body(...)):
     require_gm(request);return advance_front(settings,front_id,int(payload.get("delta") or 1),str(payload.get("label") or "Front advanced"),str(payload.get("body") or ""),payload.get("session_id"),bool(payload.get("visible_to_players",False)))
@@ -2271,7 +2357,7 @@ def public_map_regions(request:Request,slug:str,at:float|None=None):
 
 @app.post("/api/admin/rumors")
 def admin_rumor_save(request:Request,payload:dict=Body(...)):
-    require_gm(request);return save_rumor(settings,payload)
+    require_gm(request);return save_rumor(settings,_campaign_payload(request,payload))
 @app.delete("/api/admin/rumors/{rid}")
 def admin_rumor_delete(request:Request,rid:int):
     require_gm(request)
@@ -2279,27 +2365,27 @@ def admin_rumor_delete(request:Request,rid:int):
     return {"ok":True}
 @app.get("/api/admin/rumors/random")
 def admin_random_rumor(request:Request,location_slug:str="",faction_slug:str=""):
-    require_gm(request);row=random_rumor(settings,location_slug=location_slug,faction_slug=faction_slug)
+    require_gm(request);row=random_rumor(settings,location_slug=location_slug,faction_slug=faction_slug,campaign_id=_active_campaign_id(request))
     return row or {}
 
 @app.post("/api/admin/rumors/{rid}/share")
 def admin_rumor_share(request:Request,rid:int,payload:dict=Body(...)):
-    require_gm(request);r=next((x for x in list_rumors(settings,admin=True) if int(x['id'])==rid),None)
+    require_gm(request);r=next((x for x in list_rumors(settings,admin=True,campaign_id=_active_campaign_id(request)) if int(x['id'])==rid),None)
     if not r:raise HTTPException(404)
-    r=save_rumor(settings,{**r,"status":"heard"});create_notification(settings,{"title":"A new rumor is circulating","body":r['body'],"target_type":"rumor","target_key":str(rid),"kind":"rumor","audience":payload.get('audience') or []});return r
+    r=save_rumor(settings,{**r,"status":"heard","campaign_id":_active_campaign_id(request)});create_notification(settings,{"campaign_id":_active_campaign_id(request),"title":"A new rumor is circulating","body":r['body'],"target_type":"rumor","target_key":str(rid),"kind":"rumor","audience":payload.get('audience') or []});return r
 
 
 @app.post("/api/threads")
 def thread_save_api(request:Request,payload:dict=Body(...)):
     if not player_allowed(request):raise HTTPException(401)
     require_player_author(request)
-    try:return save_thread(settings,payload,invite_id=_invite_id(request),admin=is_gm(request))
+    try:return save_thread(settings,_campaign_payload(request,payload),invite_id=_invite_id(request),admin=is_gm(request))
     except PermissionError as e:raise HTTPException(403,str(e))
 @app.delete("/api/threads/{tid}")
 def thread_delete_api(request:Request,tid:int):
     if not player_allowed(request):raise HTTPException(401)
     require_player_author(request)
-    rows=list_threads(settings,admin=is_gm(request),invite_id=_invite_id(request));t=next((x for x in rows if int(x['id'])==tid),None)
+    rows=list_threads(settings,admin=is_gm(request),invite_id=_invite_id(request),campaign_id=_active_campaign_id(request));t=next((x for x in rows if int(x['id'])==tid),None)
     if not t:raise HTTPException(404)
     from .living import can_edit_thread
     if not can_edit_thread(t,_invite_id(request),is_gm(request)):raise HTTPException(403)
@@ -2349,11 +2435,11 @@ def player_journal_save(request:Request,payload:dict=Body(...)):
     require_player_author(request)
     iid=_invite_id(request)
     if iid is None:raise HTTPException(403,"A personal invitation is required for journals.")
-    payload=dict(payload)
+    payload=_campaign_payload(request,payload)
     # Session note forms inherit the character identity chosen for the current
     # live session unless the client explicitly chose a different/general scope.
     if "character_id" not in payload:
-        live=get_live_session(settings,invite_id=iid,admin=False);session_key=int((live or {}).get("id") or 0)
+        cid_active=_active_campaign_id(request);live=get_live_session(settings,invite_id=iid,admin=False,campaign_id=cid_active);session_key=int((live or {}).get("id") or 0)
         if int(request.session.get("session_character_session_id") or -1)==session_key:
             payload["character_id"]=int(request.session.get("session_character_id") or 0) or None
     try:return save_journal(settings,payload,iid)
@@ -2377,7 +2463,7 @@ def player_submission_save(request:Request,payload:dict=Body(...)):
     require_player_author(request)
     iid=_invite_id(request)
     if iid is None:raise HTTPException(403,"A personal invitation is required.")
-    return save_submission(settings,payload,iid)
+    return save_submission(settings,_campaign_payload(request,payload),iid)
 @app.post("/api/player/submissions/upload")
 async def player_submission_upload(request:Request,file:UploadFile=File(...)):
     if not player_allowed(request):raise HTTPException(401)
@@ -2417,7 +2503,7 @@ def admin_publish_batch(request:Request,payload:dict=Body(...)):
     require_gm(request);group=str(payload.get('publish_group') or '');state=str(payload.get('state') or 'published');rows=[]
     with connect(settings) as conn:slugs=[r[0] for r in conn.execute('SELECT page_slug FROM publishing_states WHERE publish_group=?',(group,)).fetchall()]
     for slug in slugs:rows.append(set_publishing_state(settings,slug,state,group))
-    if state=='published':create_notification(settings,{"title":"New lore published","body":f"A group of {len(rows)} lore entries was published.","kind":"publish"})
+    if state=='published':create_notification(settings,{"campaign_id":_active_campaign_id(request),"title":"New lore published","body":f"A group of {len(rows)} lore entries was published.","kind":"publish"})
     return rows
 
 
@@ -2476,11 +2562,11 @@ def admin_media_thumb(request:Request,ref:str):
 
 @app.post("/api/admin/notifications")
 def admin_notification_create(request:Request,payload:dict=Body(...)):
-    require_gm(request);return create_notification(settings,payload)
+    require_gm(request);return create_notification(settings,_campaign_payload(request,payload))
 @app.get("/api/public/notifications")
 def public_notifications(request:Request,since:float=0):
     if not player_allowed(request):raise HTTPException(401)
-    return list_notifications(settings,_invite_id(request),admin=is_gm(request),since=since)
+    return list_notifications(settings,_invite_id(request),admin=is_gm(request),since=since,campaign_id=_active_campaign_id(request))
 @app.post("/api/public/notifications/{nid}/read")
 def public_notification_read(request:Request,nid:int):
     if not player_allowed(request):raise HTTPException(401)
@@ -2512,7 +2598,7 @@ def page_provenance_api(request:Request,slug:str):
     if not player_allowed(request):raise HTTPException(401)
     allowed={p.get('slug') for p in _visible_wiki(request).get('pages',[])}
     if slug not in allowed and not is_gm(request):raise HTTPException(404)
-    return entity_provenance(settings,slug)
+    return entity_provenance(settings,slug,campaign_id=_active_campaign_id(request))
 
 
 @app.get("/api/export/foundry/page/{slug}")
@@ -2523,7 +2609,7 @@ def foundry_page_export(request:Request,slug:str):
     return JSONResponse(export_foundry_journal(p['title'],p.get('html',''),p.get('presentation',{}).get('hero_image_url') or ''))
 @app.get("/api/export/foundry/character/{character_id}")
 def foundry_character_export(request:Request,character_id:int):
-    char=get_player_character(settings,character_id,invite_id=_invite_id(request),admin=is_gm(request))
+    char=get_player_character(settings,character_id,invite_id=_invite_id(request),admin=is_gm(request),campaign_id=_active_campaign_id(request))
     if not char:raise HTTPException(404)
     body=f"<h2>{char.get('name','')}</h2><p>{char.get('summary','')}</p><h3>Biography</h3><p>{char.get('biography','')}</p><h3>Goals</h3><p>{char.get('goals','')}</p>"
     img='/uploads/'+char.get('portrait_path','') if char.get('portrait_path') else ''
@@ -2559,13 +2645,13 @@ def archive_mode_set(request:Request,payload:dict=Body(...)):
     require_admin(request);enabled=bool(payload.get('enabled'));set_setting(settings,'campaign_archive_mode','1' if enabled else '0')
     if enabled:
         capture_session_state(settings,None,'archive-freeze')
-        create_notification(settings,{'title':'Campaign archive published','body':'The campaign has been frozen into read-only archive mode.','kind':'archive'})
+        create_notification(settings,{'campaign_id':_active_campaign_id(request),'title':'Campaign archive published','body':'The campaign has been frozen into read-only archive mode.','kind':'archive'})
     return {'enabled':enabled}
 @app.get("/archive", response_class=HTMLResponse)
 def campaign_archive_page(request:Request):
     if not player_allowed(request):return player_gate_redirect(request)
     wiki=_visible_wiki(request);maps=list_maps(settings,public=True)
-    return templates.TemplateResponse('archive.html',{'request':request,'wiki':wiki,'maps':maps,'sessions':list_sessions(settings,public=True,invite_id=_invite_id(request)),'timeline':list_timeline(settings,admin=is_gm(request),historical_only=True),'characters':list_player_characters(settings,invite_id=_invite_id(request),admin=is_gm(request))})
+    return templates.TemplateResponse('archive.html',{'request':request,'wiki':wiki,'maps':maps,'sessions':list_sessions(settings,public=True,invite_id=_invite_id(request),campaign_id=_active_campaign_id(request)),'timeline':list_timeline(settings,admin=is_gm(request),historical_only=True),'characters':list_player_characters(settings,invite_id=_invite_id(request),admin=is_gm(request),campaign_id=_active_campaign_id(request))})
 
 
 @app.post("/api/assistant/query")

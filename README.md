@@ -33,6 +33,12 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Personal player invitations.** Player access is invitation-only by default. **Admin → Access** creates one signed link per player; each link can be copied, expired, revoked, restored, rotated, device-limited, or have its remembered devices reset independently. Legacy shared-password and public modes remain available, while the editor continues to use `ADMIN_PASSWORD`.
 - **Read → edit source bridge.** When you browse the player Codex while logged in as GM, a persistent **Edit source** control opens the exact LaTeX file/line in Campaign Studio. On long Person-of-Note pages it follows the section currently being read, and the editor offers **Back to entry** after the correction.
 
+## Seeker 4.2: one setting, multiple campaigns
+
+Seeker can now host several active campaigns inside the same world. The **Codex, Atlas and setting history remain shared**, while table-specific state stays isolated. A player who plays Aster in one campaign and Bram in another sees the correct character shelf, session history, journals, mysteries, handouts, threads and spoiler knowledge after switching tables.
+
+The owner manages campaigns in **Worldcraft → Campaigns**, where each campaign can be named, archived, made the default, and assigned its own set of player invitations. Existing installs are migrated safely into a **Main Campaign**, so upgrading does not require reconstructing the party by hand.
+
 ## Seeker 4: player-first sessions + table QoL
 
 Seeker 4 focuses on reducing the little bits of friction that interrupt actual play. The main player destinations stay obvious, session bookkeeping understands which PC somebody is playing, and first-time users no longer have to discover the interface by trial and error.

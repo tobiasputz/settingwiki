@@ -314,6 +314,11 @@ def init_feature_db(settings: Settings) -> None:
     # called init_feature_db() automatically receive the new schema too.
     from .living import init_living_db
     init_living_db(settings)
+    # v4.2 introduces multiple table campaigns inside one shared setting.
+    # Run this after both feature schemas exist so the migration can attach
+    # campaign_id to all party/session-owned state in one transaction.
+    from .campaigns import init_campaign_db
+    init_campaign_db(settings)
 
 
 
@@ -352,14 +357,16 @@ def _audience_allows(row: dict, invite_id: int | None) -> bool:
     return invite_id is not None and int(invite_id) in allowed
 
 
-def list_sessions(settings: Settings, *, public: bool = False, invite_id: int | None = None) -> list[dict]:
+def list_sessions(settings: Settings, *, public: bool = False, invite_id: int | None = None, campaign_id: int | None = None) -> list[dict]:
     """Load session history in three bulk queries rather than 2N+1 queries."""
     with connect(settings) as conn:
-        session_rows = [dict(r) for r in conn.execute(
-            "SELECT * FROM campaign_sessions ORDER BY COALESCE(session_number,999999), session_date, id"
-        ).fetchall()]
+        where=[]; params=[]
+        if campaign_id is not None:
+            where.append("campaign_id=?"); params.append(int(campaign_id))
         if public:
-            session_rows = [r for r in session_rows if r["status"] in {"live", "ended"}]
+            where.append("status IN ('live','ended')")
+        sql="SELECT * FROM campaign_sessions"+(" WHERE "+" AND ".join(where) if where else "")+" ORDER BY COALESCE(session_number,999999), session_date, id"
+        session_rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         if not session_rows:
             return []
         ids = [int(r["id"]) for r in session_rows]
@@ -381,15 +388,8 @@ def list_sessions(settings: Settings, *, public: bool = False, invite_id: int | 
         sid = int(row["id"]); row["lore"] = lore_by.get(sid, []); row["updates"] = updates_by.get(sid, [])
     return session_rows
 
-
-
-def session_appearances_for_page(settings: Settings, page_slug: str, *, public: bool = False) -> list[dict]:
-    """Return only sessions that reference one Codex page.
-
-    Article rendering used to load the complete session history, every linked lore
-    row and every player update just to answer this tiny question. This indexed
-    join keeps Codex navigation essentially constant as the campaign grows.
-    """
+def session_appearances_for_page(settings: Settings, page_slug: str, *, public: bool = False, campaign_id: int | None = None) -> list[dict]:
+    """Return sessions from the active table campaign that reference a Codex page."""
     sql = """
         SELECT s.*
         FROM campaign_sessions AS s
@@ -397,16 +397,21 @@ def session_appearances_for_page(settings: Settings, page_slug: str, *, public: 
         WHERE sl.page_slug=?
     """
     params: list[Any] = [str(page_slug)]
+    if campaign_id is not None:
+        sql += " AND s.campaign_id=?"; params.append(int(campaign_id))
     if public:
         sql += " AND s.status IN ('live','ended')"
     sql += " GROUP BY s.id ORDER BY COALESCE(s.session_number,999999),s.session_date,s.id"
     with connect(settings) as conn:
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
-def get_live_session(settings: Settings, *, invite_id: int | None = None, admin: bool = False) -> dict | None:
+def get_live_session(settings: Settings, *, invite_id: int | None = None, admin: bool = False, campaign_id: int | None = None) -> dict | None:
     """Load the live-session payload using one SQLite connection."""
     with connect(settings) as conn:
-        found = conn.execute("SELECT * FROM campaign_sessions WHERE status='live' ORDER BY updated_at DESC,id DESC LIMIT 1").fetchone()
+        if campaign_id is None:
+            found = conn.execute("SELECT * FROM campaign_sessions WHERE status='live' ORDER BY updated_at DESC,id DESC LIMIT 1").fetchone()
+        else:
+            found = conn.execute("SELECT * FROM campaign_sessions WHERE campaign_id=? AND status='live' ORDER BY updated_at DESC,id DESC LIMIT 1",(int(campaign_id),)).fetchone()
         if not found:
             return None
         row = dict(found); sid = int(row["id"])
@@ -425,27 +430,29 @@ def get_live_session(settings: Settings, *, invite_id: int | None = None, admin:
     row["handouts"] = handouts
     return row
 
-
 def save_session(settings: Settings, payload: dict) -> dict:
+    from .campaigns import resolve_campaign_id
     now = time.time(); sid = payload.get("id")
     title = str(payload.get("title") or "Untitled session").strip()[:200]
     status = str(payload.get("status") or "planned")
     if status not in {"planned", "live", "ended"}: status = "planned"
+    with connect(settings) as conn:
+        existing=conn.execute("SELECT campaign_id FROM campaign_sessions WHERE id=?",(int(sid),)).fetchone() if sid else None
+    campaign_id=resolve_campaign_id(settings, payload.get("campaign_id") if payload.get("campaign_id") is not None else (existing[0] if existing else None))
     values = (
-        payload.get("session_number"), title, str(payload.get("session_date") or ""), status,
+        campaign_id, payload.get("session_number"), title, str(payload.get("session_date") or ""), status,
         str(payload.get("summary") or ""), str(payload.get("gm_notes") or ""),
         payload.get("current_location_slug") or None, payload.get("spotlight_map_slug") or None, now,
     )
     with connect(settings) as conn:
-        if status == "live": conn.execute("UPDATE campaign_sessions SET status='ended',updated_at=? WHERE status='live' AND id!=?", (now, int(sid or 0)))
+        if status == "live": conn.execute("UPDATE campaign_sessions SET status='ended',updated_at=? WHERE campaign_id=? AND status='live' AND id!=?", (now,campaign_id,int(sid or 0)))
         if sid:
-            conn.execute("UPDATE campaign_sessions SET session_number=?,title=?,session_date=?,status=?,summary=?,gm_notes=?,current_location_slug=?,spotlight_map_slug=?,updated_at=? WHERE id=?", values + (int(sid),))
+            conn.execute("UPDATE campaign_sessions SET campaign_id=?,session_number=?,title=?,session_date=?,status=?,summary=?,gm_notes=?,current_location_slug=?,spotlight_map_slug=?,updated_at=? WHERE id=?", values + (int(sid),))
             rid = int(sid)
         else:
-            cur = conn.execute("INSERT INTO campaign_sessions(session_number,title,session_date,status,summary,gm_notes,current_location_slug,spotlight_map_slug,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", values[:-1] + (now, now))
+            cur = conn.execute("INSERT INTO campaign_sessions(campaign_id,session_number,title,session_date,status,summary,gm_notes,current_location_slug,spotlight_map_slug,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", values[:-1] + (now, now))
             rid = cur.lastrowid
     return _row(settings, "SELECT * FROM campaign_sessions WHERE id=?", (rid,)) or {}
-
 
 def delete_session(settings: Settings, sid: int) -> None:
     with connect(settings) as conn: conn.execute("DELETE FROM campaign_sessions WHERE id=?", (int(sid),))
@@ -460,16 +467,19 @@ def set_session_lore(settings: Settings, sid: int, page_slug: str, role: str = "
 
 
 def add_session_update(settings: Settings, payload: dict) -> dict:
+    from .campaigns import resolve_campaign_id
     now=time.time(); audience=payload.get("audience") or []
+    campaign_id=payload.get('campaign_id')
+    if campaign_id is None and payload.get('session_id'):
+        parent=_row(settings,'SELECT campaign_id FROM campaign_sessions WHERE id=?',(int(payload['session_id']),))
+        campaign_id=(parent or {}).get('campaign_id')
+    campaign_id=resolve_campaign_id(settings,campaign_id)
     with connect(settings) as conn:
-        cur=conn.execute("INSERT INTO session_updates(session_id,title,body,target_type,target_key,visibility,audience_json,created_at) VALUES(?,?,?,?,?,?,?,?)", (payload.get("session_id"), str(payload.get("title") or "Update"), str(payload.get("body") or ""), str(payload.get("target_type") or "lore"), str(payload.get("target_key") or ""), str(payload.get("visibility") or "players"), json.dumps(audience), now))
+        cur=conn.execute("INSERT INTO session_updates(campaign_id,session_id,title,body,target_type,target_key,visibility,audience_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (campaign_id,payload.get("session_id"), str(payload.get("title") or "Update"), str(payload.get("body") or ""), str(payload.get("target_type") or "lore"), str(payload.get("target_key") or ""), str(payload.get("visibility") or "players"), json.dumps(audience), now))
         rid=cur.lastrowid
     return _row(settings,"SELECT * FROM session_updates WHERE id=?",(rid,)) or {}
 
-
-# --- Historical timeline / world chronology ---------------------------------
 HISTORICAL_KINDS = {"event","founding","war","reign","catastrophe","treaty","discovery","migration","birth","death","journey","age","revolution"}
-
 
 def list_timeline_eras(settings: Settings, *, admin: bool = False) -> list[dict]:
     rows=_rows(settings,"SELECT * FROM timeline_eras ORDER BY sort_order,start_sort,id")
@@ -555,9 +565,11 @@ def save_entity_style(settings: Settings, slug: str, p: dict) -> dict:
 
 
 # --- Reveals / unreliable lore ---------------------------------------------
-def reveal_state(settings: Settings, target_type: str, target_key: str, invite_id: int|None=None) -> dict:
-    row=_row(settings,"SELECT * FROM lore_reveals WHERE target_type=? AND target_key=?",(target_type,target_key))
-    if not row: return {"target_type":target_type,"target_key":target_key,"state":"hidden","rumor_text":"","audience_json":"[]","expires_at":None,"configured":False}
+def reveal_state(settings: Settings, target_type: str, target_key: str, invite_id: int|None=None, campaign_id:int|None=None) -> dict:
+    from .campaigns import resolve_campaign_id
+    cid=resolve_campaign_id(settings,campaign_id)
+    row=_row(settings,"SELECT * FROM lore_reveals WHERE campaign_id=? AND target_type=? AND target_key=?",(cid,target_type,target_key))
+    if not row: return {"campaign_id":cid,"target_type":target_type,"target_key":target_key,"state":"hidden","rumor_text":"","audience_json":"[]","expires_at":None,"configured":False}
     row["configured"] = True
     if row.get("expires_at") and float(row["expires_at"])<=time.time(): row["state"]="hidden"
     try: audience=json.loads(row.get("audience_json") or "[]")
@@ -566,23 +578,24 @@ def reveal_state(settings: Settings, target_type: str, target_key: str, invite_i
     row["audience"]=audience
     return row
 
-
-def list_reveal_states(settings: Settings) -> list[dict]:
-    rows = _rows(settings, "SELECT * FROM lore_reveals ORDER BY updated_at DESC,id DESC")
+def list_reveal_states(settings: Settings, campaign_id:int|None=None) -> list[dict]:
+    if campaign_id is None:
+        rows = _rows(settings, "SELECT * FROM lore_reveals ORDER BY updated_at DESC,id DESC")
+    else:
+        rows = _rows(settings, "SELECT * FROM lore_reveals WHERE campaign_id=? ORDER BY updated_at DESC,id DESC",(int(campaign_id),))
     for row in rows:
         try: row["audience"] = json.loads(row.get("audience_json") or "[]")
         except Exception: row["audience"] = []
     return rows
 
-
 def set_reveal(settings: Settings,p:dict)->dict:
+    from .campaigns import resolve_campaign_id
     now=time.time(); tt=str(p.get("target_type") or "block"); tk=str(p.get("target_key") or ""); state=str(p.get("state") or "hidden")
     if state not in {"hidden","rumor","discovered","public"}: state="hidden"
-    audience=p.get("audience") or []
+    audience=p.get("audience") or [];cid=resolve_campaign_id(settings,p.get('campaign_id'))
     with connect(settings) as conn:
-        conn.execute("INSERT INTO lore_reveals(target_type,target_key,state,rumor_text,audience_json,expires_at,revealed_at,session_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(target_type,target_key) DO UPDATE SET state=excluded.state,rumor_text=excluded.rumor_text,audience_json=excluded.audience_json,expires_at=excluded.expires_at,revealed_at=excluded.revealed_at,session_id=excluded.session_id,updated_at=excluded.updated_at",(tt,tk,state,str(p.get("rumor_text") or ""),json.dumps(audience),p.get("expires_at"),now if state in {"discovered","public","rumor"} else None,p.get("session_id"),now))
-    return reveal_state(settings,tt,tk)
-
+        conn.execute("INSERT INTO lore_reveals(campaign_id,target_type,target_key,state,rumor_text,audience_json,expires_at,revealed_at,session_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(campaign_id,target_type,target_key) DO UPDATE SET state=excluded.state,rumor_text=excluded.rumor_text,audience_json=excluded.audience_json,expires_at=excluded.expires_at,revealed_at=excluded.revealed_at,session_id=excluded.session_id,updated_at=excluded.updated_at",(cid,tt,tk,state,str(p.get("rumor_text") or ""),json.dumps(audience),p.get("expires_at"),now if state in {"discovered","public","rumor"} else None,p.get("session_id"),now))
+    return reveal_state(settings,tt,tk,campaign_id=cid)
 
 def apply_reveals_to_html(settings: Settings, html_text: str, page_slug: str, *, admin: bool=False, invite_id: int|None=None) -> str:
     if admin: return html_text
@@ -649,15 +662,15 @@ def log_activity(settings:Settings,invite_id:int|None,event_type:str,target_key:
     with connect(settings) as conn: conn.execute("INSERT INTO player_activity(invite_id,event_type,target_key,meta_json,created_at) VALUES(?,?,?,?,?)",(invite_id,event_type,target_key,json.dumps(meta or {}),time.time()))
 
 
-def recent_updates(settings:Settings,invite_id:int|None,limit:int=30,*,admin:bool=False)->list[dict]:
-    # Audience-scoped discoveries must never leak through the player feed. Fetch a
-    # bounded superset, filter in Python for SQLite compatibility, then apply limit.
+def recent_updates(settings:Settings,invite_id:int|None,limit:int=30,*,admin:bool=False,campaign_id:int|None=None)->list[dict]:
     fetch_limit=max(100,min(1000,int(limit)*8))
-    rows=_rows(settings,"SELECT * FROM session_updates WHERE visibility!='gm' ORDER BY created_at DESC LIMIT ?",(fetch_limit,))
+    if campaign_id is None:
+        rows=_rows(settings,"SELECT * FROM session_updates WHERE visibility!='gm' ORDER BY created_at DESC LIMIT ?",(fetch_limit,))
+    else:
+        rows=_rows(settings,"SELECT * FROM session_updates WHERE campaign_id=? AND visibility!='gm' ORDER BY created_at DESC LIMIT ?",(int(campaign_id),fetch_limit))
     if not admin:
         rows=[r for r in rows if _audience_allows(r,invite_id)]
     return rows[:int(limit)]
-
 
 def toggle_bookmark(settings:Settings,invite_id:int,page_slug:str,enabled:bool)->None:
     with connect(settings) as conn:
@@ -670,10 +683,13 @@ def list_bookmarks(settings:Settings,invite_id:int)->list[str]:
 
 
 # --- Mysteries / handouts ---------------------------------------------------
-def list_mysteries(settings:Settings,*,admin=False)->list[dict]:
+def list_mysteries(settings:Settings,*,admin=False,campaign_id:int|None=None)->list[dict]:
     """Load investigation boards in three queries regardless of board count."""
     with connect(settings) as conn:
-        rows=[dict(r) for r in conn.execute("SELECT * FROM mysteries ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'solved' THEN 1 ELSE 2 END,updated_at DESC").fetchall()]
+        if campaign_id is None:
+            rows=[dict(r) for r in conn.execute("SELECT * FROM mysteries ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'solved' THEN 1 ELSE 2 END,updated_at DESC").fetchall()]
+        else:
+            rows=[dict(r) for r in conn.execute("SELECT * FROM mysteries WHERE campaign_id=? ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'solved' THEN 1 ELSE 2 END,updated_at DESC",(int(campaign_id),)).fetchall()]
         rows=[r for r in rows if _visible(r["visibility"],admin)]
         if not rows:return []
         ids=[int(r["id"]) for r in rows];ph=','.join('?' for _ in ids)
@@ -695,14 +711,16 @@ def list_mysteries(settings:Settings,*,admin=False)->list[dict]:
         r["pins"]=pins;r["edges"]=edges
     return rows
 
-
 def save_mystery(settings:Settings,p:dict)->dict:
-    now=time.time(); rid=p.get("id"); title=str(p.get("title") or "Untitled mystery"); slug=_slug(p.get("slug") or title); vals=(title,slug,str(p.get("description") or ""),str(p.get("status") or "open"),str(p.get("visibility") or "players"),str(p.get("image_ref") or ""),now)
+    from .campaigns import resolve_campaign_id
+    now=time.time(); rid=p.get("id"); title=str(p.get("title") or "Untitled mystery"); slug=_slug(p.get("slug") or title)
+    existing=_row(settings,'SELECT campaign_id FROM mysteries WHERE id=?',(int(rid),)) if rid else None
+    cid=resolve_campaign_id(settings,p.get('campaign_id') if p.get('campaign_id') is not None else (existing or {}).get('campaign_id'))
+    vals=(cid,title,slug,str(p.get("description") or ""),str(p.get("status") or "open"),str(p.get("visibility") or "players"),str(p.get("image_ref") or ""),now)
     with connect(settings) as conn:
-        if rid: conn.execute("UPDATE mysteries SET title=?,slug=?,description=?,status=?,visibility=?,image_ref=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
-        else: out=conn.execute("INSERT INTO mysteries(title,slug,description,status,visibility,image_ref,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",vals[:-1]+(now,now)).lastrowid
+        if rid: conn.execute("UPDATE mysteries SET campaign_id=?,title=?,slug=?,description=?,status=?,visibility=?,image_ref=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
+        else: out=conn.execute("INSERT INTO mysteries(campaign_id,title,slug,description,status,visibility,image_ref,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",vals[:-1]+(now,now)).lastrowid
     return _row(settings,"SELECT * FROM mysteries WHERE id=?",(out,)) or {}
-
 
 def add_mystery_pin(settings:Settings,mid:int,p:dict)->dict:
     now=time.time()
@@ -744,20 +762,25 @@ def delete_mystery_pin(settings:Settings,pin_id:int)->None:
         conn.execute("DELETE FROM mystery_pins WHERE id=?",(int(pin_id),))
 
 
-def list_handouts(settings:Settings,*,admin=False)->list[dict]:
-    now=time.time(); rows=_rows(settings,"SELECT * FROM handouts ORDER BY created_at DESC")
+def list_handouts(settings:Settings,*,admin=False,campaign_id:int|None=None)->list[dict]:
+    now=time.time()
+    rows=_rows(settings,"SELECT * FROM handouts ORDER BY created_at DESC") if campaign_id is None else _rows(settings,"SELECT * FROM handouts WHERE campaign_id=? ORDER BY created_at DESC",(int(campaign_id),))
     return [r for r in rows if _visible(r["visibility"],admin) and (admin or not r.get("expires_at") or float(r["expires_at"])>now)]
 
-
 def save_handout(settings:Settings,p:dict)->dict:
-    now=time.time(); rid=p.get("id"); title=str(p.get("title") or "Handout"); slug=_slug(p.get("slug") or title); vals=(title,slug,str(p.get("body") or ""),str(p.get("kind") or "parchment"),str(p.get("image_ref") or ""),p.get("page_slug") or None,p.get("session_id"),str(p.get("visibility") or "players"),p.get("expires_at"),now)
+    from .campaigns import resolve_campaign_id
+    now=time.time(); rid=p.get("id"); title=str(p.get("title") or "Handout"); slug=_slug(p.get("slug") or title)
+    existing=_row(settings,'SELECT campaign_id FROM handouts WHERE id=?',(int(rid),)) if rid else None
+    cid=p.get('campaign_id') if p.get('campaign_id') is not None else (existing or {}).get('campaign_id')
+    if cid is None and p.get('session_id'):
+        parent=_row(settings,'SELECT campaign_id FROM campaign_sessions WHERE id=?',(int(p['session_id']),));cid=(parent or {}).get('campaign_id')
+    cid=resolve_campaign_id(settings,cid)
+    vals=(cid,title,slug,str(p.get("body") or ""),str(p.get("kind") or "parchment"),str(p.get("image_ref") or ""),p.get("page_slug") or None,p.get("session_id"),str(p.get("visibility") or "players"),p.get("expires_at"),now)
     with connect(settings) as conn:
-        if rid: conn.execute("UPDATE handouts SET title=?,slug=?,body=?,kind=?,image_ref=?,page_slug=?,session_id=?,visibility=?,expires_at=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
-        else: out=conn.execute("INSERT INTO handouts(title,slug,body,kind,image_ref,page_slug,session_id,visibility,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",vals[:-1]+(now,now)).lastrowid
+        if rid: conn.execute("UPDATE handouts SET campaign_id=?,title=?,slug=?,body=?,kind=?,image_ref=?,page_slug=?,session_id=?,visibility=?,expires_at=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
+        else: out=conn.execute("INSERT INTO handouts(campaign_id,title,slug,body,kind,image_ref,page_slug,session_id,visibility,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",vals[:-1]+(now,now)).lastrowid
     return _row(settings,"SELECT * FROM handouts WHERE id=?",(out,)) or {}
 
-
-# --- Map layers/fog/travel --------------------------------------------------
 def map_layers(settings:Settings,map_id:int,*,public=False)->list[dict]:
     if public:
         return _rows(settings,"SELECT * FROM map_layers WHERE map_id=? AND enabled=1 AND visible_to_players=1 ORDER BY sort_order,id",(int(map_id),))
@@ -807,15 +830,18 @@ def _character_payload(settings: Settings, row: dict, images: list[dict] | None 
     return out
 
 
-def list_player_characters(settings: Settings, *, invite_id: int|None=None, admin: bool=False) -> list[dict]:
+def list_player_characters(settings: Settings, *, invite_id: int|None=None, admin: bool=False, campaign_id: int|None=None) -> list[dict]:
     """Load character dossiers and image boards in two queries total."""
     with connect(settings) as conn:
+        campaign_sql="" if campaign_id is None else "c.campaign_id=? AND "
+        cp=() if campaign_id is None else (int(campaign_id),)
         if admin:
-            rows=[dict(r) for r in conn.execute("SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id ORDER BY c.updated_at DESC,c.id DESC").fetchall()]
+            where="" if campaign_id is None else " WHERE c.campaign_id=?"
+            rows=[dict(r) for r in conn.execute("SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id"+where+" ORDER BY c.updated_at DESC,c.id DESC",cp).fetchall()]
         elif invite_id is None:
-            rows=[dict(r) for r in conn.execute("SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.visibility='party' ORDER BY c.updated_at DESC,c.id DESC").fetchall()]
+            rows=[dict(r) for r in conn.execute(f"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE {campaign_sql}c.visibility='party' ORDER BY c.updated_at DESC,c.id DESC",cp).fetchall()]
         else:
-            rows=[dict(r) for r in conn.execute("SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.visibility='party' OR c.invite_id=? ORDER BY CASE WHEN c.invite_id=? THEN 0 ELSE 1 END,c.updated_at DESC,c.id DESC",(int(invite_id),int(invite_id))).fetchall()]
+            rows=[dict(r) for r in conn.execute(f"SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE {campaign_sql}(c.visibility='party' OR c.invite_id=?) ORDER BY CASE WHEN c.invite_id=? THEN 0 ELSE 1 END,c.updated_at DESC,c.id DESC",cp+(int(invite_id),int(invite_id))).fetchall()]
         ids=[int(r['id']) for r in rows]
         image_rows=[]
         if ids:
@@ -825,42 +851,46 @@ def list_player_characters(settings: Settings, *, invite_id: int|None=None, admi
     for image in image_rows:images_by.setdefault(int(image['character_id']),[]).append(image)
     return [_character_payload(settings,r,images_by.get(int(r['id']),[])) for r in rows]
 
-
-def get_player_character(settings: Settings, character_id: int, *, invite_id: int|None=None, admin: bool=False) -> dict|None:
+def get_player_character(settings: Settings, character_id: int, *, invite_id: int|None=None, admin: bool=False, campaign_id: int|None=None) -> dict|None:
     with connect(settings) as conn:
         row=conn.execute("SELECT c.*, i.label AS player_label FROM player_characters c JOIN player_invites i ON i.id=c.invite_id WHERE c.id=?",(int(character_id),)).fetchone()
         if not row:return None
         row=dict(row)
+        if campaign_id is not None and int(row.get('campaign_id') or -1)!=int(campaign_id):return None
         if not admin and row.get("visibility")!="party" and int(row.get("invite_id") or 0)!=int(invite_id or -1):return None
         images=[dict(x) for x in conn.execute("SELECT * FROM character_images WHERE character_id=? ORDER BY sort_order,id",(int(character_id),)).fetchall()]
     return _character_payload(settings,row,images)
 
-
 def save_player_character(settings: Settings, p: dict, *, invite_id: int|None, admin: bool=False) -> dict:
+    from .campaigns import ensure_campaign_membership, invite_has_campaign, resolve_campaign_id
     rid=p.get("id"); now=time.time()
     owner=int(p.get("invite_id") or invite_id or 0)
     if not owner: raise ValueError("A player invitation is required to own this character.")
+    current=None
     if rid:
         current=_row(settings,"SELECT * FROM player_characters WHERE id=?",(int(rid),))
         if not current: raise ValueError("Character not found.")
         if not admin and int(current["invite_id"])!=int(invite_id or -1): raise PermissionError("You can only edit your own characters.")
         owner=int(current["invite_id"])
+    campaign_id=resolve_campaign_id(settings,p.get('campaign_id') if p.get('campaign_id') is not None else ((current or {}).get('campaign_id')))
+    if not admin and not invite_has_campaign(settings,invite_id,campaign_id):
+        raise PermissionError("You are not a member of that campaign.")
+    ensure_campaign_membership(settings,campaign_id,owner)
     name=str(p.get("name") or "Unnamed hero").strip()[:160]
     vis=str(p.get("visibility") or "party"); vis=vis if vis in {"party","private"} else "party"
     status=str(p.get("status") or "active")[:40]
     theme=str(p.get("theme_color") or "#b79661")
     if not re.match(r"^#[0-9a-fA-F]{6}$",theme): theme="#b79661"
-    vals=(owner,name,str(p.get("pronouns") or "")[:80],str(p.get("ancestry") or "")[:120],str(p.get("class_name") or "")[:120],int(p.get("level")) if str(p.get("level") or "").isdigit() else None,status,str(p.get("summary") or "")[:5000],str(p.get("biography") or "")[:30000],str(p.get("goals") or "")[:10000],str(p.get("player_notes") or "")[:15000],vis,theme,now)
+    vals=(campaign_id,owner,name,str(p.get("pronouns") or "")[:80],str(p.get("ancestry") or "")[:120],str(p.get("class_name") or "")[:120],int(p.get("level")) if str(p.get("level") or "").isdigit() else None,status,str(p.get("summary") or "")[:5000],str(p.get("biography") or "")[:30000],str(p.get("goals") or "")[:10000],str(p.get("player_notes") or "")[:15000],vis,theme,now)
     with connect(settings) as conn:
         if rid:
-            conn.execute("UPDATE player_characters SET invite_id=?,name=?,pronouns=?,ancestry=?,class_name=?,level=?,status=?,summary=?,biography=?,goals=?,player_notes=?,visibility=?,theme_color=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
+            conn.execute("UPDATE player_characters SET campaign_id=?,invite_id=?,name=?,pronouns=?,ancestry=?,class_name=?,level=?,status=?,summary=?,biography=?,goals=?,player_notes=?,visibility=?,theme_color=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
         else:
             base=_slug(name); slug=base
             n=2
             while conn.execute("SELECT 1 FROM player_characters WHERE slug=?",(slug,)).fetchone(): slug=f"{base}-{n}"; n+=1
-            out=conn.execute("INSERT INTO player_characters(invite_id,name,slug,pronouns,ancestry,class_name,level,status,summary,biography,goals,player_notes,visibility,theme_color,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",vals[:2]+(slug,)+vals[2:-1]+(now,now)).lastrowid
+            out=conn.execute("INSERT INTO player_characters(campaign_id,invite_id,name,slug,pronouns,ancestry,class_name,level,status,summary,biography,goals,player_notes,visibility,theme_color,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",vals[:3]+(slug,)+vals[3:-1]+(now,now)).lastrowid
     return get_player_character(settings,out,invite_id=owner,admin=True) or {}
-
 
 def delete_player_character(settings: Settings, character_id: int, *, invite_id: int|None, admin: bool=False) -> list[str]:
     row=_row(settings,"SELECT * FROM player_characters WHERE id=?",(int(character_id),))
