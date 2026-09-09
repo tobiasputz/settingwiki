@@ -661,7 +661,7 @@ def web_manifest(request: Request):
 @app.get("/sw.js")
 def service_worker():
     path = settings.root_dir / "static" / "sw.js"
-    return FileResponse(path, media_type="application/javascript", headers={"Service-Worker-Allowed": "/"})
+    return FileResponse(path, media_type="application/javascript", headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @app.get("/session", response_class=HTMLResponse)
@@ -1002,7 +1002,7 @@ def uploaded_asset(request: Request, asset_path: str):
 def admin(request: Request):
     if is_co_gm(request): return RedirectResponse("/admin/campaign", status_code=303)
     if not is_admin(request): return RedirectResponse("/admin/login")
-    return templates.TemplateResponse("admin.html", {"request": request, "title": "Loreforge Editor"})
+    return templates.TemplateResponse("admin.html", {"request": request, "title": "Loreforge Editor"}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/admin/preview/wiki", response_class=HTMLResponse)

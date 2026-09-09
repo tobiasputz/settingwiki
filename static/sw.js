@@ -1,8 +1,8 @@
-const STATIC='loreforge-static-v3000';
-const PRIVATE='loreforge-private-v3000';
+const STATIC='loreforge-static-v3002';
+const PRIVATE='loreforge-private-v3002';
 const META='loreforge-offline-meta-v3000';
 const ENABLE_KEY='/__loreforge_offline_enabled__';
-const SHELL=['/static/wiki.css?v=3000','/static/wiki.js?v=3000','/static/loreforge-icon.svg','/static/icon-192.png','/static/icon-512.png'];
+const SHELL=['/static/wiki.css?v=3002','/static/wiki.js?v=3002','/static/loreforge-icon.svg','/static/icon-192.png','/static/icon-512.png'];
 const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/archive'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
 const privateAsset=u=>u.pathname.startsWith('/project-asset/')||u.pathname.startsWith('/uploads/');
 async function offlineEnabled(){const c=await caches.open(META);return !!(await c.match(ENABLE_KEY))}
@@ -12,7 +12,7 @@ self.addEventListener('install',e=>e.waitUntil(caches.open(STATIC).then(c=>c.add
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>(k.startsWith('loreforge-static-')&&k!==STATIC)||(k.startsWith('loreforge-private-')&&k!==PRIVATE)||(k.startsWith('loreforge-offline-meta-')&&k!==META)).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{
   const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin)return;
-  if(u.pathname.startsWith('/static/')){e.respondWith(caches.match(e.request).then(hit=>hit||fetch(e.request).then(r=>{if(r.ok){const copy=r.clone();caches.open(STATIC).then(c=>c.put(e.request,copy))}return r})));return}
+  if(u.pathname.startsWith('/static/')){e.respondWith(fetch(e.request).then(r=>{if(r.ok){const copy=r.clone();caches.open(STATIC).then(c=>c.put(e.request,copy))}return r}).catch(()=>caches.match(e.request)));return}
   if(privatePage(u)||privateAsset(u)){
     e.respondWith((async()=>{
       const enabled=await offlineEnabled();

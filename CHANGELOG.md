@@ -1,3 +1,12 @@
+# Loreforge 3.0.2 — Studio stale-cache recovery
+
+- Fixed the upgrade path that could keep serving the broken v3.0.0 Campaign Studio JavaScript even after the v3.0.1 source fix was deployed. The PWA service worker had cached all `/static/*` assets cache-first while the HTML continued to request `admin.js?v=3000`, so an existing browser could remain pinned to the old file indefinitely.
+- Bumped application asset URLs and PWA cache namespaces to v3002 so existing installations request a fresh Studio bundle immediately.
+- Changed service-worker handling for static assets to **network-first with cached fallback**: online clients receive the deployed JavaScript instead of a stale cached copy, while previously cached assets still work offline.
+- Added no-cache headers to `/sw.js` so browsers can discover service-worker updates promptly.
+- Marked the Campaign Studio HTML response `no-store` so a browser cannot retain an older page that still references the obsolete asset URL.
+- Added regression coverage for Studio helper presence, asset-version consistency, stale-cache prevention, and service-worker update headers.
+
 # Loreforge 3.0.1 — Campaign Studio startup regression fix
 
 - Restored the Campaign Studio `refreshStatus()`, `refreshFiles()`, and `renderFileTree()` helpers that were accidentally dropped during the tabbed-editor refactor. Their absence threw during Studio startup and prevented later initialization, including Access controls.

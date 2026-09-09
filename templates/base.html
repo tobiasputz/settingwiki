@@ -13,7 +13,7 @@
   <link rel="icon" href="/static/loreforge-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Loreforge' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=3000">
+  <link rel="stylesheet" href="/static/wiki.css?v=3002">
   {% block head %}{% endblock %}
 </head>
 <body data-admin-view="{{ 'true' if request.session.get('admin') or request.session.get('co_gm') else 'false' }}" data-player-access-key="{{ wiki.player_access_key if wiki else '' }}">
@@ -73,7 +73,7 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=3000"></script>
+  <script src="/static/wiki.js?v=3002"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
