@@ -17,7 +17,7 @@ DEFAULT_EFFECTS: dict = {
     "marker_pulse": True,
     "marker_scale": 1.0,
     # Global animation controls
-    "effect_intensity": 0.58,
+    "effect_intensity": 0.72,
     "motion_speed": 0.65,
     # Sky / atmosphere
     "clouds": True,
@@ -80,7 +80,7 @@ def normalize_effects(raw: object, *, legacy: dict | None = None) -> dict:
     if legacy:
         effects["clouds"] = bool(legacy.get("cloud_enabled", True))
         try:
-            effects["effect_intensity"] = max(0.05, min(1.0, float(legacy.get("cloud_opacity", effects["effect_intensity"])) * 1.7))
+            effects["effect_intensity"] = max(0.05, min(1.6, float(legacy.get("cloud_opacity", effects["effect_intensity"])) * 1.7))
             effects["motion_speed"] = max(0.05, min(2.0, float(legacy.get("cloud_speed", effects["motion_speed"]))))
         except (TypeError, ValueError):
             pass
@@ -101,9 +101,9 @@ def normalize_effects(raw: object, *, legacy: dict | None = None) -> dict:
                 except (TypeError, ValueError):
                     continue
                 if key == "marker_scale":
-                    effects[key] = max(0.65, min(1.8, number))
+                    effects[key] = max(0.65, min(2.6, number))
                 elif key == "effect_intensity":
-                    effects[key] = max(0.05, min(1.0, number))
+                    effects[key] = max(0.05, min(1.6, number))
                 else:
                     effects[key] = max(0.05, min(2.0, number))
             elif key == "viewport_mode":

@@ -3,7 +3,7 @@
 Seeker turns a normal multi-file LaTeX campaign project into **two synchronized views of the same setting**:
 
 1. an Overleaf-style GM authoring workspace with a source tree, LaTeX editor, autosave, revision history, build log and live PDF preview; and
-2. a polished player-facing interactive setting wiki with full-text search, automatic chapter/section navigation and interactive maps.
+2. a polished player-facing interactive setting wiki with full-text + local semantic search, automatic chapter/section navigation and interactive maps.
 
 It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX project is already the canonical campaign document and manually re-uploading a PDF has become annoying.
 
@@ -26,12 +26,22 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Stable codex sidebar.** Opening another entry no longer throws the player back to the top of the navigation. Seeker remembers expanded chapter groups, scroll position, and the clicked row position across full page navigation.
 - **Build Doctor.** `latexmk` stale-failure states are detected and repaired automatically, the underlying TeX engine is invoked for a diagnostic pass when `latexmk` only returns a wrapper summary, and the editor surfaces likely fixes rather than only showing `pdflatex: gave an error`. High-confidence source mistakes can be repaired individually or with **Apply all safe fixes**; the full batch is verified before any source is changed and every affected file is revision-backed. Repeated `geometry` package declarations can be consolidated automatically. When TeX returns errors but still creates a fresh PDF, Seeker keeps that recoverable preview visible while clearly marking the build as not clean.
 - **Native PF2e campaign mechanics.** Your existing `\feat`, `\action`, `\itemtemplate`, creature/stat-block commands, action-symbol macros, `\chaptergroup`, `\pon`, and legacy `\image` helper remain authoritative LaTeX for the PDF while receiving dedicated responsive Codex rendering. Nested arguments are parsed safely, and the editor has a PF2e insertion palette for creating new entries with the same command vocabulary.
-- **Interactive atlas.** Upload a map image, enter explicit **＋ Location** placement mode, follow the placement crosshair, click once to place a marker, drag markers into position, attach descriptions and link them to codex pages. A searchable marker directory makes existing locations easy to find/focus. Player maps also expose a searchable location panel and category filters. Markers can be player-visible or GM-only and use distinct symbols for cities, ports, ruins, danger, secrets, temples, portals, quests, and more.
+- **Interactive atlas.** Upload a map image, enter explicit **＋ Location** placement mode, follow the placement crosshair, click once to place a marker, drag markers into position, attach descriptions and link them to codex pages. A searchable marker directory makes existing locations easy to find/focus. Player maps also expose a searchable location panel and category filters. Markers can be player-visible or GM-only and use a broad icon library for settlements, ports, fortifications, roads, terrain, institutions, commerce, hazards, monsters, secrets, temples, portals, quests, and more. Large/high-resolution source maps automatically receive a stronger atmosphere scale so visual effects remain readable on 4K artwork.
 - **Edge-locked map navigation.** Player maps use a cover-style minimum zoom by default: when you pan, the map cannot be pushed past the viewport and reveal empty space beyond its edges. Wheel, buttons, and touch pinch all zoom around the pointer/fingers.
 - **Fantasy atmosphere studio.** Per-map switches include moving clouds, cloud shadows, rolling fog, valley mist, god rays, rain, lightning, snow, blizzards, ashfall, sand/dust, heat haze, ocean shimmer, moving wave crests, embers, fireflies, pollen, leaves, petals, birds, bats, rare dragon shadows, arcane motes, spectral wisps, cursed miasma, ley lines, rune pulses, glowing spores, aurora, stars, shooting stars, vignette, fogged edges, parchment warmth, moonlight, blood-moon tint, cartographer grid, and compass rose. Presets now include Calm Fantasy, Stormbound, Frozen North, Haunted Realm, Arcane Night, Volcanic Wastes, Ancient Parchment, Coastal Breeze, Autumn Road, Feywild Glade, Scorched Desert, Underdark, Blood Moon, Ancient Ruins, Blighted Realm, and High Fantasy.
 - **Revision safety.** Seeker keeps up to 40 saved revisions of each file edited in the browser.
 - **Personal player invitations.** Player access is invitation-only by default. **Admin → Access** creates one signed link per player; each link can be copied, expired, revoked, restored, rotated, device-limited, or have its remembered devices reset independently. Legacy shared-password and public modes remain available, while the editor continues to use `ADMIN_PASSWORD`.
 - **Read → edit source bridge.** When you browse the player Codex while logged in as GM, a persistent **Edit source** control opens the exact LaTeX file/line in Campaign Studio. On long Person-of-Note pages it follows the section currently being read, and the editor offers **Back to entry** after the correction.
+
+## Seeker 4.4: player feedback, richer characters, and free semantic search
+
+Seeker 4.4 is a table-use polish release built from the first round of player feedback. **Relationships** are now searchable/filterable rather than an endless list, touch scheduling favors scrolling over painting, comments and characters have permission-aware deletion, GMs can maintain player character sheets, and the campaign selector includes a clear **All Tables** view. Atlas authoring has a much larger marker vocabulary and its atmospheric renderer compensates for high-resolution/4K map sources.
+
+Character sheets are now designed to be genuinely player-owned dossiers rather than fixed profiles. Alongside ancestry/class/level and biography, players can maintain combat stats, attacks/actions, focus, spell statistics, defenses, skills, feats, inventory, spells, resources, proficiencies, currency/bulk, appearance, personality, bonds, arcs, lore relationships and arbitrary custom sections. They can also choose sheet themes, accent/secondary colors, a personal sigil, subtitle and information density. GMs retain edit/delete access for table administration.
+
+Search now includes **local semantic retrieval with zero API cost**. Seeker builds a compact in-process index from the Codex a player is actually allowed to see and combines lexical scoring, generic concept expansion and relationships learned from terms that co-occur in the setting. A question like “who rules the northern realm?” can therefore find an entry that says “King Vael holds the crown” even when the exact wording differs. Because the source set is the already spoiler-filtered Codex, semantic retrieval cannot surface hidden pages. The index cache is bounded to keep Railway memory predictable. Optional OpenAI-compatible answer generation is still supported through `SEEKER_AI_API_KEY` / `SEEKER_AI_MODEL`, but is not required for semantic finding.
+
+The schedule remains deliberately **player-global**: rows are stored only by invitation + date. Adding a second character or joining a second campaign never moves or duplicates availability. Each campaign simply asks which unique players currently have active characters there and reads those same player-level dates.
 
 ## Seeker 4.3: session planning across campaigns
 
@@ -39,7 +49,7 @@ Seeker now includes a dedicated **Session Planner** at `/schedule`. Availability
 
 The GM planner uses the active campaign’s character roster to determine who belongs at that table, deduplicates players who have multiple PCs, and highlights the earliest fully green date. If no all-green date exists, it separately surfaces dates that work only because one or more players selected **If necessary**. Unanswered dates remain unknown and never produce a false “everyone is free” result. Players can paint/drag dates and use quick fills; writes are batched and there is no schedule polling.
 
-Character creation now includes an explicit campaign selector. Choosing an active campaign for one of your own characters automatically grants that invitation access to the table, matching the intended flow: **GM creates campaign → player creates/assigns character → player fills availability once → GM checks the campaign planner**. GM revocation still wins: a character whose invitation no longer has campaign access is not counted in scheduling.
+Character creation includes an explicit campaign selector, matching the intended flow: **GM creates campaign → player creates/assigns character → player fills availability once → GM checks the campaign planner**. Character assignment is the scheduling source of truth; availability itself never moves between campaigns. Revoking the player invitation globally still removes that player from scheduling.
 
 ## Seeker 4.2: one setting, multiple campaigns
 
@@ -161,6 +171,12 @@ PLAYER_PASSWORD=<legacy shared player password>
 LATEX_ENGINE=auto           # recommended; also accepts pdflatex / xelatex / lualatex
 LATEX_TIMEOUT=60
 LATEX_ALLOW_SHELL_ESCAPE=0
+
+# Optional: only if you want generated Ask Seeker answers.
+# Local semantic search works without these.
+SEEKER_AI_API_KEY=<OpenAI-compatible API key>
+SEEKER_AI_MODEL=<model name>
+SEEKER_AI_BASE_URL=https://api.openai.com/v1
 ```
 
 The default player gate is **Invitation links only**, so normal deployments do not need `PLAYER_PASSWORD`. After logging into `/admin`, open **Access**, create one invitation for each player, and send each player their own link.

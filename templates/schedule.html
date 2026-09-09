@@ -55,7 +55,7 @@
         <button type="button" data-quick="all-available">Whole month ✓</button>
         <button type="button" data-quick="clear">Clear month</button>
       </div>
-      <p class="schedule-paint-hint">Choose a state, then click or drag across dates. Changes save automatically.</p>
+      <p class="schedule-paint-hint">Choose a state, then click or drag across dates. On phones, tap to mark a date; normal scrolling never paints. Changes save automatically.</p>
     </div>
     {% else %}
     <div class="schedule-gm-legend"><span class="all-available"><i></i>Everyone available</span><span class="if-needed"><i></i>Works if necessary</span><span class="blocked"><i></i>Someone unavailable</span><span class="waiting"><i></i>Waiting for answers</span></div>
@@ -86,4 +86,4 @@
   {% endif %}
 </main>
 {% endblock %}
-{% block scripts %}<script src="/static/schedule.js?v=4300"></script>{% endblock %}
+{% block scripts %}<script src="/static/schedule.js?v=4400"></script>{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}All Tables · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="tables-shell">
+  <header class="tables-hero"><div><span class="eyebrow">ALL TABLES</span><h1>Every story in one setting.</h1><p>Seeker keeps the world shared while each table has its own party, sessions, discoveries and notes. Choose a table to enter its campaign context.</p></div><a class="primary-button" href="/schedule">My availability →</a></header>
+  <div class="tables-grid">
+  {% for table in table_cards %}
+    <article class="table-overview-card {% if table.status=='archived' %}archived{% endif %}" style="--table-accent:{{ table.accent or '#b79661' }}">
+      <div class="table-overview-accent"></div>
+      <header><div><small>{{ 'DEFAULT · ' if table.is_default else '' }}{{ table.status|upper }}</small><h2>{{ table.name }}</h2></div><span>{{ table.characters|length }} PC{{ '' if table.characters|length==1 else 's' }}</span></header>
+      <p>{{ table.description or 'A campaign unfolding in this setting.' }}</p>
+      {% if table.live_session %}<div class="table-live-chip">● LIVE · {{ table.live_session.title }}</div>{% endif %}
+      {% if table.own_characters %}<div class="table-own-characters"><small>YOUR CHARACTERS</small>{% for c in table.own_characters %}<a href="/characters/{{ c.id }}" data-table-enter="{{ table.id }}" data-table-href="/characters/{{ c.id }}">{% if c.portrait_url %}<img src="{{ c.portrait_url }}" alt="">{% else %}<span>♟</span>{% endif %}<strong>{{ c.name }}</strong></a>{% endfor %}</div>{% endif %}
+      {% if gm_view and table.planner %}<div class="table-planner-mini"><small>NEXT SESSION WINDOW</small>{% if table.planner.next_all_available %}<strong>✓ {{ table.planner.next_all_available.date }}</strong><span>Everyone available</span>{% elif table.planner.next_if_needed %}<strong>~ {{ table.planner.next_if_needed.date }}</strong><span>Works if necessary</span>{% else %}<strong>Waiting on players</strong><span>No fully answered date yet</span>{% endif %}</div>{% endif %}
+      <footer><button class="table-enter-button" data-table-enter="{{ table.id }}" data-table-href="/">Enter table →</button>{% if gm_view %}<button class="quiet-btn" data-table-enter="{{ table.id }}" data-table-href="/schedule">Planner</button>{% endif %}</footer>
+    </article>
+  {% else %}<div class="empty-mini">No campaigns are available to this invitation.</div>{% endfor %}
+  </div>
+</main>
+{% endblock %}

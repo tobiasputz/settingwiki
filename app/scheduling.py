@@ -101,7 +101,6 @@ def player_campaigns(settings: Settings, invite_id: int) -> list[dict]:
                       GROUP_CONCAT(pc.name, ' / ') AS characters
                FROM campaigns c
                JOIN player_characters pc ON pc.campaign_id=c.id
-               JOIN campaign_memberships cm ON cm.campaign_id=c.id AND cm.invite_id=pc.invite_id
                WHERE pc.invite_id=? AND c.status='active'
                GROUP BY c.id,c.name,c.slug,c.accent,c.status
                ORDER BY c.name COLLATE NOCASE,c.id""",
@@ -111,7 +110,13 @@ def player_campaigns(settings: Settings, invite_id: int) -> list[dict]:
 
 
 def campaign_schedule_participants(settings: Settings, campaign_id: int) -> list[dict]:
-    """Unique players represented by a current character in this campaign."""
+    """Unique players represented by a current character in this campaign.
+
+    Character assignment is the scheduling source of truth. Availability is
+    player-level and must keep applying even if campaign membership bookkeeping
+    is edited later by a GM. This also prevents the same person from appearing
+    twice when they have multiple PCs.
+    """
     inactive = ("retired", "dead", "inactive")
     now = time.time()
     with connect(settings) as conn:
@@ -120,7 +125,6 @@ def campaign_schedule_participants(settings: Settings, campaign_id: int) -> list
                       GROUP_CONCAT(pc.name, ' / ') AS characters
                FROM player_characters pc
                JOIN player_invites i ON i.id=pc.invite_id
-               JOIN campaign_memberships cm ON cm.campaign_id=pc.campaign_id AND cm.invite_id=pc.invite_id
                WHERE pc.campaign_id=?
                  AND LOWER(COALESCE(pc.status,'active')) NOT IN (?,?,?)
                  AND i.revoked_at IS NULL

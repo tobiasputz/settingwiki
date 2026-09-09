@@ -13,8 +13,8 @@
   <link rel="icon" href="/static/seeker-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Seeker' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=4300">
-  <link rel="stylesheet" href="/static/tour.css?v=4300">
+  <link rel="stylesheet" href="/static/wiki.css?v=4400">
+  <link rel="stylesheet" href="/static/tour.css?v=4400">
   {% block head %}{% endblock %}
 </head>
 {% set campaign_ctx = campaign_context(request) %}
@@ -25,11 +25,13 @@
       <span class="brand-mark">✦</span>
       <span><strong>{{ wiki.title if wiki else 'Seeker' }}</strong><small>{{ wiki.player_label if wiki and wiki.player_label else 'SEEKER' }}</small></span>
     </a>
-    {% if campaign_ctx.multi_campaign %}
-    <label class="campaign-switcher" title="Switch table campaign">
-      <span>TABLE</span>
+    {% if campaign_ctx.campaigns %}
+    {% set table_sensitive = request.url.path.startswith('/session') or request.url.path.startswith('/schedule') or request.url.path.startswith('/campaign') or request.url.path.startswith('/characters') or request.url.path.startswith('/gm') %}
+    <label class="campaign-switcher {{ 'table-sensitive' if table_sensitive else 'lore-sensitive' }} {{ 'all-tables-active' if request.url.path == '/tables' else '' }}" style="--campaign-accent:{{ campaign_ctx.active_campaign.accent or '#b79661' }}" title="Change the active table. Codex spoiler state follows the selected campaign.">
+      <i style="--campaign-dot:{{ campaign_ctx.active_campaign.accent or '#b79661' }}"></i><span>{{ 'ACTIVE TABLE' if table_sensitive else 'LORE FOR' }}</span>
       <select data-campaign-select aria-label="Active campaign">
-        {% for c in campaign_ctx.campaigns %}<option value="{{ c.id }}" {% if c.id == campaign_ctx.active_campaign_id %}selected{% endif %}>{{ c.name }}{% if c.status == 'archived' %} · archived{% endif %}</option>{% endfor %}
+        <option value="__all__" {% if request.url.path == '/tables' %}selected{% endif %}>All Tables</option>
+        {% for c in campaign_ctx.campaigns %}<option value="{{ c.id }}" {% if request.url.path != '/tables' and c.id == campaign_ctx.active_campaign_id %}selected{% endif %}>{{ c.name }}{% if c.status == 'archived' %} · archived{% endif %}</option>{% endfor %}
       </select>
     </label>
     {% endif %}
@@ -71,7 +73,7 @@
   </nav>
   <div class="mobile-more-sheet" id="mobileMoreSheet" aria-hidden="true">
     <div class="mobile-sheet-handle"></div>
-    <a href="/characters">♟ Characters</a><a href="/timeline">⌛ Chronicle of Ages</a><a href="/mysteries">◇ Mysteries</a><a href="/network">⌘ Lore Web</a><a href="/structures">♜ Families & Orders</a><a href="/handouts">✉ Letters & Relics</a><a href="/updates">✦ Newly Revealed</a><a href="/calendar">☾ Calendar</a>{% if request.session.get('admin') or request.session.get('co_gm') or (wiki and wiki.player_label) %}<a href="/schedule">◷ Session Planner</a>{% endif %}<a href="/#atlas">⌖ Atlas</a><button type="button" class="mobile-sheet-action" data-start-tour>❔ Quick tour</button><button type="button" class="mobile-sheet-action" data-offline-toggle>⇩ Offline cache: off</button>
+    <a href="/tables">◎ All Tables</a><a href="/characters">♟ Characters</a><a href="/timeline">⌛ Chronicle of Ages</a><a href="/mysteries">◇ Mysteries</a><a href="/network">⌘ Lore Web</a><a href="/structures">♜ Families & Orders</a><a href="/handouts">✉ Letters & Relics</a><a href="/updates">✦ Newly Revealed</a><a href="/calendar">☾ Calendar</a>{% if request.session.get('admin') or request.session.get('co_gm') or (wiki and wiki.player_label) %}<a href="/schedule">◷ Session Planner</a>{% endif %}<a href="/#atlas">⌖ Atlas</a><button type="button" class="mobile-sheet-action" data-start-tour>❔ Quick tour</button><button type="button" class="mobile-sheet-action" data-offline-toggle>⇩ Offline cache: off</button>
     {% if request.session.get('admin') or request.session.get('co_gm') %}<hr><a href="/gm/session">⚙ Session Console</a>{% if request.session.get('admin') %}<a href="/admin">✎ Seeker Studio</a>{% endif %}<a href="/admin/campaign">✦ Worldcraft</a><a href="/admin/living">◔ World State</a>{% elif wiki and wiki.player_label %}<hr><button type="button" class="mobile-sheet-action danger" data-player-logout>↪ Sign out of {{ wiki.player_label }}</button>{% endif %}
   </div>
 
@@ -93,8 +95,8 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=4300"></script>
-  <script src="/static/tour.js?v=4300"></script>
+  <script src="/static/wiki.js?v=4400"></script>
+  <script src="/static/tour.js?v=4400"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

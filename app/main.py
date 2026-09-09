@@ -30,7 +30,7 @@ from .storage import (
     save_codex_presentation, save_text_file, seed_project, set_setting, storage_report, validate_player_invite_session,
 )
 from .features import (
-    add_annotation, add_mystery_pin, add_session_update, aliases, apply_reveals_to_html, campaign_health,
+    add_annotation, delete_annotation, add_mystery_pin, add_session_update, aliases, apply_reveals_to_html, campaign_health,
     delete_mystery_edge, delete_mystery_pin,
     create_snapshot, delete_session, entity_style, fog_regions, get_live_session, init_feature_db,
     list_annotations, list_bookmarks, list_handouts, list_mysteries, list_relationships, list_reveal_blocks_from_wiki, list_reveal_states,
@@ -58,6 +58,7 @@ from .campaigns import (
 from .scheduling import (
     init_schedule_db, list_player_availability, save_player_availability, player_campaigns, campaign_schedule,
 )
+from .semantic_search import semantic_search
 
 settings = load_settings()
 BUILD_LOCK = threading.Lock()
@@ -231,7 +232,7 @@ def ensure_built() -> dict:
     try:
         return load_wiki(settings)
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 4300}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 4400}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -555,7 +556,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 4300
+                    needs_build=int(existing.get("renderer_version") or 0) < 4400
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -694,6 +695,24 @@ def campaign_select_api(request: Request,payload:dict=Body(...)):
     request.session.pop("session_character_id",None)
     request.session.pop("session_character_session_id",None)
     return {"ok":True,"campaign":campaign}
+
+
+@app.get("/tables", response_class=HTMLResponse)
+def all_tables_page(request: Request):
+    if not player_allowed(request): return player_gate_redirect(request)
+    gm=is_gm(request);iid=_invite_id(request);wiki=_visible_wiki(request);maps=list_maps(settings,public=True)
+    campaigns=list_campaigns(settings,invite_id=iid,admin=gm,include_archived=gm)
+    today=__import__('datetime').date.today();end=today+__import__('datetime').timedelta(days=120)
+    cards=[]
+    for c in campaigns:
+        cid=int(c['id']);chars=list_player_characters(settings,invite_id=iid,admin=gm,campaign_id=cid)
+        own=[x for x in chars if iid is not None and int(x.get('invite_id') or -1)==int(iid)]
+        planner=None
+        if gm and c.get('status')=='active':
+            try: planner=campaign_schedule(settings,cid,today.isoformat(),end.isoformat())
+            except Exception: planner=None
+        cards.append({**c,'characters':chars,'own_characters':own,'planner':planner,'live_session':get_live_session(settings,invite_id=iid,admin=gm,campaign_id=cid)})
+    return templates.TemplateResponse('tables.html',{'request':request,'wiki':wiki,'maps':maps,'table_cards':cards,'gm_view':gm,'all_tables_view':True})
 
 
 @app.post("/api/admin/campaigns")
@@ -861,64 +880,44 @@ def map_page(request: Request, slug: str):
 @app.get("/api/public/search")
 def public_search(request: Request, q: str = ""):
     if not player_allowed(request): raise HTTPException(401)
-    qn = q.strip().lower()
+    qn = q.strip()
     if not qn: return []
     wiki = _visible_wiki(request)
-    # Aliases are already loaded with the spoiler-filtered Codex state; avoid an
-    # extra SQLite connection on every search keystroke.
-    alias_map = wiki.get("aliases", {})
+    pages=wiki.get("pages",[])
     ranked=[]
-    # Aliases and redirects resolve fantasy titles, old spellings, epithets, and
-    # hidden true names to the same canonical entry without duplicate pages.
-    for alias, target in alias_map.items():
-        if qn in alias or alias in qn:
-            p = next((x for x in wiki.get("pages",[]) if x.get("slug")==target), None)
-            if p:
-                ranked.append((88 if qn==alias else 42,{"type":"alias","href":f"/wiki/{p['slug']}","slug":p["slug"],"title":p["title"],"chapter":p.get("chapter"),"excerpt":f"Also known as {alias}. {p.get('excerpt','')}"}))
-    for p in wiki.get("pages", []):
-        visibility = p.get("presentation", {}).get("visibility", "public")
-        title=p["title"].lower()
-        text=(p.get("excerpt", "") if visibility == "teaser" else p.get("plain_text", "")).lower()
-        score=0
-        if qn == title: score += 100
-        else:
-            try:
-                import difflib
-                ratio=difflib.SequenceMatcher(None,qn,title).ratio()
-                if ratio>=0.72: score += int(ratio*24)
-            except Exception:
-                pass
-        if qn in title: score += 30
-        score += min(10, text.count(qn))
-        if all(term in text or term in title for term in qn.split()): score += 5
-        if score:
-            ranked.append((score, {"type":"lore","href":f"/wiki/{p['slug']}","slug":p["slug"],"title":p["title"],"chapter":p.get("chapter"),"excerpt":p.get("excerpt","")}))
-    # Player-owned character dossiers participate in the same command/search
-    # palette as campaign lore. Private characters are returned only to their
-    # owner (and the GM) by list_player_characters.
+    # Local semantic retrieval runs only over the already spoiler-filtered Codex.
+    for hit in semantic_search(pages,qn,limit=18):
+        ranked.append((float(hit.get("score") or 0)+20,{"type":"lore","href":f"/wiki/{hit['slug']}","slug":hit["slug"],"title":hit["title"],"chapter":hit.get("chapter"),"excerpt":hit.get("excerpt","") ,"semantic_matches":hit.get("semantic_matches",[])}))
+    alias_map = wiki.get("aliases", {})
+    low=qn.casefold()
+    by_slug={p.get("slug"):p for p in pages}
+    for alias,target in alias_map.items():
+        if low in alias.casefold() or alias.casefold() in low:
+            p=by_slug.get(target)
+            if p: ranked.append((120 if low==alias.casefold() else 65,{"type":"alias","href":f"/wiki/{p['slug']}","slug":p["slug"],"title":p["title"],"chapter":p.get("chapter"),"excerpt":f"Also known as {alias}. {p.get('excerpt','')}"}))
+    # Character dossiers and map locations stay in the same palette.
     for character in list_player_characters(settings, invite_id=_invite_id(request), admin=is_gm(request),campaign_id=_active_campaign_id(request)):
-        title=(character.get("name") or "").lower(); body=" ".join(str(character.get(k) or "") for k in ("summary","biography","goals","ancestry","class_name")).lower(); score=0
-        if qn==title: score+=100
-        if qn in title: score+=34
-        score+=min(9,body.count(qn))
-        if score:
-            ranked.append((score,{"type":"character","href":f"/characters/{character['id']}","title":character.get("name") or "Character","chapter":"Player Characters","excerpt":character.get("summary") or " · ".join(x for x in (character.get("ancestry"),character.get("class_name")) if x)}))
-
+        title=(character.get("name") or "").casefold(); body=" ".join(str(character.get(k) or "") for k in ("summary","biography","goals","ancestry","class_name")).casefold(); score=0
+        if low==title: score+=115
+        if low in title: score+=45
+        for t in re.findall(r"[\w'-]+",low):
+            if len(t)>2: score+=min(5,body.count(t))
+        if score: ranked.append((score,{"type":"character","href":f"/characters/{character['id']}","title":character.get("name") or "Character","chapter":"Player Characters","excerpt":character.get("summary") or " · ".join(x for x in (character.get("ancestry"),character.get("class_name")) if x)}))
     for map_data in list_maps(settings, public=True):
-        map_title = (map_data.get("name") or "").lower()
-        map_desc = (map_data.get("description") or "").lower()
-        score = (35 if qn in map_title else 0) + min(6, map_desc.count(qn))
-        if score:
-            ranked.append((score, {"type":"map","href":f"/atlas/{map_data['slug']}","title":map_data["name"],"chapter":"Atlas","excerpt":map_data.get("description","")}))
-        for marker in map_data.get("markers", []):
-            title = (marker.get("title") or "").lower(); body=(marker.get("body") or "").lower(); score=0
-            if qn == title: score += 90
-            if qn in title: score += 28
-            score += min(8, body.count(qn))
-            if score:
-                ranked.append((score,{"type":"location","href":f"/atlas/{map_data['slug']}?focus={marker['id']}","title":marker.get("title","Location"),"chapter":map_data["name"],"excerpt":marker.get("body","")}))
-    ranked.sort(key=lambda x:(-x[0],x[1]["title"]))
-    return [item for _,item in ranked[:24]]
+        map_title=(map_data.get("name") or "").casefold();map_desc=(map_data.get("description") or "").casefold();score=(45 if low in map_title else 0)+sum(min(3,map_desc.count(t)) for t in re.findall(r"[\w'-]+",low) if len(t)>2)
+        if score: ranked.append((score,{"type":"map","href":f"/atlas/{map_data['slug']}","title":map_data["name"],"chapter":"Atlas","excerpt":map_data.get("description","")}))
+        for marker in map_data.get("markers",[]):
+            title=(marker.get("title") or "").casefold();body=(marker.get("body") or "").casefold();ms=(100 if low==title else 38 if low in title else 0)+sum(min(3,body.count(t)) for t in re.findall(r"[\w'-]+",low) if len(t)>2)
+            if ms: ranked.append((ms,{"type":"location","href":f"/atlas/{map_data['slug']}?focus={marker['id']}","title":marker.get("title","Location"),"chapter":map_data["name"],"excerpt":marker.get("body","")}))
+    # De-duplicate the same Codex entry when an alias and semantic result both hit.
+    ranked.sort(key=lambda x:(-x[0],str(x[1].get("title") or "").casefold()))
+    out=[];seen=set()
+    for _score,item in ranked:
+        key=item.get("href") or (item.get("type"),item.get("title"))
+        if key in seen: continue
+        seen.add(key);out.append(item)
+        if len(out)>=24: break
+    return out
 
 
 @app.get("/manifest.webmanifest")
@@ -1201,7 +1200,11 @@ def page_card(request: Request, slug: str):
 @app.get("/api/public/annotations/{slug}")
 def public_annotations(request: Request, slug: str):
     if not player_allowed(request): raise HTTPException(401)
-    return list_annotations(settings,slug,invite_id=_invite_id(request),admin=is_gm(request))
+    iid=_invite_id(request);gm=is_gm(request)
+    rows=list_annotations(settings,slug,invite_id=iid,admin=gm)
+    for row in rows:
+        row["can_delete"]=bool(gm or (iid is not None and row.get("invite_id") is not None and int(row["invite_id"])==int(iid)))
+    return rows
 
 
 @app.post("/api/public/annotations")
@@ -1209,6 +1212,17 @@ def public_add_annotation(request: Request,payload:dict=Body(...)):
     if not player_allowed(request): raise HTTPException(401)
     invite=current_player_invite(request); label="GM" if is_gm(request) else (invite or {}).get("label","Player")
     return add_annotation(settings,payload,invite_id=_invite_id(request),author_label=label,admin=is_gm(request))
+
+
+@app.delete("/api/public/annotations/{annotation_id}")
+def public_delete_annotation(request: Request, annotation_id:int):
+    if not player_allowed(request): raise HTTPException(401)
+    try:
+        ok=delete_annotation(settings,annotation_id,invite_id=_invite_id(request),admin=is_gm(request))
+    except PermissionError as exc:
+        raise HTTPException(403,str(exc))
+    if not ok: raise HTTPException(404,"Note not found.")
+    return {"ok":True}
 
 
 @app.post("/api/public/bookmark/{slug}")
@@ -2710,14 +2724,12 @@ def lore_assistant_query(request:Request,payload:dict=Body(...)):
     if not player_allowed(request):raise HTTPException(401)
     q=str(payload.get('q') or '').strip()
     if not q:raise HTTPException(400,'Ask a question about the campaign.')
-    wiki=_visible_wiki(request);terms=[x for x in re.findall(r'[A-Za-z0-9]+',q.lower()) if len(x)>2]
-    ranked=[]
-    for p in wiki.get('pages',[]):
-        text=(p.get('plain_text') or '')[:12000];low=text.lower();score=sum(low.count(t) for t in terms)+(8 if any(t in p.get('title','').lower() for t in terms) else 0)
-        if score:ranked.append((score,p))
-    ranked.sort(key=lambda x:-x[0]);context=[]
-    for _,p in ranked[:8]:
-        plain=re.sub(r'\s+',' ',p.get('plain_text','')).strip();context.append({'title':p.get('title'),'slug':p.get('slug'),'text':plain[:1600]})
+    wiki=_visible_wiki(request);pages=wiki.get('pages',[])
+    hits=semantic_search(pages,q,limit=8);by_slug={p.get('slug'):p for p in pages};context=[]
+    for hit in hits:
+        p=by_slug.get(hit.get('slug')) or {}
+        plain=re.sub(r'\s+',' ',p.get('plain_text') or p.get('excerpt') or '').strip()
+        context.append({'title':hit.get('title'),'slug':hit.get('slug'),'text':plain[:1800],'semantic_matches':hit.get('semantic_matches',[])})
     api_key=(os.getenv('SEEKER_AI_API_KEY') or os.getenv('LOREFORGE_AI_API_KEY','')).strip();model=(os.getenv('SEEKER_AI_MODEL') or os.getenv('LOREFORGE_AI_MODEL','')).strip();base=(os.getenv('SEEKER_AI_BASE_URL') or os.getenv('LOREFORGE_AI_BASE_URL','https://api.openai.com/v1')).rstrip('/')
     if api_key and model and payload.get('use_ai',True):
         try:
@@ -2731,11 +2743,11 @@ def lore_assistant_query(request:Request,payload:dict=Body(...)):
             ai_error=str(exc)
         else: ai_error=''
     else:ai_error=''
-    if not context:return {'mode':'local','answer':'I could not find that in the lore currently visible to you.','sources':[],'ai_error':ai_error}
+    if not context:return {'mode':'semantic','answer':'I could not find that in the lore currently visible to you.','sources':[],'ai_error':ai_error}
     snippets=[]
     for c in context[:4]:
         snippets.append(f"{c['title']}: {c['text'][:420].rstrip()}…")
-    return {'mode':'local','answer':'\n\n'.join(snippets),'sources':[{k:c[k] for k in ('title','slug')} for c in context[:4]],'ai_error':ai_error}
+    return {'mode':'semantic','answer':'\n\n'.join(snippets),'sources':[{k:c[k] for k in ('title','slug')} for c in context[:4]],'ai_error':ai_error}
 
 
 @app.put("/api/admin/invitations/{invite_id}/role")

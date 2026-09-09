@@ -30,7 +30,7 @@ def test_effect_settings_roundtrip_and_validate(tmp_path: Path):
     assert updated['effects']['lightning'] is True
     assert updated['effects']['dragon_shadow'] is True
     assert updated['effects']['rune_pulses'] is True
-    assert updated['effects']['effect_intensity']==1.0
+    assert updated['effects']['effect_intensity']==1.6
     assert updated['effects']['motion_speed']==0.05
     assert updated['effects']['viewport_mode']=='cover'
 
