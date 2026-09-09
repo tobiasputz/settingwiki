@@ -893,3 +893,28 @@ def test_player_navigation_templates_keep_entry_headlines_text_only():
     assert "has-nav-art" not in page
     assert "--nav-entry-art" not in page
     assert "category.presentation.display_toc_image_url" in home
+
+
+def test_entity_outline_retains_exact_source_lines_for_admin_edit_bridge(tmp_path: Path):
+    s = make_settings(tmp_path); init_db(s)
+    source = r'''\documentclass{book}
+\newcommand{\pon}[1]{#1}
+\begin{document}
+\chapter{People}
+\pon{Corvina Dampierre}
+Intro.
+\section{Profile}
+Profile text.
+\section{Biography}
+Biography text.
+\subsection{The Revolution}
+Revolution text.
+\end{document}
+'''
+    (s.project_dir/'main.tex').write_text(source,encoding='utf-8')
+    page=next(x for x in build_wiki(s)['pages'] if x['title']=='Corvina Dampierre')
+    by_title={x['title']:x for x in page['outline']}
+    assert by_title['Profile']['source_file']=='main.tex'
+    assert by_title['Profile']['source_line']==7
+    assert by_title['Biography']['source_line']==9
+    assert by_title['The Revolution']['source_line']==11

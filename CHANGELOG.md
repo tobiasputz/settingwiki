@@ -1,3 +1,18 @@
+## 1.4.0 — personal invitation access + GM source bridge
+
+- Replaced the shared player-password assumption with **invitation-only access by default**. Every player can receive a unique signed bearer link from **Admin → Access**; there is no shared secret to distribute.
+- Added an Access workspace for creating, copying, expiring, revoking, restoring, rotating, and deleting personal invitations. Usage count, last-used time, and remembered browser/device count are shown per invitation.
+- Invitations can optionally be limited to a set number of browsers/devices. Reopening the link in the same remembered browser reuses its slot; the GM can reset remembered devices without changing the invitation URL.
+- Opening an invitation while already logged in as GM does not consume a player device slot, so testing/copying links cannot accidentally lock a one-device invitation.
+- Invitation links are signed with the persistent Loreforge session secret. The database stores an invitation nonce/version rather than a reusable global player password; rotating a link increments its access version and immediately invalidates old links and existing player sessions.
+- Revocation is checked on every protected request, including Codex pages, Atlas pages/assets, Lore Network, search, project images, uploaded map art, and PDF preview. Static application assets and the health endpoint remain public.
+- Added three player access modes: **Invitation links only** (default/recommended), legacy shared `PLAYER_PASSWORD`, and fully public. Creating an invitation automatically moves the site back to invite-only mode.
+- Railway deployments now default session cookies to Secure; local HTTP development remains supported.
+- Added a persistent **Edit source** control when the GM reads the player-facing Codex while logged in as admin. It opens the correct LaTeX file directly in Campaign Studio at the entry's source line.
+- Long Person-of-Note/entity articles now retain source locations for nested sections. As the GM scrolls through Biography/Profile/etc., the floating edit control follows the active section and opens that exact LaTeX line.
+- Admin deep links support `?file=...&line=...&from=...`, focus the CodeMirror cursor on the requested source line, and show **Back to entry** for a fast read → edit → return workflow.
+- Added regression coverage for invitation signing, expiry, rotation/revocation, per-device limits/reset, live-session invalidation, admin bypass, and nested-heading source-line retention.
+
 ## 1.3.11 — section-card navigation art
 
 - Restored the earlier Codex visual hierarchy: automatic first-image artwork now belongs to the **whole large chapter/section block**, not behind each individual entry headline.

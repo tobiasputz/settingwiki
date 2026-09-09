@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
+import secrets
 import json
 import shutil
 import sqlite3
@@ -52,6 +55,28 @@ CREATE TABLE IF NOT EXISTS edit_log (
     sha256 TEXT NOT NULL,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS player_invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    access_version INTEGER NOT NULL DEFAULT 1,
+    created_at REAL NOT NULL,
+    expires_at REAL,
+    max_devices INTEGER,
+    revoked_at REAL,
+    last_used_at REAL,
+    use_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS player_devices (
+    id TEXT PRIMARY KEY,
+    invite_id INTEGER NOT NULL,
+    access_version INTEGER NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL,
+    last_seen_at REAL NOT NULL,
+    FOREIGN KEY(invite_id) REFERENCES player_invites(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_player_devices_invite ON player_devices(invite_id, access_version);
 CREATE TABLE IF NOT EXISTS codex_presentation (
     target_type TEXT NOT NULL,
     target_key TEXT NOT NULL,
@@ -87,6 +112,9 @@ def init_db(settings: Settings) -> None:
         map_columns = {row[1] for row in conn.execute("PRAGMA table_info(maps)").fetchall()}
         if "effects_json" not in map_columns:
             conn.execute("ALTER TABLE maps ADD COLUMN effects_json TEXT NOT NULL DEFAULT '{}' ")
+        invite_columns = {row[1] for row in conn.execute("PRAGMA table_info(player_invites)").fetchall()}
+        if invite_columns and "max_devices" not in invite_columns:
+            conn.execute("ALTER TABLE player_invites ADD COLUMN max_devices INTEGER")
 
 
 def get_setting(settings: Settings, key: str, default: str = "") -> str:
@@ -103,6 +131,236 @@ def set_setting(settings: Settings, key: str, value: str) -> None:
         )
 
 
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _invite_signature(settings: Settings, invite_id: int, version: int, nonce: str) -> str:
+    payload = f"lf1.{int(invite_id)}.{int(version)}.{nonce}".encode("utf-8")
+    digest = hmac.new(settings.session_secret.encode("utf-8"), payload, hashlib.sha256).digest()
+    return _b64url(digest[:20])
+
+
+def _invite_token(settings: Settings, row: sqlite3.Row | dict) -> str:
+    invite_id = int(row["id"])
+    version = int(row["access_version"])
+    nonce = str(row["nonce"])
+    return f"lf1.{invite_id}.{version}.{nonce}.{_invite_signature(settings, invite_id, version, nonce)}"
+
+
+def _invite_payload(settings: Settings, row: sqlite3.Row | dict, now: float | None = None) -> dict:
+    now = time.time() if now is None else float(now)
+    data = dict(row)
+    expires_at = data.get("expires_at")
+    revoked_at = data.get("revoked_at")
+    expired = bool(expires_at is not None and float(expires_at) <= now)
+    revoked = bool(revoked_at is not None)
+    token = _invite_token(settings, data)
+    data.update({
+        "active": not expired and not revoked,
+        "expired": expired,
+        "revoked": revoked,
+        "token": token,
+        "invite_path": "/invite/" + token,
+    })
+    return data
+
+
+def create_player_invite(settings: Settings, label: str, expires_at: float | None = None, max_devices: int | None = None) -> dict:
+    label = str(label or "").strip()
+    if not label:
+        raise ValueError("Give the invitation a player name or label.")
+    if len(label) > 120:
+        raise ValueError("Invitation labels are limited to 120 characters.")
+    if expires_at is not None:
+        expires_at = float(expires_at)
+        if expires_at <= time.time():
+            raise ValueError("Invitation expiry must be in the future.")
+    if max_devices in ("", None, 0, "0"):
+        max_devices = None
+    else:
+        try:
+            max_devices = int(max_devices)
+        except (TypeError, ValueError):
+            raise ValueError("Device limit must be a number.")
+        if max_devices < 1 or max_devices > 20:
+            raise ValueError("Device limit must be between 1 and 20, or unlimited.")
+    nonce = secrets.token_urlsafe(18)
+    now = time.time()
+    with connect(settings) as conn:
+        cur = conn.execute(
+            "INSERT INTO player_invites(label,nonce,access_version,created_at,expires_at,max_devices) VALUES(?,?,?,?,?,?)",
+            (label, nonce, 1, now, expires_at, max_devices),
+        )
+        row = conn.execute("SELECT * FROM player_invites WHERE id=?", (cur.lastrowid,)).fetchone()
+    return _invite_payload(settings, row, now)
+
+
+def _attach_invite_devices(settings: Settings, payload: dict) -> dict:
+    with connect(settings) as conn:
+        rows = conn.execute(
+            "SELECT id,user_agent,created_at,last_seen_at FROM player_devices WHERE invite_id=? AND access_version=? ORDER BY created_at",
+            (int(payload["id"]), int(payload["access_version"])),
+        ).fetchall()
+    payload["devices"] = [dict(row) for row in rows]
+    payload["device_count"] = len(rows)
+    return payload
+
+
+def list_player_invites(settings: Settings) -> list[dict]:
+    with connect(settings) as conn:
+        rows = conn.execute("SELECT * FROM player_invites ORDER BY created_at DESC, id DESC").fetchall()
+    now = time.time()
+    return [_attach_invite_devices(settings, _invite_payload(settings, row, now)) for row in rows]
+
+
+def get_player_invite(settings: Settings, invite_id: int) -> dict | None:
+    try:
+        invite_id = int(invite_id)
+    except (TypeError, ValueError):
+        return None
+    with connect(settings) as conn:
+        row = conn.execute("SELECT * FROM player_invites WHERE id=?", (invite_id,)).fetchone()
+    return _attach_invite_devices(settings, _invite_payload(settings, row)) if row else None
+
+
+def resolve_player_invite(settings: Settings, token: str, *, record_use: bool = True) -> dict | None:
+    parts = str(token or "").split(".")
+    if len(parts) != 5 or parts[0] != "lf1":
+        return None
+    try:
+        invite_id = int(parts[1])
+        version = int(parts[2])
+    except ValueError:
+        return None
+    nonce, supplied_sig = parts[3], parts[4]
+    if not nonce or not supplied_sig:
+        return None
+    with connect(settings) as conn:
+        row = conn.execute("SELECT * FROM player_invites WHERE id=?", (invite_id,)).fetchone()
+        if not row:
+            return None
+        if int(row["access_version"]) != version or not secrets.compare_digest(str(row["nonce"]), nonce):
+            return None
+        expected = _invite_signature(settings, invite_id, version, nonce)
+        if not secrets.compare_digest(expected, supplied_sig):
+            return None
+        payload = _invite_payload(settings, row)
+        if not payload["active"]:
+            return None
+        if record_use:
+            now = time.time()
+            conn.execute("UPDATE player_invites SET last_used_at=?, use_count=use_count+1 WHERE id=?", (now, invite_id))
+            row = conn.execute("SELECT * FROM player_invites WHERE id=?", (invite_id,)).fetchone()
+            payload = _invite_payload(settings, row, now)
+    return payload
+
+
+def register_player_device(
+    settings: Settings, invite_id: int, version: int, *, existing_device_id: str | None = None, user_agent: str = ""
+) -> str:
+    invite = get_player_invite(settings, invite_id)
+    if not invite or not invite["active"] or int(invite["access_version"]) != int(version):
+        raise ValueError("Invitation is no longer active.")
+    now = time.time()
+    user_agent = str(user_agent or "")[:240]
+    with connect(settings) as conn:
+        if existing_device_id:
+            row = conn.execute(
+                "SELECT id FROM player_devices WHERE id=? AND invite_id=? AND access_version=?",
+                (str(existing_device_id), int(invite_id), int(version)),
+            ).fetchone()
+            if row:
+                conn.execute("UPDATE player_devices SET last_seen_at=?, user_agent=? WHERE id=?", (now, user_agent, row["id"]))
+                return str(row["id"])
+        count = conn.execute(
+            "SELECT COUNT(*) FROM player_devices WHERE invite_id=? AND access_version=?",
+            (int(invite_id), int(version)),
+        ).fetchone()[0]
+        limit = invite.get("max_devices")
+        if limit is not None and int(count) >= int(limit):
+            raise ValueError(f"This invitation has reached its {int(limit)}-device limit. Ask your GM to reset devices or create a new link.")
+        device_id = secrets.token_urlsafe(18)
+        conn.execute(
+            "INSERT INTO player_devices(id,invite_id,access_version,user_agent,created_at,last_seen_at) VALUES(?,?,?,?,?,?)",
+            (device_id, int(invite_id), int(version), user_agent, now, now),
+        )
+    return device_id
+
+
+def validate_player_invite_session(
+    settings: Settings, invite_id: int | None, version: int | None, device_id: str | None = None
+) -> dict | None:
+    if invite_id is None or version is None or not device_id:
+        return None
+    invite = get_player_invite(settings, invite_id)
+    if not invite or not invite["active"]:
+        return None
+    try:
+        if int(invite["access_version"]) != int(version):
+            return None
+    except (TypeError, ValueError):
+        return None
+    with connect(settings) as conn:
+        device = conn.execute(
+            "SELECT id FROM player_devices WHERE id=? AND invite_id=? AND access_version=?",
+            (str(device_id), int(invite_id), int(version)),
+        ).fetchone()
+    return invite if device else None
+
+
+def reset_player_invite_devices(settings: Settings, invite_id: int) -> dict:
+    invite = get_player_invite(settings, invite_id)
+    if not invite:
+        raise ValueError("Invitation not found.")
+    with connect(settings) as conn:
+        conn.execute("DELETE FROM player_devices WHERE invite_id=?", (int(invite_id),))
+    return get_player_invite(settings, invite_id)
+
+
+def revoke_player_invite(settings: Settings, invite_id: int) -> dict:
+    invite = get_player_invite(settings, invite_id)
+    if not invite:
+        raise ValueError("Invitation not found.")
+    with connect(settings) as conn:
+        conn.execute("UPDATE player_invites SET revoked_at=? WHERE id=?", (time.time(), int(invite_id)))
+        row = conn.execute("SELECT * FROM player_invites WHERE id=?", (int(invite_id),)).fetchone()
+    return _invite_payload(settings, row)
+
+
+def restore_player_invite(settings: Settings, invite_id: int) -> dict:
+    invite = get_player_invite(settings, invite_id)
+    if not invite:
+        raise ValueError("Invitation not found.")
+    with connect(settings) as conn:
+        conn.execute("UPDATE player_invites SET revoked_at=NULL WHERE id=?", (int(invite_id),))
+        row = conn.execute("SELECT * FROM player_invites WHERE id=?", (int(invite_id),)).fetchone()
+    return _invite_payload(settings, row)
+
+
+def rotate_player_invite(settings: Settings, invite_id: int) -> dict:
+    invite = get_player_invite(settings, invite_id)
+    if not invite:
+        raise ValueError("Invitation not found.")
+    nonce = secrets.token_urlsafe(18)
+    new_expiry = None if invite.get("expired") else invite.get("expires_at")
+    with connect(settings) as conn:
+        conn.execute(
+            "UPDATE player_invites SET nonce=?, access_version=access_version+1, revoked_at=NULL, expires_at=? WHERE id=?",
+            (nonce, new_expiry, int(invite_id)),
+        )
+        conn.execute("DELETE FROM player_devices WHERE invite_id=?", (int(invite_id),))
+        row = conn.execute("SELECT * FROM player_invites WHERE id=?", (int(invite_id),)).fetchone()
+    return _attach_invite_devices(settings, _invite_payload(settings, row))
+
+
+def delete_player_invite(settings: Settings, invite_id: int) -> None:
+    with connect(settings) as conn:
+        cur = conn.execute("DELETE FROM player_invites WHERE id=?", (int(invite_id),))
+    if cur.rowcount == 0:
+        raise ValueError("Invitation not found.")
 
 
 def _clamp_number(value, minimum: float, maximum: float, default: float) -> float:

@@ -30,7 +30,8 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 - **Edge-locked map navigation.** Player maps use a cover-style minimum zoom by default: when you pan, the map cannot be pushed past the viewport and reveal empty space beyond its edges. Wheel, buttons, and touch pinch all zoom around the pointer/fingers.
 - **Fantasy atmosphere studio.** Per-map switches include moving clouds, cloud shadows, rolling fog, valley mist, god rays, rain, lightning, snow, blizzards, ashfall, sand/dust, heat haze, ocean shimmer, moving wave crests, embers, fireflies, pollen, leaves, petals, birds, bats, rare dragon shadows, arcane motes, spectral wisps, cursed miasma, ley lines, rune pulses, glowing spores, aurora, stars, shooting stars, vignette, fogged edges, parchment warmth, moonlight, blood-moon tint, cartographer grid, and compass rose. Presets now include Calm Fantasy, Stormbound, Frozen North, Haunted Realm, Arcane Night, Volcanic Wastes, Ancient Parchment, Coastal Breeze, Autumn Road, Feywild Glade, Scorched Desert, Underdark, Blood Moon, Ancient Ruins, Blighted Realm, and High Fantasy.
 - **Revision safety.** Loreforge keeps up to 40 saved revisions of each file edited in the browser.
-- **Separate player and GM access.** The player wiki can be public or protected with `PLAYER_PASSWORD`; the editor uses `ADMIN_PASSWORD`.
+- **Personal player invitations.** Player access is invitation-only by default. **Admin → Access** creates one signed link per player; each link can be copied, expired, revoked, restored, rotated, device-limited, or have its remembered devices reset independently. Legacy shared-password and public modes remain available, while the editor continues to use `ADMIN_PASSWORD`.
+- **Read → edit source bridge.** When you browse the player Codex while logged in as GM, a persistent **Edit source** control opens the exact LaTeX file/line in Campaign Studio. On long Person-of-Note pages it follows the section currently being read, and the editor offers **Back to entry** after the correction.
 
 ## Repository layout
 
@@ -73,11 +74,14 @@ ADMIN_PASSWORD=<a strong GM password>
 Optional:
 
 ```text
-PLAYER_PASSWORD=<password for the player-facing wiki>
+# Only needed if you deliberately switch Admin → Access to Shared Password mode:
+PLAYER_PASSWORD=<legacy shared player password>
 LATEX_ENGINE=auto           # recommended; also accepts pdflatex / xelatex / lualatex
 LATEX_TIMEOUT=60
 LATEX_ALLOW_SHELL_ESCAPE=0
 ```
+
+The default player gate is **Invitation links only**, so normal deployments do not need `PLAYER_PASSWORD`. After logging into `/admin`, open **Access**, create one invitation for each player, and send each player their own link.
 
 If `ADMIN_PASSWORD` is omitted, Loreforge generates one on first startup, stores it in `/data/.admin_password`, and prints it to the service logs. Setting the variable explicitly is cleaner.
 
@@ -187,6 +191,31 @@ The PDF fallback macro can be defined in your source however you like, for examp
 ```
 
 In the player wiki, this becomes a link to the matching slug.
+
+## Invitation-only player access
+
+Open **Admin → Access**. Loreforge defaults to **Invitation links only**. Create one link per player with a recognizable label such as `Sarah` or `Piotr`. Opening that private URL establishes a signed Loreforge session in that browser and sends the player directly into the campaign—there is no shared player password.
+
+Each invitation shows its state, expiry, last-used time, invitation-open count, and remembered browser/device count. When creating a link you can optionally cap it to 1–5 devices in the UI (the backend accepts up to 20). From the same screen you can:
+
+- **Copy link** again at any time;
+- **Revoke** it, immediately invalidating browsers authenticated through that invitation on their next protected request;
+- **Replace / rotate** it, invalidating the old URL and all sessions from the previous version and clearing remembered devices;
+- **Reset devices** without changing the URL, useful after a player changes phone/browser; existing sessions stop working until the player reopens the link;
+- open/test an invitation while logged in as GM without consuming one of its player device slots;
+- **Restore** a revoked, non-expired invitation;
+- set an expiry when creating a link; and
+- permanently delete old invitation records.
+
+Invitation tokens are signed with Loreforge's persistent session secret and versioned per player. There is no global player secret to share, and the GM password is never placed in an invitation URL. As with any bearer link, a player can still forward their personal URL to someone else; a low device limit reduces casual sharing but is not identity verification. Treat the URL like a password and revoke/rotate it if it leaks.
+
+Two fallback modes exist for unusual deployments: **Shared Password** uses the legacy `PLAYER_PASSWORD` environment variable, and **Public** removes the player gate entirely. Creating a new personal invitation automatically switches the site back to invitation-only mode.
+
+## GM read → edit source bridge
+
+Open the player site from the same browser where you are logged into `/admin`. Codex entries then show an unobtrusive GM-only **Edit source** button plus a floating edit control that remains available while you scroll. Clicking it opens Campaign Studio at the corresponding `.tex` file and line. On long entity pages such as `\pon{...}` entries, Loreforge retains the source line for nested Profile/Biography/etc. headings, so the floating control follows the section currently in view.
+
+The editor URL uses `?file=...&line=...&from=...`; CodeMirror jumps to the requested line and the top bar shows **Back to entry**. This makes quick spelling/lore corrections a read → edit → return workflow rather than a manual file-tree search.
 
 ## Codex Studio and art direction
 
@@ -304,7 +333,9 @@ The player atlas also includes a type-filterable location panel, fixed-size mark
 
 ## Security notes
 
-- The editor is password protected.
+- The GM editor is password protected with `ADMIN_PASSWORD`.
+- The player site is **invitation-only by default**. Revoked/rotated invitation sessions are revalidated on protected requests, including Codex, Atlas, Lore Network, images/uploads, search, and PDF preview.
+- Railway deployments use Secure session cookies by default; local HTTP development automatically remains usable.
 - Zip imports are extracted with path-traversal protection.
 - File APIs cannot escape the campaign project root.
 - LaTeX compilation disables shell escape by default and asks TeX to restrict file access. If your trusted campaign requires `minted` or another shell-escape feature, you can explicitly set `LATEX_ALLOW_SHELL_ESCAPE=1`.

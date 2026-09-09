@@ -77,10 +77,18 @@
   const sceneParallax=[...document.querySelectorAll('.lore-scene-parallax')];
   if(sceneParallax.length&&!matchMedia('(prefers-reduced-motion: reduce)').matches){let sceneRaf=0;const updateScenes=()=>{sceneRaf=0;sceneParallax.forEach(el=>{const r=el.getBoundingClientRect(),offset=Math.max(-30,Math.min(30,(innerHeight/2-(r.top+r.height/2))*.045));el.style.setProperty('--scene-parallax',offset+'px')})};addEventListener('scroll',()=>{if(!sceneRaf)sceneRaf=requestAnimationFrame(updateScenes)},{passive:true});updateScenes()}
 
+  // GM source bridge: when the admin reads the player-facing Codex, a persistent
+  // edit control opens the exact LaTeX file/line in Campaign Studio. On long
+  // entity pages the target follows the currently active section.
+  const gmEditLinks=[...document.querySelectorAll('[data-gm-edit-source]')];
+  const gmEditHref=(file,line)=>{const u=new URL('/admin',location.origin),activeHash=document.querySelector('[data-outline-link].active')?.getAttribute('href')||location.hash||'';u.searchParams.set('file',file||'');u.searchParams.set('line',String(Math.max(1,Number(line)||1)));u.searchParams.set('from',location.pathname+location.search+activeHash);return u.pathname+u.search};
+  const updateGmEditTarget=(file,line)=>{if(!file)return;gmEditLinks.forEach(a=>{a.href=gmEditHref(file,line);a.dataset.sourceFile=file;a.dataset.sourceLine=String(line||1);const small=a.querySelector('small');if(small)small.textContent=`${file} · line ${line||1}`})};
+  if(gmEditLinks.length){const first=gmEditLinks[0];updateGmEditTarget(first.dataset.sourceFile,first.dataset.sourceLine)}
+
   // Long entries receive a compact local outline generated from their LaTeX
   // section/subsection structure. Highlight the section currently being read.
   const outline=document.querySelector('[data-article-outline]');
-  if(outline){const links=[...outline.querySelectorAll('[data-outline-link]')],heads=links.map(a=>document.getElementById(a.dataset.outlineLink)).filter(Boolean);if(heads.length){const activate=id=>links.forEach(a=>a.classList.toggle('active',a.dataset.outlineLink===id));const obs=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>a.boundingClientRect.top-b.boundingClientRect.top);if(visible[0])activate(visible[0].target.id)},{rootMargin:'-18% 0px -68% 0px',threshold:[0,1]});heads.forEach(h=>obs.observe(h));links.forEach(a=>a.addEventListener('click',()=>activate(a.dataset.outlineLink)))}}
+  if(outline){const links=[...outline.querySelectorAll('[data-outline-link]')],heads=links.map(a=>document.getElementById(a.dataset.outlineLink)).filter(Boolean);if(heads.length){const activate=id=>{links.forEach(a=>a.classList.toggle('active',a.dataset.outlineLink===id));const active=links.find(a=>a.dataset.outlineLink===id);if(active?.dataset.sourceFile)updateGmEditTarget(active.dataset.sourceFile,active.dataset.sourceLine)};const obs=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>a.boundingClientRect.top-b.boundingClientRect.top);if(visible[0])activate(visible[0].target.id)},{rootMargin:'-18% 0px -68% 0px',threshold:[0,1]});heads.forEach(h=>obs.observe(h));links.forEach(a=>a.addEventListener('click',()=>activate(a.dataset.outlineLink)))}}
 
   // Private browser-side player journal: bookmarks + recently viewed pages.
   const pageShell=document.querySelector('[data-page-slug]');

@@ -20,9 +20,11 @@ from .config import load_settings
 from .latex import analyze_project, build_wiki, choose_main, compile_pdf, compiled_pdf_path, load_wiki
 from .maps import create_map, create_marker, delete_map, delete_marker, get_map, list_maps, update_map, update_marker
 from .storage import (
-    export_project_zip, get_setting, init_db, list_project_files, list_revisions,
-    cleanup_legacy_import_artifacts, get_codex_presentation, replace_project_from_zip, restore_revision,
-    safe_project_path, save_codex_presentation, save_text_file, seed_project, set_setting, storage_report,
+    cleanup_legacy_import_artifacts, create_player_invite, delete_player_invite, export_project_zip,
+    get_codex_presentation, get_setting, init_db, list_player_invites, list_project_files, list_revisions,
+    register_player_device, replace_project_from_zip, reset_player_invite_devices, resolve_player_invite,
+    restore_player_invite, restore_revision, revoke_player_invite, rotate_player_invite, safe_project_path,
+    save_codex_presentation, save_text_file, seed_project, set_setting, storage_report, validate_player_invite_session,
 )
 
 settings = load_settings()
@@ -30,7 +32,11 @@ init_db(settings)
 seed_project(settings)
 
 app = FastAPI(title="Loreforge", docs_url=None, redoc_url=None)
-app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, https_only=False, same_site="lax")
+_secure_session_cookie = os.getenv("SESSION_COOKIE_SECURE", "1" if os.getenv("RAILWAY_ENVIRONMENT") else "0").lower() in {"1", "true", "yes"}
+app.add_middleware(
+    SessionMiddleware, secret_key=settings.session_secret, https_only=_secure_session_cookie,
+    same_site="lax", max_age=60 * 60 * 24 * 30,
+)
 app.mount("/static", StaticFiles(directory=settings.root_dir / "static"), name="static")
 templates = Jinja2Templates(directory=settings.root_dir / "templates")
 
@@ -44,8 +50,32 @@ def require_admin(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Admin login required")
 
 
+def player_access_mode() -> str:
+    mode = get_setting(settings, "player_access_mode", "invite").strip().lower()
+    return mode if mode in {"invite", "password", "public"} else "invite"
+
+
+def current_player_invite(request: Request) -> dict | None:
+    return validate_player_invite_session(
+        settings, request.session.get("player_invite_id"), request.session.get("player_invite_version"),
+        request.session.get("player_device_id"),
+    )
+
+
 def player_allowed(request: Request) -> bool:
-    return settings.player_password is None or bool(request.session.get("player")) or is_admin(request)
+    if is_admin(request):
+        return True
+    mode = player_access_mode()
+    if mode == "public":
+        return True
+    if mode == "password":
+        return bool(settings.player_password and request.session.get("player_password"))
+    return current_player_invite(request) is not None
+
+
+def player_gate_redirect(request: Request) -> RedirectResponse:
+    mode = player_access_mode()
+    return RedirectResponse("/login" if mode == "password" else "/access", status_code=303)
 
 
 def ensure_built() -> dict:
@@ -108,15 +138,73 @@ def health() -> dict:
     return {"ok": True, "project": bool(list(settings.project_dir.rglob("*.tex")))}
 
 
+@app.get("/access", response_class=HTMLResponse)
+def invitation_required_page(request: Request):
+    if player_allowed(request):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "mode": "invite", "title": ensure_built().get("title", "Campaign Atlas")},
+        status_code=401,
+    )
+
+
+@app.get("/invite/{token}")
+def accept_player_invite(request: Request, token: str):
+    invite = resolve_player_invite(settings, token, record_use=False)
+    if not invite:
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request, "mode": "invite", "title": ensure_built().get("title", "Campaign Atlas"),
+                "error": "This invitation is invalid, expired, or has been revoked. Ask your GM for a new link.",
+            },
+            status_code=403,
+        )
+    target = request.query_params.get("next", "/")
+    if not target.startswith("/") or target.startswith("//"):
+        target = "/"
+    # A GM following a link to inspect it should never consume one of a player's
+    # optional device slots. The admin session already has player-view access.
+    if is_admin(request):
+        return RedirectResponse(target, status_code=303)
+
+    old_device = None
+    if request.session.get("player_invite_id") == int(invite["id"]) and request.session.get("player_invite_version") == int(invite["access_version"]):
+        old_device = request.session.get("player_device_id")
+    try:
+        device_id = register_player_device(
+            settings, int(invite["id"]), int(invite["access_version"]),
+            existing_device_id=old_device, user_agent=request.headers.get("user-agent", ""),
+        )
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "mode": "invite", "title": ensure_built().get("title", "Campaign Atlas"), "error": str(exc)},
+            status_code=403,
+        )
+    invite = resolve_player_invite(settings, token, record_use=True) or invite
+    request.session.clear()
+    request.session["player_invite_id"] = int(invite["id"])
+    request.session["player_invite_version"] = int(invite["access_version"])
+    request.session["player_invite_label"] = str(invite["label"])
+    request.session["player_device_id"] = device_id
+    return RedirectResponse(target, status_code=303)
+
+
 @app.get("/login", response_class=HTMLResponse)
 def player_login_page(request: Request):
+    if player_access_mode() != "password":
+        return RedirectResponse("/access", status_code=303)
     return templates.TemplateResponse("login.html", {"request": request, "mode": "player", "title": ensure_built().get("title", "Campaign Atlas")})
 
 
 @app.post("/login")
 def player_login(request: Request, password: str = Form(...)):
-    if settings.player_password is None or secrets.compare_digest(password, settings.player_password):
-        request.session["player"] = True
+    if player_access_mode() != "password":
+        return RedirectResponse("/access", status_code=303)
+    if settings.player_password and secrets.compare_digest(password, settings.player_password):
+        request.session["player_password"] = True
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse("login.html", {"request": request, "mode": "player", "error": "Wrong password.", "title": ensure_built().get("title", "Campaign Atlas")}, status_code=401)
 
@@ -130,7 +218,6 @@ def admin_login_page(request: Request):
 def admin_login(request: Request, password: str = Form(...)):
     if secrets.compare_digest(password, settings.admin_password):
         request.session["admin"] = True
-        request.session["player"] = True
         return RedirectResponse("/admin", status_code=303)
     return templates.TemplateResponse("login.html", {"request": request, "mode": "admin", "error": "Wrong password.", "title": "Loreforge Editor"}, status_code=401)
 
@@ -142,7 +229,7 @@ def logout(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    if not player_allowed(request): return RedirectResponse("/login")
+    if not player_allowed(request): return player_gate_redirect(request)
     wiki = _visible_wiki(request); maps = list_maps(settings, public=True)
     featured = [p for p in wiki.get("pages", []) if p.get("presentation", {}).get("featured")][:6]
     return templates.TemplateResponse("home.html", {"request": request, "wiki": wiki, "maps": maps, "featured": featured})
@@ -150,7 +237,7 @@ def home(request: Request):
 
 @app.get("/wiki/{slug}", response_class=HTMLResponse)
 def wiki_page(request: Request, slug: str):
-    if not player_allowed(request): return RedirectResponse("/login")
+    if not player_allowed(request): return player_gate_redirect(request)
     wiki = _visible_wiki(request); pages = wiki.get("pages", [])
     page = next((p for p in pages if p["slug"] == slug), None)
     if not page: raise HTTPException(404, "Wiki page not found")
@@ -158,12 +245,18 @@ def wiki_page(request: Request, slug: str):
     prev_page = pages[idx-1] if idx > 0 else None
     next_page = pages[idx+1] if idx + 1 < len(pages) else None
     page_locked = (not is_admin(request) and page.get("presentation", {}).get("visibility") == "teaser")
-    return templates.TemplateResponse("page.html", {"request": request, "wiki": wiki, "page": page, "prev_page": prev_page, "next_page": next_page, "page_locked": page_locked})
+    return templates.TemplateResponse(
+        "page.html",
+        {
+            "request": request, "wiki": wiki, "page": page, "prev_page": prev_page, "next_page": next_page,
+            "page_locked": page_locked, "admin_view": is_admin(request),
+        },
+    )
 
 
 @app.get("/network", response_class=HTMLResponse)
 def lore_network(request: Request):
-    if not player_allowed(request): return RedirectResponse("/login")
+    if not player_allowed(request): return player_gate_redirect(request)
     wiki = _visible_wiki(request)
     maps = list_maps(settings, public=True)
     allowed = {p.get("slug") for p in wiki.get("pages", [])}
@@ -187,7 +280,7 @@ def lore_network(request: Request):
 
 @app.get("/atlas/{slug}", response_class=HTMLResponse)
 def map_page(request: Request, slug: str):
-    if not player_allowed(request): return RedirectResponse("/login")
+    if not player_allowed(request): return player_gate_redirect(request)
     wiki = _visible_wiki(request); map_data = get_map(settings, slug, public=True)
     if not map_data: raise HTTPException(404, "Map not found")
     return templates.TemplateResponse("map.html", {"request": request, "wiki": wiki, "map": map_data})
@@ -286,6 +379,8 @@ def admin_status(request: Request):
         "main_file":get_setting(settings,"main_file","") or analysis.get("main_file",""),
         "auto_link_codex":get_setting(settings,"auto_link_codex","1").strip().lower() not in {"0","false","no","off"},
         "auto_navigation_art":get_setting(settings,"auto_navigation_art","1").strip().lower() not in {"0","false","no","off"},
+        "player_access_mode":player_access_mode(),
+        "active_invites":sum(1 for row in list_player_invites(settings) if row.get("active")),
         "storage":storage_report(settings),
     }
 
@@ -294,6 +389,93 @@ def admin_status(request: Request):
 def admin_storage_cleanup(request: Request):
     require_admin(request)
     return cleanup_legacy_import_artifacts(settings)
+
+
+@app.get("/api/admin/access")
+def admin_access(request: Request):
+    require_admin(request)
+    return {
+        "mode": player_access_mode(),
+        "legacy_password_configured": bool(settings.player_password),
+        "invitations": list_player_invites(settings),
+    }
+
+
+@app.put("/api/admin/access")
+def admin_access_update(request: Request, payload: dict = Body(...)):
+    require_admin(request)
+    mode = str(payload.get("mode") or "invite").strip().lower()
+    if mode not in {"invite", "password", "public"}:
+        raise HTTPException(400, "Access mode must be invite, password, or public.")
+    if mode == "password" and not settings.player_password:
+        raise HTTPException(400, "Set PLAYER_PASSWORD in Railway before enabling shared-password mode.")
+    set_setting(settings, "player_access_mode", mode)
+    return {"ok": True, "mode": mode}
+
+
+@app.post("/api/admin/invitations")
+def admin_invitation_create(request: Request, payload: dict = Body(...)):
+    require_admin(request)
+    expires_at = payload.get("expires_at")
+    if expires_at in ("", None):
+        expires_at = None
+    try:
+        invite = create_player_invite(
+            settings, str(payload.get("label") or ""), expires_at, payload.get("max_devices")
+        )
+        # Creating a personal invitation is an explicit choice to use the private
+        # invitation gate. Keep the backend authoritative instead of relying on
+        # the browser to make a second request.
+        set_setting(settings, "player_access_mode", "invite")
+        return invite
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/admin/invitations/{invite_id}/revoke")
+def admin_invitation_revoke(request: Request, invite_id: int):
+    require_admin(request)
+    try:
+        return revoke_player_invite(settings, invite_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.post("/api/admin/invitations/{invite_id}/restore")
+def admin_invitation_restore(request: Request, invite_id: int):
+    require_admin(request)
+    try:
+        return restore_player_invite(settings, invite_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.post("/api/admin/invitations/{invite_id}/rotate")
+def admin_invitation_rotate(request: Request, invite_id: int):
+    require_admin(request)
+    try:
+        return rotate_player_invite(settings, invite_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.post("/api/admin/invitations/{invite_id}/reset-devices")
+def admin_invitation_reset_devices(request: Request, invite_id: int):
+    require_admin(request)
+    try:
+        return reset_player_invite_devices(settings, invite_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.delete("/api/admin/invitations/{invite_id}")
+def admin_invitation_delete(request: Request, invite_id: int):
+    require_admin(request)
+    try:
+        delete_player_invite(settings, invite_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
 
 
 @app.get("/api/admin/files")

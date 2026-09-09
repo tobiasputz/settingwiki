@@ -50,6 +50,7 @@ class WikiPage:
     source_line: int
     excerpt: str
     order: int
+    heading_sources: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -420,10 +421,11 @@ _GENERIC_LINK_TITLES = {
 }
 
 
-def _annotate_headings(html_body: str) -> tuple[str, list[dict]]:
-    """Give article headings stable anchors and return a compact page outline."""
+def _annotate_headings(html_body: str, heading_sources: list[dict] | None = None) -> tuple[str, list[dict]]:
+    """Give article headings stable anchors and retain their LaTeX source locations."""
     used: dict[str, int] = {}
     outline: list[dict] = []
+    sources = list(heading_sources or [])
 
     def sub(m: re.Match) -> str:
         level = int(m.group(1))
@@ -432,7 +434,12 @@ def _annotate_headings(html_body: str) -> tuple[str, list[dict]]:
         base = slugify(title) or "section"
         used[base] = used.get(base, 0) + 1
         anchor = base if used[base] == 1 else f"{base}-{used[base]}"
-        outline.append({"level": level, "id": anchor, "title": title})
+        source = sources[len(outline)] if len(outline) < len(sources) else {}
+        item = {"level": level, "id": anchor, "title": title}
+        if source.get("source_file"):
+            item["source_file"] = source["source_file"]
+            item["source_line"] = int(source.get("source_line") or 1)
+        outline.append(item)
         return f'<h{level} id="{html.escape(anchor, quote=True)}">{inner}<a class="heading-anchor" href="#{html.escape(anchor, quote=True)}" aria-label="Link to {html.escape(title, quote=True)}">#</a></h{level}>'
 
     rendered = re.sub(r"<h([2-4])>(.*?)</h\1>", sub, html_body, flags=re.DOTALL)
@@ -542,7 +549,7 @@ def build_wiki(settings: Settings) -> dict:
     current_level = "section"
     current_source = analysis["main_file"]
     current_line = 1
-    buffer: list[str] = []
+    buffer: list[SourceLine] = []
     entity_mode = False
     order = 0
     used_slugs: dict[str, int] = {}
@@ -557,7 +564,15 @@ def build_wiki(settings: Settings) -> dict:
         if not current_title:
             buffer = []
             return
-        raw = "\n".join(buffer).strip()
+        raw = "\n".join(item.text for item in buffer).strip()
+        heading_sources = []
+        for buffered in buffer:
+            hm = HEADING_RE.search(buffered.text)
+            if hm and hm.group(1) in {"section", "subsection", "subsubsection"}:
+                heading_sources.append({
+                    "source_file": buffered.path, "source_line": buffered.line,
+                    "title": clean_inline_text(hm.group(2)),
+                })
         # Chapter/part headings are often structural containers only. Do not
         # create blank player pages when the next meaningful item is a \pon
         # or section; the heading still remains the navigation category.
@@ -569,7 +584,7 @@ def build_wiki(settings: Settings) -> dict:
         pages.append(WikiPage(
             slug=unique_slug(current_title), title=current_title, chapter=chapter,
             level=current_level, html=body_html, plain_text=plain, source_file=current_source,
-            source_line=current_line, excerpt=excerpt, order=order,
+            source_line=current_line, excerpt=excerpt, order=order, heading_sources=heading_sources,
         ))
         order += 1
         buffer = []
@@ -612,7 +627,7 @@ def build_wiki(settings: Settings) -> dict:
             # In the PDF those sections often live on multiple pages, but on
             # the wiki they make much more sense as one character article.
             if entity_mode and match and match.group(1) in {"section", "subsection", "subsubsection"}:
-                buffer.append(line)
+                buffer.append(SourceLine(src.path, src.line, line))
                 if should_end:
                     in_document = False
                 continue
@@ -640,9 +655,9 @@ def build_wiki(settings: Settings) -> dict:
             current_source = src.path
             current_line = src.line
             if remainder:
-                buffer.append(remainder)
+                buffer.append(SourceLine(src.path, src.line, remainder))
         elif current_title:
-            buffer.append(line)
+            buffer.append(SourceLine(src.path, src.line, line))
         if should_end:
             in_document = False
     flush()
@@ -659,7 +674,7 @@ def build_wiki(settings: Settings) -> dict:
     for page in pages:
         item = asdict(page)
         item["presentation"] = _presentation_for_web(settings, presentations.get(("page", page.slug), {}))
-        item["html"], item["outline"] = _annotate_headings(item.get("html", ""))
+        item["html"], item["outline"] = _annotate_headings(item.get("html", ""), item.pop("heading_sources", []))
         auto_image = _first_rendered_image_url(item["html"])
         # Keep automatic first-image artwork at the *section-card* level, not
         # behind every individual entry headline.  Explicit per-entry TOC artwork
