@@ -77,6 +77,8 @@ from .v51 import (
 from .v6 import (
     init_v6_db, integration_config, save_integration_config, discord_post, discord_session_confirmation,
     foundry_accept, foundry_state, foundry_actors, foundry_link, foundry_link_for_character, foundry_manifest, build_foundry_module_zip,
+    list_foundry_prepared_content, save_foundry_prepared_content, delete_foundry_prepared_content,
+    queue_foundry_command, complete_foundry_commands, recent_foundry_commands,
     calendar_feed, session_ics,
     sync_lore_revisions, lore_revisions, lore_revision_diff, restore_lore_source_revision, page_update_status, knowledge_matrix, converge_campaigns,
     changes_since_last_session, continuity_v6, player_dashboard, command_rows, save_map_annotation, list_map_annotations, delete_map_annotation,
@@ -186,6 +188,13 @@ def player_role(request: Request) -> str:
         return "owner"
     invite=current_player_invite(request)
     return str((invite or {}).get("role") or "player").lower()
+
+
+def requester_label(request: Request) -> str:
+    if is_admin(request):
+        return 'GM'
+    invite=current_player_invite(request)
+    return str((invite or {}).get('label') or (invite or {}).get('name') or 'Player')[:160]
 
 
 def archive_mode() -> bool:
@@ -3487,6 +3496,21 @@ def v6_integrations_page(request: Request):
     return templates.TemplateResponse('gm_integrations.html', {'request':request,'wiki':_visible_wiki(request),'maps':list_maps(settings,public=True),'integration':cfg,'campaign':camp,'foundry':foundry_state(settings,cid),'foundry_actors':foundry_actors(settings,cid)})
 
 
+@app.get('/gm/foundry-workshop', response_class=HTMLResponse)
+def v61_foundry_workshop_page(request: Request):
+    require_gm(request)
+    cid=_active_campaign_id(request)
+    return templates.TemplateResponse('gm_foundry_workshop.html', {
+        'request':request,
+        'wiki':_visible_wiki(request),
+        'maps':list_maps(settings,public=True),
+        'foundry':foundry_state(settings,cid),
+        'foundry_actors':foundry_actors(settings,cid),
+        'prepared_content':list_foundry_prepared_content(settings,cid),
+        'command_log':recent_foundry_commands(settings,cid),
+    })
+
+
 @app.get('/gm/media', response_class=HTMLResponse)
 def v6_media_page(request: Request, session_id: int|None=None):
     require_gm(request);cid=_active_campaign_id(request);sessions=list_sessions(settings,campaign_id=cid)
@@ -3556,6 +3580,11 @@ def v6_foundry_push_options(campaign_id:int):
     return Response(status_code=204,headers=_FOUNDRY_CORS)
 
 
+@app.options('/api/v6/foundry/push/{campaign_id}/ack')
+def v61_foundry_push_ack_options(campaign_id:int):
+    return Response(status_code=204,headers=_FOUNDRY_CORS)
+
+
 @app.post('/api/v6/foundry/push/{campaign_id}')
 def v6_foundry_push(campaign_id:int,token:str='',payload:dict=Body(...)):
     try:
@@ -3566,6 +3595,17 @@ def v6_foundry_push(campaign_id:int,token:str='',payload:dict=Body(...)):
         # Keep CORS headers even on a bridge-side server failure so Foundry can
         # report the HTTP status instead of masking it as a generic CORS error.
         return JSONResponse({'detail':'Seeker could not store the Foundry bridge state.'},status_code=500,headers=_FOUNDRY_CORS)
+
+
+@app.post('/api/v6/foundry/push/{campaign_id}/ack')
+def v61_foundry_push_ack(campaign_id:int,token:str='',payload:dict=Body(...)):
+    try:
+        rows=payload.get('results') if isinstance(payload.get('results'),list) else []
+        return JSONResponse(complete_foundry_commands(settings,campaign_id,token,rows),headers=_FOUNDRY_CORS)
+    except PermissionError as exc:
+        return JSONResponse({'detail':str(exc)},status_code=403,headers=_FOUNDRY_CORS)
+    except Exception:
+        return JSONResponse({'detail':'Seeker could not acknowledge the Foundry action results.'},status_code=500,headers=_FOUNDRY_CORS)
 
 
 @app.get('/api/v6/foundry/state')
@@ -3583,7 +3623,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.1.2.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.2.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -3591,7 +3631,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.1.2.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.2.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 
@@ -3605,6 +3645,79 @@ def v61_foundry_actors(request:Request,campaign_id:int|None=None):
         if iid is None or not invite_has_campaign(settings,iid,cid):raise HTTPException(403,'You are not a member of that campaign.')
     rows=foundry_actors(settings,cid)
     return [{k:v for k,v in r.items() if k!='sheet'} for r in rows]
+
+
+@app.get('/api/v61/foundry/workshop')
+def v61_foundry_workshop_state(request:Request):
+    require_gm(request)
+    cid=_active_campaign_id(request)
+    return {
+        'foundry':foundry_state(settings,cid),
+        'actors':[{k:v for k,v in r.items() if k!='sheet'} for r in foundry_actors(settings,cid)],
+        'prepared_content':list_foundry_prepared_content(settings,cid),
+        'commands':recent_foundry_commands(settings,cid),
+    }
+
+
+@app.post('/api/v61/foundry/content')
+def v61_foundry_content_save(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_foundry_prepared_content(settings,_active_campaign_id(request),payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v61/foundry/content/{item_id}')
+def v61_foundry_content_delete(request:Request,item_id:int):
+    require_gm(request);delete_foundry_prepared_content(settings,_active_campaign_id(request),item_id);return {'ok':True}
+
+
+@app.post('/api/v61/foundry/content/{item_id}/push')
+def v61_foundry_content_push(request:Request,item_id:int,payload:dict=Body(...)):
+    require_gm(request)
+    cid=_active_campaign_id(request)
+    item=next((x for x in list_foundry_prepared_content(settings,cid) if int(x.get('id') or 0)==int(item_id)),None)
+    if not item: raise HTTPException(404,'Prepared content not found.')
+    target_type=str(payload.get('target_type') or item.get('target_type') or 'world').lower()
+    actor_id=str(payload.get('actor_id') or '').strip()
+    if target_type not in {'world','actor'}: raise HTTPException(400,'target_type must be world or actor.')
+    if target_type=='actor' and not actor_id: raise HTTPException(400,'Choose a target actor.')
+    command=queue_foundry_command(settings,cid,'grant_prepared_content' if target_type=='actor' else 'push_prepared_content',{
+        'prepared_id':int(item['id']),
+        'prepared_kind':item.get('kind'),
+        'title':item.get('title'),
+        'subtitle':item.get('subtitle'),
+        'summary':item.get('summary'),
+        'tags':item.get('tags'),
+        'target_type':target_type,
+        'data':item.get('payload') or {},
+    },actor_id=actor_id,scope=target_type,requested_by=requester_label(request))
+    return {'ok':True,'command':command}
+
+
+@app.post('/api/v61/characters/{character_id}/foundry/action')
+def v61_character_foundry_action(request:Request,character_id:int,payload:dict=Body(...)):
+    if not player_allowed(request): raise HTTPException(401)
+    char=_character_owned(request,character_id)
+    link=foundry_link_for_character(settings,character_id)
+    if not link or not link.get('actor_id'): raise HTTPException(400,'This character is not linked to a Foundry actor.')
+    action=str(payload.get('action') or '').strip().lower()
+    if action=='adjust_resource':
+        resource=str(payload.get('resource') or '').strip().lower()
+        if resource not in {'hp','temp_hp','hero_points','focus'}: raise HTTPException(400,'Unsupported resource.')
+        try: delta=max(-999,min(999,int(payload.get('delta') or 0)))
+        except Exception: raise HTTPException(400,'delta must be an integer.')
+        if delta==0: raise HTTPException(400,'delta cannot be zero.')
+        command=queue_foundry_command(settings,int(link['campaign_id']),'adjust_resource',{'resource':resource,'delta':delta,'character_id':int(character_id),'character_name':char.get('name')},actor_id=str(link['actor_id']),requested_by=requester_label(request))
+    elif action=='adjust_item_quantity':
+        item_id=str(payload.get('item_id') or '').strip();
+        if not item_id: raise HTTPException(400,'item_id is required.')
+        try: delta=max(-99,min(99,int(payload.get('delta') or 0)))
+        except Exception: raise HTTPException(400,'delta must be an integer.')
+        if delta==0: raise HTTPException(400,'delta cannot be zero.')
+        command=queue_foundry_command(settings,int(link['campaign_id']),'adjust_item_quantity',{'item_id':item_id,'delta':delta,'character_id':int(character_id),'character_name':char.get('name')},actor_id=str(link['actor_id']),requested_by=requester_label(request))
+    else:
+        raise HTTPException(400,'Unsupported Foundry action.')
+    return {'ok':True,'command':command}
 
 
 @app.put('/api/v61/characters/{character_id}/foundry-link')

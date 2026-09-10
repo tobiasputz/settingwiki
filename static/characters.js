@@ -7,6 +7,7 @@ let pages=[];try{pages=JSON.parse($('#characterWikiPages')?.textContent||'[]')}c
 let sessions=[];try{sessions=JSON.parse($('#characterSessionsData')?.textContent||'[]')}catch(_){ }
 const api=async(u,o={})=>{const r=await fetch(u,o),b=await r.json().catch(()=>({}));if(!r.ok)throw Error(b.detail||'Request failed');return b};
 const send=(u,m,b)=>api(u,{method:m,headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+const toast=(msg,bad=false)=>{const n=document.createElement('div');n.className=`v6-toast${bad?' bad':''}`;n.textContent=msg;document.body.appendChild(n);requestAnimationFrame(()=>n.classList.add('show'));setTimeout(()=>{n.classList.remove('show');setTimeout(()=>n.remove(),220)},2200)};
 const modal=$('#characterEditorModal'),form=$('#characterEditorForm');
 async function loadFoundryActors(campaignId,selected=''){
   const select=$('#charFoundryActor');if(!select)return;
@@ -29,6 +30,29 @@ $$('[data-character-image]').forEach(input=>input.addEventListener('change',asyn
 $$('[data-delete-character-image]').forEach(b=>b.onclick=async()=>{if(!confirm('Remove this image?'))return;try{await api('/api/player/character-images/'+b.dataset.deleteCharacterImage,{method:'DELETE'});location.reload()}catch(e){alert(e.message)}});
 $$('[data-foundry-tab]').forEach(b=>b.onclick=()=>{const key=b.dataset.foundryTab;$$('[data-foundry-tab]').forEach(x=>x.classList.toggle('active',x===b));$$('[data-foundry-pane]').forEach(x=>x.classList.toggle('active',x.dataset.foundryPane===key))});
 $('[data-foundry-refresh]')?.addEventListener('click',()=>location.reload());
+const foundryRoot=$('[data-foundry-character]');
+async function queueFoundryAction(body,button){
+  if(!single?.id)return;
+  if(button){button.disabled=true;button.dataset.busy='1'}
+  try{
+    await send(`/api/v61/characters/${single.id}/foundry/action`,'POST',body);
+    toast('Sent to Foundry. The bridge will apply it on the next sync.');
+    setTimeout(()=>location.reload(),900);
+  }catch(err){toast(err.message||'Could not reach Foundry.',true)}
+  finally{if(button){button.disabled=false;delete button.dataset.busy}}
+}
+foundryRoot?.addEventListener('click',e=>{
+  const resource=e.target.closest('[data-foundry-resource]');
+  if(resource){
+    const delta=parseInt(resource.dataset.foundryDelta||'0',10);
+    return queueFoundryAction({action:'adjust_resource',resource:resource.dataset.foundryResource,delta},resource);
+  }
+  const item=e.target.closest('[data-foundry-item]');
+  if(item){
+    const delta=parseInt(item.dataset.foundryDelta||'0',10);
+    return queueFoundryAction({action:'adjust_item_quantity',item_id:item.dataset.foundryItem,delta},item);
+  }
+});
 if(!single)return;
 function quick(html){const wrap=document.createElement('div');wrap.className='character-quick-modal';wrap.innerHTML=`<div class="character-quick-card"><button data-qclose>×</button>${html}</div>`;document.body.appendChild(wrap);wrap.querySelector('[data-qclose]').onclick=()=>wrap.remove();wrap.onclick=e=>{if(e.target===wrap)wrap.remove()};return wrap}
 function arcForm(row={}){const m=quick(`<span class="eyebrow">CHARACTER ARC</span><h2>${row.id?'Edit':'Add'} personal thread</h2><label>Title<input id="qaTitle" value="${esc(row.title||'')}"></label><label>Kind<select id="qaKind">${['goal','promise','fear','bond','quest','milestone'].map(x=>`<option ${row.kind===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Details<textarea id="qaBody" rows="5">${esc(row.body||'')}</textarea></label><div class="character-form-grid"><label>Status<select id="qaStatus">${['active','completed','failed','paused'].map(x=>`<option ${row.status===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Visibility<select id="qaVisibility"><option value="private" ${row.visibility!=='party'?'selected':''}>Private</option><option value="party" ${row.visibility==='party'?'selected':''}>Party</option></select></label></div><div class="modal-actions">${row.id?'<button class="character-danger" id="qaDelete">Delete</button>':''}<span></span><button id="qaSave" class="character-primary">Save</button></div>`);m.querySelector('#qaSave').onclick=async()=>{try{await send(`/api/player/characters/${single.id}/arcs`,'POST',{...row,title:m.querySelector('#qaTitle').value,kind:m.querySelector('#qaKind').value,body:m.querySelector('#qaBody').value,status:m.querySelector('#qaStatus').value,visibility:m.querySelector('#qaVisibility').value});location.reload()}catch(e){alert(e.message)}};m.querySelector('#qaDelete')?.addEventListener('click',async()=>{if(!confirm('Delete this arc?'))return;await api(`/api/player/characters/${single.id}/arcs/${row.id}`,{method:'DELETE'});location.reload()})}

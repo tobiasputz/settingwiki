@@ -17,7 +17,7 @@
     </article>
 
     <article class="v6-card integration-card foundry-install-card">
-      <div class="integration-icon">◇</div><h2>Foundry VTT</h2><p>The Seeker Bridge is read-only. Foundry remains authoritative for mechanics; Seeker receives the active table context and player-owned character sheets.</p>
+      <div class="integration-icon">◇</div><h2>Foundry VTT</h2><p>The Seeker Bridge keeps Foundry authoritative, but Seeker can now queue a safe subset of write-backs: small resource nudges, item quantity changes, and GM-prepared content pushes from the Foundry Workshop.</p>
       <div class="foundry-install-step"><span>1</span><div><strong>Install through Foundry</strong><p>Foundry → Add-on Modules → Install Module → paste this into <em>Manifest URL</em>.</p></div></div>
       <label>Foundry manifest URL<input readonly value="{{ integration.foundry_manifest_url }}" data-foundry-manifest></label>
       <div class="v6-actions"><button class="quiet-btn" type="button" data-copy-foundry-manifest>Copy manifest URL</button><a class="quiet-btn" href="/foundry/seeker-bridge/seeker-bridge.zip">Download ZIP</a></div>
@@ -25,6 +25,7 @@
       <label>Private bridge endpoint<input readonly value="{{ integration.foundry_push_url }}" data-copy-value></label>
       <div class="v6-actions"><button class="quiet-btn" data-copy-target="previous" type="button">Copy endpoint</button><button class="quiet-btn" data-v6-rotate-foundry type="button">Rotate token</button></div>
       {% if foundry.received_at %}<div class="integration-status ok"><strong>Connected · {{ foundry_actors|length }} actor{{ '' if foundry_actors|length == 1 else 's' }} synced</strong><span>{{ foundry.scene_name or 'No active scene' }} · {{ foundry.world_name }}</span><small>Last update <time data-epoch="{{ foundry.received_at }}"></time></small></div>{% else %}<div class="integration-status"><strong>Waiting for Foundry</strong><span>Install the module and paste the campaign endpoint into Foundry's module settings.</span></div>{% endif %}
+      <div class="v6-actions"><a class="quiet-btn" href="/gm/foundry-workshop">Open Foundry Workshop</a></div>
     </article>
 
     <article class="v6-card integration-card"><div class="integration-icon">◷</div><h2>Calendar sync</h2><p>Subscribe once from Google Calendar, Apple Calendar or Outlook. Planned sessions then stay synced automatically.</p><label>Private calendar feed<input readonly value="{{ integration.calendar_feed_url }}" data-calendar-feed></label><div class="v6-actions"><button class="quiet-btn" data-copy-calendar>Copy subscription URL</button><button class="quiet-btn" data-v6-rotate-calendar>Rotate URL</button></div><p class="small-note">Anyone with this private URL can see scheduled session titles/dates, so rotate it if it is ever shared accidentally.</p></article>
@@ -33,4 +34,4 @@
   <section class="v6-card"><span class="eyebrow">FOUNDRY BRIDGE STATUS</span><h2>Current table context</h2>{% if foundry.payload %}<div class="foundry-status-grid"><div><small>WORLD</small><strong>{{ foundry.world_name or 'Unknown world' }}</strong></div><div><small>SCENE</small><strong>{{ foundry.scene_name or 'No active scene' }}</strong></div><div><small>ACTORS</small><strong>{{ foundry_actors|length }} synced</strong></div><div><small>BRIDGE</small><strong>{{ foundry.payload.bridge_version or 'Legacy' }}</strong></div></div>{% if foundry_actors %}<div class="foundry-actor-roster">{% for actor in foundry_actors %}<article>{% if actor.img %}<img src="{{ actor.img }}" alt="">{% else %}<span>♟</span>{% endif %}<div><strong>{{ actor.name }}</strong><small>{{ actor.owners|join(', ') or 'Player-owned actor' }}</small></div></article>{% endfor %}</div>{% endif %}<details class="integration-debug"><summary>Technical bridge payload</summary><pre class="v6-json">{{ foundry.payload|tojson(indent=2) }}</pre></details>{% else %}<p class="muted">No Foundry state has been received yet.</p>{% endif %}</section>
 </main>
 {% endblock %}
-{% block scripts %}<script src="/static/v6.js?v=6100"></script>{% endblock %}
+{% block scripts %}<script src="/static/v6.js?v=6200"></script>{% endblock %}

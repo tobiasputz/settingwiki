@@ -19,6 +19,8 @@ from app.v6 import (
     foundry_actors,
     foundry_link,
     foundry_link_for_character,
+    claim_foundry_commands,
+    complete_foundry_commands,
     discord_session_confirmation,
 )
 
@@ -66,12 +68,12 @@ def test_v61_schema_foundry_actor_sync_and_link(tmp_path: Path):
         tables={r['name'] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert {'discord_mention','discord_auto_session_confirmed'} <= cols
     assert {'foundry_actor_snapshots','foundry_character_links'} <= tables
-    assert foundry_accept(s,cid,cfg['foundry_bridge_token'],actor_payload())=={'ok':True,'actors':1}
+    assert foundry_accept(s,cid,cfg['foundry_bridge_token'],actor_payload())=={'ok':True,'actors':1,'commands':[]}
     actors=foundry_actors(s,cid);assert actors[0]['name']=='Aster' and actors[0]['sheet']['vitals']['ac']==26
     inv=create_player_invite(s,'Alice');set_campaign_members(s,cid,[inv['id']])
     char=save_player_character(s,{'campaign_id':cid,'name':'Aster'},invite_id=inv['id'])
     linked=foundry_link(s,char['id'],cid,'abc123');assert linked['actor_id']=='abc123'
-    view=foundry_link_for_character(s,char['id']);assert view['name']=='Aster' and view['sheet']['skills'][0]['label']=='occultism'
+    view=foundry_link_for_character(s,char['id']);assert view['name']=='Aster' and view['sheet']['skills'][0]['label']=='Occultism'
     assert foundry_link(s,char['id'],cid,'') is None and foundry_link_for_character(s,char['id']) is None
 
 
@@ -85,7 +87,7 @@ def test_v61_public_foundry_manifest_and_install_zip(tmp_path: Path, monkeypatch
     client=TestClient(main.app)
     manifest=client.get('/foundry/seeker-bridge/module.json')
     assert manifest.status_code==200
-    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.1.2'
+    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.2.0'
     assert data['manifest'].endswith('/foundry/seeker-bridge/module.json')
     assert data['download'].endswith('/foundry/seeker-bridge/seeker-bridge.zip')
     package=client.get('/foundry/seeker-bridge/seeker-bridge.zip')
@@ -159,7 +161,7 @@ def test_v61_scroll_contract_and_foundry_frontend_assets():
     assert 'data-foundry-manifest' in integrations and 'Automatically announce confirmed session dates' in integrations
     assert '/api/v61/characters/' in chars and 'data-foundry-tab' in chars
     assert 'data-notification-pref="spotlight"' not in base
-    assert 'seeker-static-v6100' in sw
+    assert 'seeker-static-v6200' in sw
 
 
 def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
@@ -183,9 +185,10 @@ def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
 def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
     root=Path(__file__).resolve().parents[1]
     bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.1.2"' in bridge
+    assert 'const BRIDGE_VERSION = "1.2.0"' in bridge
     assert 'function normalizedEndpoint' in bridge
     assert 'u.protocol === "http:" && !local' in bridge
+    assert 'processCommands(endpoint, body?.commands || [])' in bridge
     assert 'Seeker Bridge connected' in bridge
     assert 'Seeker Bridge cannot reach Seeker' in bridge
     assert 'Could not serialize actor' in bridge
@@ -200,6 +203,31 @@ def test_v61_foundry_push_errors_keep_cors_headers(tmp_path: Path, monkeypatch):
     assert bad.status_code==403
     assert bad.headers.get('access-control-allow-origin')=='*'
     assert 'Invalid Foundry bridge token' in bad.text
+
+
+def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
+    cid=default_campaign_id(s);cfg=integration_config(s,cid,include_secret=True)
+    alice=create_player_invite(s,'Alice');set_campaign_members(s,cid,[alice['id']])
+    char=save_player_character(s,{'campaign_id':cid,'name':'Aster','visibility':'party'},invite_id=alice['id'])
+    foundry_accept(s,cid,cfg['foundry_bridge_token'],actor_payload());foundry_link(s,char['id'],cid,'abc123')
+
+    player=TestClient(main.app); assert player.get(alice['invite_path'],follow_redirects=False).status_code==303
+    safe=player.post(f'/api/v61/characters/{char["id"]}/foundry/action',json={'action':'adjust_resource','resource':'hero_points','delta':1})
+    assert safe.status_code==200 and safe.json()['command']['command_type']=='adjust_resource'
+    pending=claim_foundry_commands(s,cid,cfg['foundry_bridge_token'])
+    assert pending and pending[0]['payload']['resource']=='hero_points'
+    assert complete_foundry_commands(s,cid,cfg['foundry_bridge_token'],[{'id':pending[0]['id'],'status':'done','result':{'message':'ok'}}])['ok']
+
+    gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
+    workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200 and 'Foundry Workshop' in workshop.text
+    created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
+    assert created.status_code==200
+    pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})
+    assert pushed.status_code==200 and pushed.json()['command']['command_type']=='grant_prepared_content'
+    queued=claim_foundry_commands(s,cid,cfg['foundry_bridge_token'])
+    assert any(cmd['command_type']=='grant_prepared_content' and cmd['actor_id']=='abc123' for cmd in queued)
 
 
 def test_v611_request_host_beats_secondary_railway_domain(tmp_path: Path, monkeypatch):

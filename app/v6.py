@@ -68,6 +68,38 @@ CREATE TABLE IF NOT EXISTS foundry_character_links (
     FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_foundry_links_campaign_actor ON foundry_character_links(campaign_id,actor_id);
+CREATE TABLE IF NOT EXISTS foundry_command_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL,
+    actor_id TEXT NOT NULL DEFAULT '',
+    scope TEXT NOT NULL DEFAULT 'actor',
+    command_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    requested_by TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'queued',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    dispatched_at REAL,
+    completed_at REAL,
+    FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_foundry_command_campaign_status ON foundry_command_queue(campaign_id,status,created_at,id);
+CREATE TABLE IF NOT EXISTS foundry_prepared_content (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'item',
+    title TEXT NOT NULL,
+    subtitle TEXT NOT NULL DEFAULT '',
+    target_type TEXT NOT NULL DEFAULT 'world',
+    summary TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_foundry_prepared_campaign_kind ON foundry_prepared_content(campaign_id,kind,updated_at DESC,id DESC);
 CREATE TABLE IF NOT EXISTS lore_page_revisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     page_slug TEXT NOT NULL,
@@ -192,6 +224,164 @@ def _json(raw: Any, default: Any):
         return json.loads(raw or '')
     except Exception:
         return default
+
+
+_ABILITY_LABELS={
+    'PF2E.ABILITYSTR':'STR','PF2E.ABILITYDEX':'DEX','PF2E.ABILITYCON':'CON',
+    'PF2E.ABILITYINT':'INT','PF2E.ABILITYWIS':'WIS','PF2E.ABILITYCHA':'CHA',
+}
+_SAVE_LABELS={'fortitude':'Fortitude','reflex':'Reflex','will':'Will'}
+
+
+def _pretty_label(label: Any, slug: Any = '', kind: str = '') -> str:
+    raw=str(label or slug or '').strip()
+    if not raw:
+        return ''
+    if raw in _ABILITY_LABELS:
+        return _ABILITY_LABELS[raw]
+    lower=raw.lower()
+    if kind=='saves':
+        return _SAVE_LABELS.get(lower, raw.title())
+    if lower in _SAVE_LABELS:
+        return _SAVE_LABELS[lower]
+    if raw.startswith('PF2E.'):
+        raw=raw.split('.')[-1]
+    return raw.replace('_',' ').replace('-', ' ').strip() if kind=='abilities' else raw.replace('_',' ').replace('-', ' ').strip().title()
+
+
+def _normalize_foundry_rows(rows: Any, kind: str) -> list[dict]:
+    out=[]
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        item=dict(row)
+        item['label']=_pretty_label(item.get('label'), item.get('slug'), kind)
+        out.append(item)
+    return out
+
+
+def normalize_foundry_sheet(sheet: Any) -> dict:
+    data=_json(sheet, {}) if not isinstance(sheet, dict) else dict(sheet)
+    for kind in ('abilities','saves','skills'):
+        data[kind]=_normalize_foundry_rows(data.get(kind), kind)
+    return data
+
+
+def _foundry_module_version() -> str:
+    return '1.2.0'
+
+
+def _validate_foundry_token(settings: Settings, campaign_id: int, token: str) -> None:
+    cfg=integration_config(settings, campaign_id, include_secret=True)
+    if not secrets.compare_digest(str(cfg.get('foundry_bridge_token') or ''), str(token or '')):
+        raise PermissionError('Invalid Foundry bridge token.')
+
+
+def _command_row(raw: dict) -> dict:
+    row=dict(raw)
+    row['payload']=_json(row.pop('payload_json','{}'),{})
+    row['result']=_json(row.pop('result_json','{}'),{})
+    return row
+
+
+def list_foundry_prepared_content(settings: Settings, campaign_id: int) -> list[dict]:
+    rows=_rows(settings,'SELECT * FROM foundry_prepared_content WHERE campaign_id=? ORDER BY updated_at DESC,id DESC',(int(campaign_id),))
+    for row in rows:
+        row['payload']=_json(row.pop('payload_json','{}'),{})
+    return rows
+
+
+def save_foundry_prepared_content(settings: Settings, campaign_id: int, payload: dict) -> dict:
+    kind=str(payload.get('kind') or 'item').strip().lower()
+    if kind not in {'item','feat','monster','npc','homebrew'}:
+        raise ValueError('Unsupported prep content kind.')
+    target_type=str(payload.get('target_type') or 'world').strip().lower()
+    if target_type not in {'world','actor'}:
+        raise ValueError('target_type must be world or actor.')
+    title=str(payload.get('title') or '').strip()[:180]
+    if not title:
+        raise ValueError('A title is required.')
+    content_payload=payload.get('payload') if isinstance(payload.get('payload'),dict) else {}
+    row=(
+        int(payload.get('id') or 0), int(campaign_id), kind, title,
+        str(payload.get('subtitle') or '')[:180], target_type,
+        str(payload.get('summary') or '')[:8000], str(payload.get('tags') or '')[:400],
+        json.dumps(content_payload,ensure_ascii=False), time.time(),
+    )
+    with connect(settings) as conn:
+        if row[0]:
+            exists=conn.execute('SELECT id FROM foundry_prepared_content WHERE id=? AND campaign_id=?',(row[0],row[1])).fetchone()
+            if not exists:
+                raise ValueError('Prepared content entry not found.')
+            conn.execute('''UPDATE foundry_prepared_content SET kind=?,title=?,subtitle=?,target_type=?,summary=?,tags=?,payload_json=?,updated_at=? WHERE id=? AND campaign_id=?''',
+                         (row[2],row[3],row[4],row[5],row[6],row[7],row[8],row[9],row[0],row[1]))
+            out=row[0]
+        else:
+            cur=conn.execute('''INSERT INTO foundry_prepared_content(campaign_id,kind,title,subtitle,target_type,summary,tags,payload_json,created_at,updated_at)
+                                VALUES(?,?,?,?,?,?,?,?,?,?)''',(row[1],row[2],row[3],row[4],row[5],row[6],row[7],row[8],row[9],row[9]))
+            out=int(cur.lastrowid or 0)
+    return next((x for x in list_foundry_prepared_content(settings,campaign_id) if int(x['id'])==out),{})
+
+
+def delete_foundry_prepared_content(settings: Settings, campaign_id: int, item_id: int) -> None:
+    with connect(settings) as conn:
+        conn.execute('DELETE FROM foundry_prepared_content WHERE campaign_id=? AND id=?',(int(campaign_id),int(item_id)))
+
+
+def queue_foundry_command(settings: Settings, campaign_id: int, command_type: str, payload: dict, *, actor_id: str = '', scope: str = 'actor', requested_by: str = '') -> dict:
+    ctype=str(command_type or '').strip().lower()
+    if ctype not in {'adjust_resource','adjust_item_quantity','grant_prepared_content','push_prepared_content'}:
+        raise ValueError('Unsupported Foundry action.')
+    sc=str(scope or 'actor').strip().lower()
+    if sc not in {'actor','world'}:
+        raise ValueError('Unsupported Foundry action scope.')
+    now=time.time()
+    with connect(settings) as conn:
+        cur=conn.execute('''INSERT INTO foundry_command_queue(campaign_id,actor_id,scope,command_type,payload_json,requested_by,status,result_json,created_at,updated_at)
+                            VALUES(?,?,?,?,?,?,?,?,?,?)''',
+                         (int(campaign_id),str(actor_id or '')[:300],sc,ctype,json.dumps(payload or {},ensure_ascii=False),str(requested_by or '')[:160],'queued','{}',now,now))
+        out=int(cur.lastrowid or 0)
+    return _command_row(_row(settings,'SELECT * FROM foundry_command_queue WHERE id=?',(out,)) or {})
+
+
+def claim_foundry_commands(settings: Settings, campaign_id: int, token: str, limit: int = 25) -> list[dict]:
+    _validate_foundry_token(settings,campaign_id,token)
+    cid=int(campaign_id); now=time.time(); stale=now-90
+    with connect(settings) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        rows=[dict(r) for r in conn.execute('''SELECT * FROM foundry_command_queue
+                                              WHERE campaign_id=? AND (status='queued' OR (status='dispatched' AND dispatched_at<?))
+                                              ORDER BY created_at,id LIMIT ?''',(cid,stale,int(limit))).fetchall()]
+        if rows:
+            ids=[int(r['id']) for r in rows]
+            marks=','.join('?' for _ in ids)
+            conn.execute(f'''UPDATE foundry_command_queue SET status='dispatched',updated_at=?,dispatched_at=? WHERE id IN ({marks})''',(now,now,*ids))
+    fresh=[]
+    for row in rows:
+        row['status']='dispatched'; row['updated_at']=now; row['dispatched_at']=now
+        fresh.append(_command_row(row))
+    return fresh
+
+
+def complete_foundry_commands(settings: Settings, campaign_id: int, token: str, results: list[dict]) -> dict:
+    _validate_foundry_token(settings,campaign_id,token)
+    cid=int(campaign_id); now=time.time(); done=failed=0
+    with connect(settings) as conn:
+        for item in results or []:
+            try: cmd_id=int(item.get('id') or 0)
+            except Exception: continue
+            status='done' if str(item.get('status') or 'done').lower() in {'ok','done','skipped'} else 'failed'
+            result=json.dumps(item.get('result') if isinstance(item.get('result'),dict) else {'message':str(item.get('result') or '')},ensure_ascii=False)
+            cur=conn.execute('''UPDATE foundry_command_queue SET status=?,result_json=?,updated_at=?,completed_at=?
+                                WHERE id=? AND campaign_id=?''',(status,result,now,now,cmd_id,cid))
+            if cur.rowcount:
+                done += status=='done'
+                failed += status=='failed'
+    return {'ok':True,'completed':done,'failed':failed}
+
+
+def recent_foundry_commands(settings: Settings, campaign_id: int, limit: int = 24) -> list[dict]:
+    return [_command_row(r) for r in _rows(settings,'SELECT * FROM foundry_command_queue WHERE campaign_id=? ORDER BY created_at DESC,id DESC LIMIT ?',(int(campaign_id),int(limit)))]
 
 
 def _row(settings: Settings, sql: str, params: tuple = ()) -> dict | None:
@@ -345,9 +535,7 @@ def _bounded_sheet(raw: Any) -> dict:
 
 
 def foundry_accept(settings: Settings, campaign_id: int, token: str, payload: dict) -> dict:
-    cfg = integration_config(settings, campaign_id, include_secret=True)
-    if not secrets.compare_digest(str(cfg.get('foundry_bridge_token') or ''), str(token or '')):
-        raise PermissionError('Invalid Foundry bridge token.')
+    _validate_foundry_token(settings,campaign_id,token)
     scene = payload.get('scene') or {}
     world = payload.get('world') or {}
     actors=[]
@@ -363,7 +551,7 @@ def foundry_accept(settings: Settings, campaign_id: int, token: str, payload: di
             'type': str(a.get('type') or '')[:100],
             'active': bool(a.get('active', True)),
             'owners': [str(x)[:160] for x in (a.get('owners') or [])[:20]],
-            'sheet': _bounded_sheet(a.get('sheet') or {}),
+            'sheet': normalize_foundry_sheet(_bounded_sheet(a.get('sheet') or {})),
         }
         if actor['id']:
             actors.append(actor)
@@ -396,7 +584,7 @@ def foundry_accept(settings: Settings, campaign_id: int, token: str, payload: di
             conn.execute(f'DELETE FROM foundry_actor_snapshots WHERE campaign_id=? AND actor_id NOT IN ({marks})',(cid,*seen))
         else:
             conn.execute('DELETE FROM foundry_actor_snapshots WHERE campaign_id=?',(cid,))
-    return {'ok': True, 'actors': len(actors)}
+    return {'ok': True, 'actors': len(actors), 'commands': claim_foundry_commands(settings,campaign_id,token)}
 
 
 def foundry_state(settings: Settings, campaign_id: int) -> dict:
@@ -409,7 +597,7 @@ def foundry_actors(settings: Settings, campaign_id: int) -> list[dict]:
     rows=_rows(settings, 'SELECT actor_id,actor_uuid,name,img,actor_url,actor_type,owners_json,sheet_json,received_at FROM foundry_actor_snapshots WHERE campaign_id=? ORDER BY lower(name),actor_id', (int(campaign_id),))
     for row in rows:
         row['owners']=_json(row.pop('owners_json', '[]'), [])
-        row['sheet']=_json(row.pop('sheet_json', '{}'), {})
+        row['sheet']=normalize_foundry_sheet(_json(row.pop('sheet_json', '{}'), {}))
     return rows
 
 
@@ -418,7 +606,7 @@ def foundry_actor(settings: Settings, campaign_id: int, actor_id: str) -> dict |
     if not row:
         return None
     row['owners']=_json(row.pop('owners_json', '[]'), [])
-    row['sheet']=_json(row.pop('sheet_json', '{}'), {})
+    row['sheet']=normalize_foundry_sheet(_json(row.pop('sheet_json', '{}'), {}))
     return row
 
 
@@ -449,7 +637,7 @@ def foundry_link_for_character(settings: Settings, character_id: int) -> dict | 
     if not row:
         return None
     row['owners']=_json(row.pop('owners_json','[]'),[])
-    row['sheet']=_json(row.pop('sheet_json','{}'),{})
+    row['sheet']=normalize_foundry_sheet(_json(row.pop('sheet_json','{}'),{}))
     row['stale']=not bool(row.get('name'))
     return row
 
@@ -459,9 +647,9 @@ def foundry_manifest(settings: Settings, base_url: str) -> dict:
     try:
         data=json.loads(source.read_text(encoding='utf-8'))
     except Exception:
-        data={'id':'seeker-bridge','title':'Seeker Bridge','version':'1.1.2','esmodules':['seeker-bridge.mjs']}
+        data={'id':'seeker-bridge','title':'Seeker Bridge','version':_foundry_module_version(),'esmodules':['seeker-bridge.mjs']}
     base=base_url.rstrip('/')
-    data['version']='1.1.2'
+    data['version']=_foundry_module_version()
     data['manifest']=f'{base}/foundry/seeker-bridge/module.json'
     data['download']=f'{base}/foundry/seeker-bridge/seeker-bridge.zip'
     data['url']=base

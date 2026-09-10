@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.1.2";
+const BRIDGE_VERSION = "1.2.0";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 let pushTimer = null;
 let intervalId = null;
@@ -47,6 +47,12 @@ function normalizedEndpoint(raw) {
 function setting(key) {
   return game.settings.get(MODULE_ID, key);
 }
+function i18n(key, fallback = "") {
+  try {
+    const out = String(game.i18n?.localize(key) || "");
+    return out && out !== key ? out : (fallback || key);
+  } catch { return fallback || key; }
+}
 
 function val(x, fallback = null) {
   if (x === null || x === undefined) return fallback;
@@ -80,7 +86,7 @@ function stat(actor, slug) {
     if (!s) return null;
     return {
       slug,
-      label: s.label || slug,
+      label: i18n(s.label || slug, s.label || slug),
       mod: num(s.mod ?? s.check?.mod),
       dc: num(s.dc?.value ?? s.dc),
       rank: num(s.rank),
@@ -143,7 +149,8 @@ function actorSheet(actor) {
   const sys = actor.system || {};
   const attrs = sys.attributes || {};
   const resources = sys.resources || {};
-  const abilities = Object.entries(sys.abilities || {}).map(([slug, a]) => ({slug, label: String(a?.label || slug).toUpperCase(), mod: num(a?.mod)})).filter(a => a.mod !== null);
+  const abilityShort = { str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA" };
+  const abilities = Object.entries(sys.abilities || {}).map(([slug, a]) => ({slug, label: abilityShort[String(slug || "").toLowerCase()] || i18n(String(a?.label || slug), String(a?.label || slug).toUpperCase()), mod: num(a?.mod)})).filter(a => a.mod !== null);
   const saveSlugs = ["fortitude", "reflex", "will"];
   const skillSlugs = ["acrobatics","arcana","athletics","crafting","deception","diplomacy","intimidation","medicine","nature","occultism","performance","religion","society","stealth","survival","thievery"];
   const saves = saveSlugs.map(x => stat(actor, x)).filter(Boolean);
@@ -214,6 +221,172 @@ function sceneSummary(scene) {
   return { id: scene.id, name: scene.name || "", img: abs(scene.background?.src || scene.img || "") };
 }
 
+function processedCommandIds() {
+  try {
+    const raw = JSON.parse(String(setting("processedCommands") || "[]"));
+    return new Set(Array.isArray(raw) ? raw.map(x => String(x)) : []);
+  } catch { return new Set(); }
+}
+async function rememberProcessedCommandId(id) {
+  const out = Array.from(processedCommandIds());
+  const value = String(id || "");
+  if (!value || out.includes(value)) return;
+  out.push(value);
+  while (out.length > 250) out.shift();
+  await game.settings.set(MODULE_ID, "processedCommands", JSON.stringify(out));
+}
+function ackEndpoint(rawEndpoint) {
+  const u = new URL(normalizedEndpoint(rawEndpoint));
+  u.pathname = `${u.pathname.replace(/\/+$/, "")}/ack`;
+  return u.href;
+}
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+function htmlDescription(summary, detail) {
+  const parts = [String(summary || "").trim(), String(detail || "").trim()].filter(Boolean);
+  return parts.map(chunk => `<p>${foundry.utils.escapeHTML(chunk).replace(/\n/g, "<br>")}</p>`).join("");
+}
+function slugList(input) {
+  return String(input || "").split(",").map(x => x.trim()).filter(Boolean);
+}
+function numericOr(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+function buildPreparedItem(payload) {
+  const data = payload?.data || {};
+  const kind = String(payload?.prepared_kind || "item").toLowerCase();
+  const type = kind === "feat" ? "feat" : (String(data.item_type || "equipment") || "equipment");
+  return {
+    name: String(payload?.title || "Prepared item"),
+    type,
+    img: String(data.img || "icons/svg/item-bag.svg"),
+    system: {
+      description: { value: htmlDescription(payload?.summary, data.description) },
+      level: { value: numericOr(data.level, 0) },
+      quantity: Math.max(0, numericOr(data.quantity, 1)),
+      traits: { value: slugList(data.traits), rarity: String(data.rarity || "common").toLowerCase() || "common" },
+      slug: foundry.utils.slugify(String(payload?.title || "prepared-item")),
+      source: { value: "Seeker" },
+    },
+  };
+}
+function buildPreparedActor(payload) {
+  const data = payload?.data || {};
+  const hp = Math.max(1, numericOr(data.hp, 1));
+  const speed = numericOr(data.speed, 25);
+  const level = numericOr(data.level, 0);
+  return {
+    name: String(payload?.title || "Prepared creature"),
+    type: "npc",
+    img: String(data.img || "icons/svg/mystery-man.svg"),
+    system: {
+      details: {
+        level: { value: level },
+        alliance: String(data.actor_role || "npc") === "ally" ? "party" : "opposition",
+        publicNotes: htmlDescription(payload?.summary, data.description),
+        languages: { value: slugList(data.languages) },
+      },
+      traits: { value: slugList(data.traits), rarity: String(data.rarity || "common").toLowerCase() || "common" },
+      attributes: {
+        ac: { value: Math.max(0, numericOr(data.ac, 10)) },
+        hp: { value: hp, max: hp },
+        speed: { value: speed },
+        perception: { value: numericOr(data.perception, 0) },
+      },
+      abilities: {
+        str: { mod: numericOr(data.str_mod, 0) }, dex: { mod: numericOr(data.dex_mod, 0) },
+        con: { mod: numericOr(data.con_mod, 0) }, int: { mod: numericOr(data.int_mod, 0) },
+        wis: { mod: numericOr(data.wis_mod, 0) }, cha: { mod: numericOr(data.cha_mod, 0) },
+      },
+    },
+  };
+}
+async function runFoundryCommand(command) {
+  const type = String(command?.command_type || "").toLowerCase();
+  const payload = command?.payload || {};
+  const actorId = String(command?.actor_id || "");
+  const actor = actorId ? game.actors?.get(actorId) : null;
+  if (["adjust_resource", "adjust_item_quantity", "grant_prepared_content"].includes(type) && !actor) {
+    throw new Error("Target actor is not available in this world.");
+  }
+  if (type === "adjust_resource") {
+    const resource = String(payload.resource || "").toLowerCase();
+    const delta = numericOr(payload.delta, 0);
+    if (!delta) throw new Error("Delta cannot be zero.");
+    let path = ""; let current = 0; let max = 999;
+    if (resource === "hp") { path = "system.attributes.hp.value"; current = numericOr(actor.system?.attributes?.hp?.value, 0); max = Math.max(current, numericOr(actor.system?.attributes?.hp?.max, current)); }
+    else if (resource === "temp_hp") { path = "system.attributes.hp.temp"; current = numericOr(actor.system?.attributes?.hp?.temp, 0); max = 999; }
+    else if (resource === "hero_points") { path = "system.resources.heroPoints.value"; current = numericOr(actor.system?.resources?.heroPoints?.value, 0); max = Math.max(0, numericOr(actor.system?.resources?.heroPoints?.max, 3)); }
+    else if (resource === "focus") { path = "system.resources.focus.value"; current = numericOr(actor.system?.resources?.focus?.value, 0); max = Math.max(0, numericOr(actor.system?.resources?.focus?.max, 3)); }
+    else throw new Error("Unsupported resource.");
+    const next = clamp(current + delta, 0, max);
+    await actor.update({ [path]: next });
+    return { message: `${actor.name}: ${resource.replace("_", " ")} ${delta > 0 ? "increased" : "decreased"} to ${next}.` };
+  }
+  if (type === "adjust_item_quantity") {
+    const item = actor.items?.get(String(payload.item_id || ""));
+    if (!item) throw new Error("Target item was not found on the actor.");
+    const delta = numericOr(payload.delta, 0);
+    if (!delta) throw new Error("Delta cannot be zero.");
+    const current = Math.max(0, numericOr(item.system?.quantity, 1));
+    const next = Math.max(0, current + delta);
+    await item.update({ "system.quantity": next });
+    return { message: `${item.name}: quantity updated to ${next}.` };
+  }
+  if (type === "grant_prepared_content") {
+    const created = await actor.createEmbeddedDocuments("Item", [buildPreparedItem(payload)]);
+    return { message: `${created?.[0]?.name || payload.title || "Prepared content"} added to ${actor.name}.` };
+  }
+  if (type === "push_prepared_content") {
+    const kind = String(payload.prepared_kind || "item").toLowerCase();
+    if (["npc", "monster"].includes(kind) || (kind === "homebrew" && (payload?.data?.hp || payload?.data?.ac))) {
+      const created = await Actor.create(buildPreparedActor(payload));
+      return { message: `${created?.name || payload.title || "Prepared creature"} created in the Actors directory.` };
+    }
+    const created = await Item.create(buildPreparedItem(payload));
+    return { message: `${created?.name || payload.title || "Prepared content"} created in the Items directory.` };
+  }
+  throw new Error(`Unsupported command type: ${type}`);
+}
+async function acknowledgeCommands(endpoint, results) {
+  if (!results?.length) return;
+  const response = await fetch(ackEndpoint(endpoint), {
+    method: "POST",
+    mode: "cors",
+    credentials: "omit",
+    cache: "no-store",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ results })
+  });
+  if (!response.ok) throw new Error(`Seeker ack failed (${response.status}).`);
+}
+async function processCommands(endpoint, commands = []) {
+  const queue = Array.isArray(commands) ? commands : [];
+  if (!queue.length) return;
+  const seen = processedCommandIds();
+  const results = [];
+  for (const command of queue) {
+    const id = String(command?.id || "");
+    if (!id) continue;
+    if (seen.has(id)) {
+      results.push({ id, status: "skipped", result: { message: "Command already processed on this Foundry world." } });
+      continue;
+    }
+    try {
+      const result = await runFoundryCommand(command);
+      await rememberProcessedCommandId(id);
+      results.push({ id, status: "done", result });
+    } catch (error) {
+      console.warn(`[${MODULE_ID}] Command ${id} failed`, error);
+      results.push({ id, status: "failed", result: { message: error?.message || String(error) } });
+    }
+  }
+  await acknowledgeCommands(endpoint, results);
+  queuePush(200);
+}
+
 async function sendState() {
   if (!game.user?.isGM || !setting("enabled")) return;
   const configuredEndpoint = String(setting("endpoint") || "").trim();
@@ -268,6 +441,9 @@ async function sendState() {
       bridgeNotice("warn", `Seeker Bridge could not connect (${response.status})${detail ? `: ${detail}` : ". Check the campaign endpoint in Module Settings."}`);
       return;
     }
+    let body = {};
+    try { body = await response.json(); } catch {}
+    await processCommands(endpoint, body?.commands || []);
     const firstSuccess = !String(bridgeStatus).startsWith("info:Seeker Bridge connected");
     bridgeStatus = "info:Seeker Bridge connected";
     if (firstSuccess) bridgeNotice("info", `Seeker Bridge connected · ${actors.length} player actor${actors.length === 1 ? "" : "s"} synced.`, {force: true});
@@ -303,6 +479,9 @@ Hooks.once("init", () => {
     hint: "Low-frequency refresh in case no Foundry hook fires. Minimum 30 seconds.",
     scope: "world", config: true, type: Number, default: 60,
     onChange: () => setupInterval()
+  });
+  game.settings.register(MODULE_ID, "processedCommands", {
+    scope: "world", config: false, type: String, default: "[]"
   });
 });
 

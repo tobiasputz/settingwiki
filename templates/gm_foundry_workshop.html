@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+{% block title %}Foundry Workshop · {{ wiki.title }}{% endblock %}
+{% block content %}
+<section class="v6-shell" data-foundry-workshop>
+  <header class="v6-hero">
+    <div>
+      <span class="eyebrow">GM · FOUNDRY WORKSHOP</span>
+      <h1>Prep content in Seeker. Push it when the table needs it.</h1>
+      <p>Build quick items, feats, monsters, NPCs, or freeform homebrew in Seeker, then queue them for Foundry. Player-safe sheet controls remain limited to small reversible changes; world-changing prep actions stay here in the GM workspace.</p>
+    </div>
+    <div class="v6-hero-actions">
+      <a class="primary-button" href="/gm/integrations">Bridge settings</a>
+      <a class="quiet-btn" href="/gm/session">Session console</a>
+    </div>
+  </header>
+
+  <section class="v6-grid v6-grid-3">
+    <article class="v6-card">
+      <span class="eyebrow">BRIDGE STATUS</span>
+      <h2>{{ foundry.world_name or 'Waiting for Foundry' }}</h2>
+      <p>{% if foundry.received_at %}Bridge connected to {{ foundry.host or 'your table host' }} · synced <time data-epoch="{{ foundry.received_at }}"></time>{% else %}Open Foundry with the Seeker Bridge enabled on a GM client to receive queued actions.{% endif %}</p>
+    </article>
+    <article class="v6-card">
+      <span class="eyebrow">AVAILABLE ACTORS</span>
+      <h2>{{ foundry_actors|length }} synced actor{{ '' if foundry_actors|length == 1 else 's' }}</h2>
+      <p>Item and feat handouts can be pushed straight onto an actor without opening Foundry at the table.</p>
+    </article>
+    <article class="v6-card">
+      <span class="eyebrow">SAFETY MODEL</span>
+      <h2>Queue-based and auditable</h2>
+      <p>Every action is stored in Seeker, delivered to a connected Foundry GM client, and logged below. No Seeker control deletes actors or destroys world data.</p>
+    </article>
+  </section>
+
+  <section class="foundry-workshop-grid">
+    <div class="foundry-prep-list-wrap">
+      <article class="v6-card">
+        <div class="v6-card-head">
+          <div>
+            <span class="eyebrow">PREP LIBRARY</span>
+            <h2>Prepared Foundry content</h2>
+          </div>
+          <button class="quiet-btn" type="button" data-fw-new>＋ New entry</button>
+        </div>
+        <div id="foundryPrepList" class="foundry-prep-list"></div>
+      </article>
+    </div>
+
+    <div class="foundry-workshop-side">
+      <article class="v6-card foundry-workshop-form">
+        <span class="eyebrow">CREATOR</span>
+        <h2 id="fwFormTitle">New prep entry</h2>
+        <p>Use a concise rules summary. For world actors, think “good enough to hand to future-you at the table,” not “replace every PF2e system field by hand.”</p>
+        <form id="foundryWorkshopForm">
+          <input type="hidden" name="id">
+          <div class="workshop-inline">
+            <label>Type<select name="kind"><option value="item">Item</option><option value="feat">Feat</option><option value="monster">Monster</option><option value="npc">NPC</option><option value="homebrew">Homebrew</option></select></label>
+            <label>Default push target<select name="target_type"><option value="world">World directory</option><option value="actor">Give to actor</option></select></label>
+          </div>
+          <div class="workshop-inline">
+            <label>Title<input name="title" required maxlength="180" placeholder="Ashen Relic"></label>
+            <label>Subtitle<input name="subtitle" maxlength="180" placeholder="Level 4 cursed treasure"></label>
+          </div>
+          <label>Summary<textarea name="summary" placeholder="What it does, when it matters, and what the players should understand at a glance."></textarea></label>
+          <div class="workshop-inline">
+            <label>Tags<input name="tags" maxlength="400" placeholder="consumable, fire, relic"></label>
+            <label>Image URL (optional)<input name="img" placeholder="https://..."></label>
+          </div>
+          <div class="workshop-inline">
+            <label>Item/feat mode<select name="item_type"><option value="equipment">Equipment</option><option value="consumable">Consumable</option><option value="weapon">Weapon</option><option value="armor">Armor</option><option value="treasure">Treasure</option><option value="feat">Feat</option><option value="action">Action</option><option value="lore">Lore</option></select></label>
+            <label>Level<input name="level" type="number" step="1" placeholder="0"></label>
+          </div>
+          <div class="workshop-inline">
+            <label>Quantity<input name="quantity" type="number" step="1" placeholder="1"></label>
+            <label>Price / value<input name="price" placeholder="15 gp"></label>
+          </div>
+          <div class="workshop-inline">
+            <label>Traits<input name="traits" placeholder="magical, occult"></label>
+            <label>Rarity<input name="rarity" placeholder="common"></label>
+          </div>
+          <label>Description / rules text<textarea name="description" placeholder="Full effect, activation, or encounter notes."></textarea></label>
+          <details>
+            <summary>Actor stats for NPC / monster / actor-style homebrew</summary>
+            <div class="workshop-inline">
+              <label>Actor role<select name="actor_role"><option value="npc">NPC</option><option value="hazard">Hazard-like NPC</option><option value="ally">Ally</option></select></label>
+              <label>Perception<input name="perception" type="number" step="1" placeholder="8"></label>
+            </div>
+            <div class="workshop-inline">
+              <label>AC<input name="ac" type="number" step="1" placeholder="18"></label>
+              <label>HP<input name="hp" type="number" step="1" placeholder="45"></label>
+            </div>
+            <div class="workshop-inline">
+              <label>Speed<input name="speed" placeholder="25"></label>
+              <label>Languages<input name="languages" placeholder="Common, Draconic"></label>
+            </div>
+            <div class="workshop-inline">
+              <label>STR<input name="str_mod" type="number" step="1" placeholder="3"></label>
+              <label>DEX<input name="dex_mod" type="number" step="1" placeholder="2"></label>
+            </div>
+            <div class="workshop-inline">
+              <label>CON<input name="con_mod" type="number" step="1" placeholder="2"></label>
+              <label>INT<input name="int_mod" type="number" step="1" placeholder="0"></label>
+            </div>
+            <div class="workshop-inline">
+              <label>WIS<input name="wis_mod" type="number" step="1" placeholder="1"></label>
+              <label>CHA<input name="cha_mod" type="number" step="1" placeholder="-1"></label>
+            </div>
+          </details>
+          <div class="v6-actions">
+            <button class="primary-button" type="submit">Save prep entry</button>
+            <button class="quiet-btn" type="button" data-fw-reset>Reset</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="v6-card">
+        <span class="eyebrow">ACTION LOG</span>
+        <h2>Recent bridge activity</h2>
+        <div id="foundryCommandLog" class="command-log-list"></div>
+      </article>
+    </div>
+  </section>
+</section>
+<script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="/static/foundry-workshop.js?v=6200"></script>{% endblock %}
