@@ -258,6 +258,7 @@ CREATE TABLE IF NOT EXISTS notification_reads (
     notification_id INTEGER NOT NULL,
     invite_id INTEGER NOT NULL,
     read_at REAL NOT NULL,
+    dismissed_at REAL,
     PRIMARY KEY(notification_id,invite_id),
     FOREIGN KEY(notification_id) REFERENCES campaign_notifications(id) ON DELETE CASCADE
 );
@@ -317,6 +318,9 @@ def init_living_db(settings: Settings) -> None:
             conn.execute("DROP TABLE player_journals_v3")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_player_journals_owner_character ON player_journals(invite_id,character_id,updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_notifications_created ON campaign_notifications(created_at DESC)")
+        read_cols={r[1] for r in conn.execute("PRAGMA table_info(notification_reads)").fetchall()}
+        if read_cols and "dismissed_at" not in read_cols:
+            conn.execute("ALTER TABLE notification_reads ADD COLUMN dismissed_at REAL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_notification_reads_invite ON notification_reads(invite_id,notification_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_fronts_visibility_updated ON campaign_fronts(visibility,updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_threads_visibility_updated ON campaign_threads(visibility,updated_at DESC)")
@@ -856,10 +860,16 @@ def create_notification(settings:Settings,p:dict)->dict:
     return _row(settings,'SELECT * FROM campaign_notifications WHERE id=?',(nid,)) or {}
 
 def list_notifications(settings:Settings,invite_id:int|None,*,admin:bool=False,since:float=0,campaign_id:int|None=None)->list[dict]:
+    # The campaign owner has no player invitation identity. Use a stable
+    # synthetic reader id so read state survives navigation for the GM too.
     iid=int(invite_id) if invite_id is not None else -1
-    sql=("SELECT n.*, CASE WHEN nr.read_at IS NULL THEN 0 ELSE 1 END AS read FROM campaign_notifications n LEFT JOIN notification_reads nr ON nr.notification_id=n.id AND nr.invite_id=? WHERE n.created_at>?")
+    sql=("SELECT n.*, CASE WHEN nr.read_at IS NULL THEN 0 ELSE 1 END AS read, "
+         "CASE WHEN nr.dismissed_at IS NULL THEN 0 ELSE 1 END AS dismissed "
+         "FROM campaign_notifications n LEFT JOIN notification_reads nr "
+         "ON nr.notification_id=n.id AND nr.invite_id=? WHERE n.created_at>?")
     params=[iid,float(since or 0)]
     if campaign_id is not None:sql+=' AND n.campaign_id=?';params.append(int(campaign_id))
+    if not admin:sql+=' AND nr.dismissed_at IS NULL'
     sql+=' ORDER BY n.created_at DESC LIMIT 100'
     with connect(settings) as conn:rows=[dict(r) for r in conn.execute(sql,params).fetchall()]
     now=time.time();out=[]
@@ -867,11 +877,27 @@ def list_notifications(settings:Settings,invite_id:int|None,*,admin:bool=False,s
         if r.get('expires_at') and float(r['expires_at'])<now:continue
         aud=_json(r.get('audience_json'),[])
         if not admin and aud and iid not in {int(x) for x in aud}:continue
-        r['read']=bool(r.get('read'));out.append(r)
+        r['read']=bool(r.get('read'));r['dismissed']=bool(r.get('dismissed'));out.append(r)
     return out
 
 def mark_notification_read(settings:Settings,nid:int,invite_id:int)->None:
-    with connect(settings) as conn:conn.execute('INSERT OR REPLACE INTO notification_reads(notification_id,invite_id,read_at) VALUES(?,?,?)',(int(nid),int(invite_id),time.time()))
+    now=time.time()
+    with connect(settings) as conn:
+        conn.execute("""INSERT INTO notification_reads(notification_id,invite_id,read_at,dismissed_at) VALUES(?,?,?,NULL)
+                        ON CONFLICT(notification_id,invite_id) DO UPDATE SET read_at=excluded.read_at""",
+                     (int(nid),int(invite_id),now))
+
+def dismiss_notification(settings:Settings,nid:int,invite_id:int)->None:
+    now=time.time()
+    with connect(settings) as conn:
+        conn.execute("""INSERT INTO notification_reads(notification_id,invite_id,read_at,dismissed_at) VALUES(?,?,?,?)
+                        ON CONFLICT(notification_id,invite_id) DO UPDATE SET read_at=excluded.read_at,dismissed_at=excluded.dismissed_at""",
+                     (int(nid),int(invite_id),now,now))
+
+def delete_notification(settings:Settings,nid:int,campaign_id:int|None=None)->None:
+    with connect(settings) as conn:
+        if campaign_id is None:conn.execute('DELETE FROM campaign_notifications WHERE id=?',(int(nid),))
+        else:conn.execute('DELETE FROM campaign_notifications WHERE id=? AND campaign_id=?',(int(nid),int(campaign_id)))
 
 
 def character_relationships(settings:Settings,character_id:int,*,owner:bool=False)->list[dict]:

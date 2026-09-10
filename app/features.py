@@ -250,6 +250,12 @@ CREATE TABLE IF NOT EXISTS player_characters (
     visibility TEXT NOT NULL DEFAULT 'party',
     portrait_path TEXT NOT NULL DEFAULT '',
     theme_color TEXT NOT NULL DEFAULT '#b79661',
+    theme_style TEXT NOT NULL DEFAULT 'classic',
+    quote TEXT NOT NULL DEFAULT '',
+    banner_path TEXT NOT NULL DEFAULT '',
+    sheet_json TEXT NOT NULL DEFAULT '{}',
+    external_sheet_url TEXT NOT NULL DEFAULT '',
+    foundry_actor_url TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     FOREIGN KEY(invite_id) REFERENCES player_invites(id) ON DELETE CASCADE
@@ -293,6 +299,18 @@ def init_feature_db(settings: Settings) -> None:
         alias_cols = {r[1] for r in conn.execute("PRAGMA table_info(page_aliases)").fetchall()}
         if "updated_at" not in alias_cols:
             conn.execute("ALTER TABLE page_aliases ADD COLUMN updated_at REAL NOT NULL DEFAULT 0")
+        character_cols = {r[1] for r in conn.execute("PRAGMA table_info(player_characters)").fetchall()}
+        character_add = {
+            "theme_style": "TEXT NOT NULL DEFAULT 'classic'",
+            "quote": "TEXT NOT NULL DEFAULT ''",
+            "banner_path": "TEXT NOT NULL DEFAULT ''",
+            "sheet_json": "TEXT NOT NULL DEFAULT '{}'",
+            "external_sheet_url": "TEXT NOT NULL DEFAULT ''",
+            "foundry_actor_url": "TEXT NOT NULL DEFAULT ''",
+        }
+        for col, ddl in character_add.items():
+            if col not in character_cols:
+                conn.execute(f"ALTER TABLE player_characters ADD COLUMN {col} {ddl}")
         # Hot-path indexes for live table polling and Codex article lookups.
         conn.execute("CREATE INDEX IF NOT EXISTS idx_campaign_sessions_live ON campaign_sessions(status,updated_at DESC,id DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_session_updates_visibility_created ON session_updates(visibility,created_at DESC)")
@@ -319,6 +337,17 @@ def init_feature_db(settings: Settings) -> None:
     # campaign_id to all party/session-owned state in one transaction.
     from .campaigns import init_campaign_db
     init_campaign_db(settings)
+    # V4.3/V5 player-session state is chained here as well so integrations that
+    # historically initialize the feature DB receive a complete Seeker schema.
+    from .scheduling import init_schedule_db
+    init_schedule_db(settings)
+    from .v5 import init_v5_db
+    init_v5_db(settings)
+    # V5.1 extends the same campaign/session schema with GM runbook state.
+    # Keep it chained here so temporary databases, tests, and older integrations
+    # that initialize through init_feature_db() never get a half-initialized V5.1.
+    from .v51 import init_v51_db
+    init_v51_db(settings)
 
 
 
@@ -658,6 +687,18 @@ def add_annotation(settings:Settings,p:dict,*,invite_id:int|None,author_label:st
     return _row(settings,"SELECT * FROM annotations WHERE id=?",(rid,)) or {}
 
 
+def delete_annotation(settings:Settings,annotation_id:int,*,invite_id:int|None,admin:bool=False)->bool:
+    """Delete a Codex margin note without allowing players to delete each other's notes."""
+    with connect(settings) as conn:
+        row=conn.execute("SELECT id,invite_id FROM annotations WHERE id=?",(int(annotation_id),)).fetchone()
+        if not row:
+            return False
+        if not admin and (invite_id is None or row["invite_id"] is None or int(row["invite_id"])!=int(invite_id)):
+            raise PermissionError("You can only delete your own Codex notes.")
+        conn.execute("DELETE FROM annotations WHERE id=?",(int(annotation_id),))
+    return True
+
+
 def log_activity(settings:Settings,invite_id:int|None,event_type:str,target_key:str="",meta:dict|None=None)->None:
     with connect(settings) as conn: conn.execute("INSERT INTO player_activity(invite_id,event_type,target_key,meta_json,created_at) VALUES(?,?,?,?,?)",(invite_id,event_type,target_key,json.dumps(meta or {}),time.time()))
 
@@ -819,9 +860,57 @@ def travel_between_markers(marker_a:dict,marker_b:dict,world_width:float=1000.0,
 
 
 # --- Player-owned characters ------------------------------------------------
+def _default_character_sheet() -> dict:
+    return {
+        "heritage":"","background":"","deity":"","alignment":"","size":"","speed":"","senses":"","languages":"",
+        "hero_points":"","xp":"","focus_points":"","initiative":"","spell_dc":"","spell_attack":"",
+        "armor":"","shield":"","currency":"","bulk":"","appearance":"","personality":"","bonds":"",
+        "hp":{"current":"","max":"","temp":""},
+        "defenses":{"ac":"","perception":"","class_dc":"","fortitude":"","reflex":"","will":""},
+        "abilities":{"str":"","dex":"","con":"","int":"","wis":"","cha":""},
+        "skills":{},"feats":[],"inventory":[],"spells":[],"attacks":[],"resources":[],"proficiencies":[],"custom_sections":[],
+        "display":{"subtitle":"","symbol":"✦","secondary_color":"","density":"comfortable"},
+        "conditions":"","resistances":"","weaknesses":"","immunities":"",
+    }
+
+
+def _normalize_character_sheet(value: Any) -> dict:
+    base=_default_character_sheet()
+    if isinstance(value,str):
+        try:value=json.loads(value or "{}")
+        except Exception:value={}
+    if not isinstance(value,dict): value={}
+    for key in ("heritage","background","deity","alignment","size","speed","senses","languages","hero_points","xp","focus_points","initiative","spell_dc","spell_attack","armor","shield","currency","bulk","appearance","personality","bonds","conditions","resistances","weaknesses","immunities"):
+        base[key]=str(value.get(key) or "")[:3000]
+    for group in ("hp","defenses","abilities"):
+        incoming=value.get(group) if isinstance(value.get(group),dict) else {}
+        for key in base[group]: base[group][key]=str(incoming.get(key) or "")[:80]
+    skills=value.get("skills") if isinstance(value.get("skills"),dict) else {}
+    base["skills"]={str(k)[:80]:({"mod":str((v or {}).get("mod") or "")[:40],"rank":str((v or {}).get("rank") or "untrained")[:40]} if isinstance(v,dict) else {"mod":str(v)[:40],"rank":"untrained"}) for k,v in list(skills.items())[:80]}
+    for key in ("feats","inventory","spells","attacks","resources","proficiencies"):
+        rows=value.get(key) if isinstance(value.get(key),list) else []
+        clean=[]
+        for row in rows[:250]:
+            if isinstance(row,dict): clean.append({str(k)[:50]:str(v or "")[:3000] for k,v in list(row.items())[:12]})
+            elif row: clean.append({"name":str(row)[:300]})
+        base[key]=clean
+    display=value.get("display") if isinstance(value.get("display"),dict) else {}
+    base["display"]={
+        "subtitle":str(display.get("subtitle") or "")[:160],
+        "symbol":str(display.get("symbol") or "✦")[:8],
+        "secondary_color":str(display.get("secondary_color") or "")[:24],
+        "density":str(display.get("density") or "comfortable")[:24] if str(display.get("density") or "comfortable") in {"compact","comfortable","spacious"} else "comfortable",
+    }
+    sections=value.get("custom_sections") if isinstance(value.get("custom_sections"),list) else []
+    base["custom_sections"]=[{"title":str((r or {}).get("title") or "Custom section")[:120],"body":str((r or {}).get("body") or "")[:12000],"icon":str((r or {}).get("icon") or "✦")[:8]} for r in sections[:24] if isinstance(r,dict)]
+    return base
+
+
 def _character_payload(settings: Settings, row: dict, images: list[dict] | None = None) -> dict:
     out=dict(row)
     out["portrait_url"] = ("/uploads/" + out["portrait_path"]) if out.get("portrait_path") else ""
+    out["banner_url"] = ("/uploads/" + out["banner_path"]) if out.get("banner_path") else ""
+    out["sheet"]=_normalize_character_sheet(out.get("sheet_json") or "{}")
     if images is None:
         images=_rows(settings,"SELECT * FROM character_images WHERE character_id=? ORDER BY sort_order,id",(int(out["id"]),))
     imgs=[dict(x) for x in images]
@@ -864,38 +953,45 @@ def get_player_character(settings: Settings, character_id: int, *, invite_id: in
 def save_player_character(settings: Settings, p: dict, *, invite_id: int|None, admin: bool=False) -> dict:
     from .campaigns import ensure_campaign_membership, invite_has_campaign, resolve_campaign_id
     rid=p.get("id"); now=time.time()
-    owner=int(p.get("invite_id") or invite_id or 0)
-    if not owner: raise ValueError("A player invitation is required to own this character.")
     current=None
     if rid:
         current=_row(settings,"SELECT * FROM player_characters WHERE id=?",(int(rid),))
         if not current: raise ValueError("Character not found.")
         if not admin and int(current["invite_id"])!=int(invite_id or -1): raise PermissionError("You can only edit your own characters.")
-        owner=int(current["invite_id"])
+    # On updates the existing owner is authoritative. This is essential for GM
+    # edits, because a GM session intentionally has no player invitation id.
+    owner=int((current or {}).get("invite_id") or p.get("invite_id") or invite_id or 0)
+    if not owner: raise ValueError("A player invitation is required to own this character.")
+    def val(key, default=""):
+        return p[key] if key in p else ((current or {}).get(key,default))
     campaign_id=resolve_campaign_id(settings,p.get('campaign_id') if p.get('campaign_id') is not None else ((current or {}).get('campaign_id')))
     if not admin and not invite_has_campaign(settings,invite_id,campaign_id):
-        # A player joins a table by assigning one of their own characters to it.
-        # This exposes only active campaign names in the character editor; no
-        # campaign-owned state becomes visible until this explicit choice.
         from .campaigns import get_campaign
         chosen=get_campaign(settings,campaign_id)
         if not chosen or str(chosen.get("status") or "") != "active":
             raise PermissionError("That campaign is not available for player characters.")
     ensure_campaign_membership(settings,campaign_id,owner)
-    name=str(p.get("name") or "Unnamed hero").strip()[:160]
-    vis=str(p.get("visibility") or "party"); vis=vis if vis in {"party","private"} else "party"
-    status=str(p.get("status") or "active")[:40]
-    theme=str(p.get("theme_color") or "#b79661")
+    name=str(val("name","Unnamed hero") or "Unnamed hero").strip()[:160]
+    vis=str(val("visibility","party") or "party"); vis=vis if vis in {"party","private"} else "party"
+    status=str(val("status","active") or "active")[:40]
+    theme=str(val("theme_color","#b79661") or "#b79661")
     if not re.match(r"^#[0-9a-fA-F]{6}$",theme): theme="#b79661"
-    vals=(campaign_id,owner,name,str(p.get("pronouns") or "")[:80],str(p.get("ancestry") or "")[:120],str(p.get("class_name") or "")[:120],int(p.get("level")) if str(p.get("level") or "").isdigit() else None,status,str(p.get("summary") or "")[:5000],str(p.get("biography") or "")[:30000],str(p.get("goals") or "")[:10000],str(p.get("player_notes") or "")[:15000],vis,theme,now)
+    theme_style=str(val("theme_style","classic") or "classic").lower(); theme_style=theme_style if theme_style in {"classic","parchment","night","arcane","minimal","heroic","fey","blood","scholar","wanderer"} else "classic"
+    raw_sheet=p.get("sheet") if "sheet" in p else val("sheet_json","{}")
+    sheet=_normalize_character_sheet(raw_sheet)
+    sheet_json=json.dumps(sheet,separators=(",",":"),ensure_ascii=False)
+    level_raw=val("level",None)
+    level=int(level_raw) if str(level_raw or "").isdigit() else None
+    external_sheet_url=str(val("external_sheet_url") or "")[:1500]
+    foundry_actor_url=str(val("foundry_actor_url") or "")[:1500]
+    vals=(campaign_id,owner,name,str(val("pronouns") or "")[:80],str(val("ancestry") or "")[:120],str(val("class_name") or "")[:120],level,status,str(val("summary") or "")[:5000],str(val("biography") or "")[:30000],str(val("goals") or "")[:10000],str(val("player_notes") or "")[:15000],vis,theme,theme_style,str(val("quote") or "")[:500],str(val("banner_path") or "")[:500],sheet_json,external_sheet_url,foundry_actor_url,now)
     with connect(settings) as conn:
         if rid:
-            conn.execute("UPDATE player_characters SET campaign_id=?,invite_id=?,name=?,pronouns=?,ancestry=?,class_name=?,level=?,status=?,summary=?,biography=?,goals=?,player_notes=?,visibility=?,theme_color=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
+            conn.execute("UPDATE player_characters SET campaign_id=?,invite_id=?,name=?,pronouns=?,ancestry=?,class_name=?,level=?,status=?,summary=?,biography=?,goals=?,player_notes=?,visibility=?,theme_color=?,theme_style=?,quote=?,banner_path=?,sheet_json=?,external_sheet_url=?,foundry_actor_url=?,updated_at=? WHERE id=?",vals+(int(rid),)); out=int(rid)
         else:
-            base=_slug(name); slug=base
-            n=2
+            base=_slug(name); slug=base; n=2
             while conn.execute("SELECT 1 FROM player_characters WHERE slug=?",(slug,)).fetchone(): slug=f"{base}-{n}"; n+=1
-            out=conn.execute("INSERT INTO player_characters(campaign_id,invite_id,name,slug,pronouns,ancestry,class_name,level,status,summary,biography,goals,player_notes,visibility,theme_color,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",vals[:3]+(slug,)+vals[3:-1]+(now,now)).lastrowid
+            out=conn.execute("INSERT INTO player_characters(campaign_id,invite_id,name,slug,pronouns,ancestry,class_name,level,status,summary,biography,goals,player_notes,visibility,theme_color,theme_style,quote,banner_path,sheet_json,external_sheet_url,foundry_actor_url,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",vals[:3]+(slug,)+vals[3:-1]+(now,now)).lastrowid
     return get_player_character(settings,out,invite_id=owner,admin=True) or {}
 
 def delete_player_character(settings: Settings, character_id: int, *, invite_id: int|None, admin: bool=False) -> list[str]:
@@ -904,6 +1000,7 @@ def delete_player_character(settings: Settings, character_id: int, *, invite_id:
     if not admin and int(row["invite_id"])!=int(invite_id or -1): raise PermissionError("You can only delete your own characters.")
     paths=[x["image_path"] for x in _rows(settings,"SELECT image_path FROM character_images WHERE character_id=?",(int(character_id),))]
     if row.get("portrait_path"): paths.append(row["portrait_path"])
+    if row.get("banner_path"): paths.append(row["banner_path"])
     with connect(settings) as conn: conn.execute("DELETE FROM player_characters WHERE id=?",(int(character_id),))
     return list(dict.fromkeys(paths))
 
@@ -912,21 +1009,23 @@ def add_character_image(settings: Settings, character_id:int, image_path:str, ki
     char=_row(settings,"SELECT * FROM player_characters WHERE id=?",(int(character_id),))
     if not char: raise ValueError("Character not found.")
     if not admin and int(char["invite_id"])!=int(invite_id or -1): raise PermissionError("You can only upload art for your own characters.")
-    kind=kind if kind in {"portrait","inspiration","gallery"} else "inspiration"
+    kind=kind if kind in {"portrait","banner","inspiration","gallery"} else "inspiration"
     with connect(settings) as conn:
         rid=conn.execute("INSERT INTO character_images(character_id,image_path,kind,caption,created_at) VALUES(?,?,?,?,?)",(int(character_id),image_path,kind,str(caption or "")[:500],time.time())).lastrowid
         if kind=="portrait": conn.execute("UPDATE player_characters SET portrait_path=?,updated_at=? WHERE id=?",(image_path,time.time(),int(character_id)))
+        if kind=="banner": conn.execute("UPDATE player_characters SET banner_path=?,updated_at=? WHERE id=?",(image_path,time.time(),int(character_id)))
     row=_row(settings,"SELECT * FROM character_images WHERE id=?",(rid,)) or {}; row["url"]="/uploads/"+image_path
     return row
 
 
 def delete_character_image(settings: Settings, image_id:int, *, invite_id:int|None, admin:bool=False) -> str:
-    row=_row(settings,"SELECT ci.*,pc.invite_id,pc.portrait_path FROM character_images ci JOIN player_characters pc ON pc.id=ci.character_id WHERE ci.id=?",(int(image_id),))
+    row=_row(settings,"SELECT ci.*,pc.invite_id,pc.portrait_path,pc.banner_path FROM character_images ci JOIN player_characters pc ON pc.id=ci.character_id WHERE ci.id=?",(int(image_id),))
     if not row: return ""
     if not admin and int(row["invite_id"])!=int(invite_id or -1): raise PermissionError("You can only remove art from your own characters.")
     with connect(settings) as conn:
         conn.execute("DELETE FROM character_images WHERE id=?",(int(image_id),))
         if row.get("portrait_path")==row.get("image_path"): conn.execute("UPDATE player_characters SET portrait_path='' WHERE id=?",(int(row["character_id"]),))
+        if row.get("banner_path")==row.get("image_path"): conn.execute("UPDATE player_characters SET banner_path='' WHERE id=?",(int(row["character_id"]),))
     return str(row.get("image_path") or "")
 
 

@@ -126,8 +126,8 @@ async function mutateInvite(id,action,message='',copyAfter=false){if(message&&!c
 async function deleteInvite(id,label){if(!confirm(`Permanently delete the invitation record for ${label}?`))return;try{await api(`/api/admin/invitations/${id}`,{method:'DELETE'});S.access=null;await loadAccess(true);toast('Invitation deleted')}catch(e){toast(e.message,'error')}}
 
 // --- Map authoring ---------------------------------------------------------
-const MAP_GLYPHS={place:'✦',settlement:'⌂',city:'♜',port:'⚓',fortress:'♜',temple:'✧',ruin:'◇',landmark:'◆',quest:'⚑',portal:'◉',danger:'!',secret:'?'};
-const EFFECT_DEFAULTS=window.SeekerMapEffects?.defaults||{clouds:true,vignette:true,effect_intensity:.58,motion_speed:.65};
+const MAP_GLYPHS={place:'✦',settlement:'⌂',village:'⌂',town:'⌂',city:'♜',capital:'♛',port:'⚓',harbor:'⚓',fortress:'♜',castle:'♜',palace:'♛',manor:'⌂',tower:'▲',watchtower:'△',gate:'⊓',wall:'║',bridge:'⌁',road:'═',crossroads:'╬',temple:'✧',shrine:'◇',monastery:'✥',sacred_grove:'♧',ruin:'◇',crypt:'†',graveyard:'†',dungeon:'⛓',cave:'◒',mine:'⛏',forest:'♣',swamp:'≋',mountain:'△',volcano:'▲',glacier:'❄',lake:'≈',river:'≋',waterfall:'≋',island:'◌',reef:'≈',desert:'∴',oasis:'◉',landmark:'◆',obelisk:'♦',inn:'♨',tavern:'♨',shop:'¤',market:'¤',smithy:'⚒',farm:'♧',windmill:'✣',academy:'✎',library:'☷',guild:'⚒',arena:'◇',battlefield:'⚔',camp:'⌂',caravan:'≫',ship:'⚓',shipwreck:'⚓',lighthouse:'✺',waypoint:'⌖',border:'⋮',checkpoint:'⊓',quest:'⚑',treasure:'✶',portal:'◉',anomaly:'◎',monster:'☠',dragon_lair:'◈',danger:'!',secret:'?'};
+const EFFECT_DEFAULTS=window.SeekerMapEffects?.defaults||{clouds:true,vignette:true,effect_intensity:.72,motion_speed:.65};
 const EFFECT_KEYS=['clouds','cloud_shadows','fog','low_mist','sun_rays','aurora','stars','shooting_stars','rain','lightning','snow','blizzard','ash','dust','heat_haze','ocean_shimmer','wave_crests','embers','fireflies','pollen','leaves','petals','birds','bats','dragon_shadow','magic_motes','spectral_wisps','cursed_miasma','ley_lines','rune_pulses','spores','vignette','parchment','moonlight','blood_moon','edge_fog','grid','compass'];
 const MAP_PRESETS={
  calm:{clouds:true,sun_rays:true,vignette:true,compass:true,fireflies:true,pollen:true,effect_intensity:.42,motion_speed:.4},
@@ -147,7 +147,7 @@ const MAP_PRESETS={
  plague:{low_mist:true,spores:true,cursed_miasma:true,ash:true,bats:true,vignette:true,edge_fog:true,compass:true,effect_intensity:.68,motion_speed:.42},
  highfantasy:{clouds:true,sun_rays:true,birds:true,dragon_shadow:true,magic_motes:true,ley_lines:true,vignette:true,compass:true,effect_intensity:.55,motion_speed:.48}
 };
-function normalizedEffects(e={}){return Object.assign({viewport_mode:'cover',edge_lock:true,marker_labels:true,marker_pulse:true,marker_scale:1,effect_intensity:.58,motion_speed:.65,clouds:true,vignette:true,compass:true},EFFECT_DEFAULTS,e||{})}
+function normalizedEffects(e={}){return Object.assign({viewport_mode:'cover',edge_lock:true,marker_labels:true,marker_pulse:true,marker_scale:1,effect_intensity:.72,motion_speed:.65,clouds:true,vignette:true,compass:true},EFFECT_DEFAULTS,e||{})}
 async function loadMaps(){S.maps=await api('/api/admin/maps');renderMapList();if(S.map){const fresh=S.maps.find(x=>x.id===S.map.id);if(fresh)selectMap(fresh)}}
 function renderMapList(){$('#mapList').innerHTML=S.maps.length?S.maps.map(m=>`<div class="map-list-item ${S.map?.id===m.id?'active':''}" data-mapid="${m.id}"><strong>${esc(m.name)}</strong><small>${m.markers.length} markers · ${activeEffectCount(m.effects)} effects</small></div>`).join(''):'<div class="inspector-empty">No maps yet.</div>';$$('.map-list-item').forEach(x=>x.onclick=()=>selectMap(S.maps.find(m=>m.id===Number(x.dataset.mapid))))}
 function activeEffectCount(e={}){return EFFECT_KEYS.filter(k=>e[k]).length}

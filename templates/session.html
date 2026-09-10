@@ -1,51 +1,109 @@
 {% extends "base.html" %}
 {% block title %}Session · {{ wiki.title }}{% endblock %}
 {% block body %}
-<main class="session-player-shell" data-session-pulse="{{ session.id if session else 0 }}" data-session-updated="{{ session.updated_at if session else 0 }}">
-  <section class="session-hero {% if session and session.status == 'live' %}is-live{% endif %}">
-    <div class="session-hero-copy">
-      <span class="eyebrow">{% if session and session.status == 'live' %}<i class="live-dot"></i> LIVE CAMPAIGN SESSION{% else %}CAMPAIGN TABLE{% endif %}</span>
-      {% if session %}<h1>{% if session.session_number %}Session {{ session.session_number }} · {% endif %}{{ session.title }}</h1><p>{{ session.summary or 'Your GM has opened the session screen. New discoveries, handouts, and spotlight lore will appear here.' }}</p>{% else %}<h1>The table is quiet.</h1><p>No session is live right now. Your Codex, discoveries, and campaign history are still available.</p>{% endif %}
-      <div class="session-player-meta">{% if player %}<span>Player <strong>{{ player.label }}</strong></span>{% endif %}{% if active_character %}<a href="/characters/{{ active_character.id }}">♟ {{ active_character.name }}</a>{% elif character_selection_made and session_characters %}<span>Notes <strong>Player-wide</strong></span>{% endif %}{% if session and session.session_date %}<span>{{ session.session_date }}</span>{% endif %}{% if session and session.current_location_slug %}<a href="/wiki/{{ session.current_location_slug }}">⌖ Current location</a>{% endif %}{% if session and session_characters|length > 1 %}<button type="button" class="session-character-switch" data-session-character-open>{{ 'Switch character' if character_selection_made else 'Choose character' }}</button>{% endif %}</div>
+<main class="session-v5-shell" data-session-id="{{ session.id if session else '' }}" data-session-live="{{ '1' if live_session else '0' }}">
+  <section class="session-v5-hero {{ 'is-live' if live_session else 'is-upcoming' if session else 'is-idle' }}">
+    <div class="session-v5-hero-copy">
+      <div class="session-v5-kicker">{% if live_session %}<span class="live-dot"></span> LIVE NOW{% elif session %}UPCOMING SESSION{% else %}TABLE COMPANION{% endif %}</div>
+      {% if session %}
+        <h1>{% if session.session_number %}Session {{ session.session_number }} · {% endif %}{{ session.title }}</h1>
+        <p>{{ session.summary or ('The table is live. Keep notes, clues, objectives, and lore close at hand.' if live_session else 'A session is planned for this campaign.') }}</p>
+      {% else %}
+        <h1>Ready when the table is.</h1><p>No session is live or planned right now. Your campaign memory is still here.</p>
+      {% endif %}
+      <div class="session-v5-meta">
+        <span>{{ campaign_context(request).active_campaign.name }}</span>
+        {% if session and session.session_date %}<span>◷ {{ session.session_date }}</span>{% endif %}
+        {% if session and session.current_location_slug %}<a href="/wiki/{{ session.current_location_slug }}">⌖ Current location</a>{% endif %}
+        {% if active_character %}<a href="/characters/{{ active_character.id }}">♟ {{ active_character.name }}</a>{% elif player %}<span>Player · {{ player.label }}</span>{% endif %}
+        {% if session and session_characters|length > 1 %}<button type="button" data-session-character-open>{{ 'Switch character' if character_selection_made else 'Choose character' }}</button>{% endif %}
+      </div>
     </div>
-    {% if session and session.spotlight_map %}<a class="session-map-spotlight" href="/atlas/{{ session.spotlight_map.slug }}" style="--session-map:url('/uploads/{{ session.spotlight_map.image_path }}')"><span>OPEN SPOTLIGHT MAP</span><strong>{{ session.spotlight_map.name }}</strong><i>→</i></a>{% endif %}
+    <div class="session-v5-hero-actions">
+      {% if session and not gm_view and player and not live_session %}
+      <div class="rsvp-card" data-rsvp-card>
+        <small>YOUR RSVP</small><strong>{{ own_rsvp.status|upper if own_rsvp else 'NOT ANSWERED' }}</strong>
+        <div><button data-rsvp="going" class="{{ 'active' if own_rsvp and own_rsvp.status=='going' else '' }}">✓ Going</button><button data-rsvp="maybe" class="{{ 'active' if own_rsvp and own_rsvp.status=='maybe' else '' }}">~ Maybe</button><button data-rsvp="cant" class="{{ 'active' if own_rsvp and own_rsvp.status=='cant' else '' }}">× Can't</button></div>
+      </div>
+      {% endif %}
+      {% if gm_view %}<a class="session-v5-primary" href="/gm/prep{% if session %}?session_id={{ session.id }}{% endif %}">✎ GM Prep</a>{% endif %}
+      {% if session and session.spotlight_map %}<a class="session-v5-map" href="/atlas/{{ session.spotlight_map.slug }}"><span>⌖</span><div><small>SPOTLIGHT MAP</small><strong>{{ session.spotlight_map.name }}</strong></div></a>{% endif %}
+    </div>
   </section>
 
   {% if session and session_characters and not gm_view %}
   <section class="session-character-entry {{ 'is-chosen' if character_selection_made else '' }}" data-session-character-panel {% if character_selection_made %}hidden{% endif %}>
-    <div class="session-character-entry-copy"><span class="eyebrow">SESSION IDENTITY</span><h2>Who are you playing tonight?</h2><p>Session notes are kept with that character. Switching later changes which of your character notes are shown; party-shared notes from the rest of the table stay visible.</p></div>
+    <div class="session-character-entry-copy"><span class="eyebrow">SESSION IDENTITY</span><h2>Who are you playing tonight?</h2><p>Character-specific private notes stay attached to the right hero. Shared table notes remain shared.</p></div>
     <div class="session-character-options">
       {% for c in session_characters %}<button type="button" class="session-character-option" data-session-character="{{ c.id }}">{% if c.portrait_url %}<img src="{{ c.portrait_url }}" alt="">{% else %}<span>♟</span>{% endif %}<div><small>{{ c.ancestry or 'CHARACTER' }}{% if c.class_name %} · {{ c.class_name }}{% endif %}</small><strong>{{ c.name }}</strong></div><i>Enter →</i></button>{% endfor %}
-      <button type="button" class="session-character-option general" data-session-character=""><span>◇</span><div><small>NO CHARACTER SCOPE</small><strong>Enter as {{ player.label if player else 'player' }}</strong></div><i>Enter →</i></button>
+      <button type="button" class="session-character-option general" data-session-character=""><span>◇</span><div><small>PLAYER-WIDE NOTES</small><strong>Enter as {{ player.label if player else 'player' }}</strong></div><i>Enter →</i></button>
     </div>
   </section>
   {% endif %}
 
-  {% if session and session.lore_pages %}
-  <section class="session-section"><div class="section-heading compact"><div><span class="eyebrow">AT THE TABLE</span><h2>Spotlight lore</h2></div><p>People, places, and threads relevant to the current session.</p></div>
-    <div class="session-lore-strip">{% for p in session.lore_pages %}<a href="/wiki/{{ p.slug }}" class="session-lore-card" {% if p.presentation.auto_image_url or p.presentation.hero_image_url %}style="--card-art:url('{{ p.presentation.hero_image_url or p.presentation.auto_image_url }}')"{% endif %}><small>{{ p.chapter or 'Lore' }}</small><strong>{{ p.title }}</strong><p>{{ p.excerpt }}</p><i>Open →</i></a>{% endfor %}</div>
-  </section>{% endif %}
+  <nav class="session-v5-tabs" aria-label="Session companion sections">
+    <button class="active" data-session-tab="now">✦ Now</button><button data-session-tab="notes">✎ Notes</button><button data-session-tab="threads">◇ Threads</button><button data-session-tab="lore">⌘ Lore</button>
+  </nav>
 
-  <section class="session-grid">
-    <div class="session-panel"><div class="panel-title"><span>✦</span><div><small>LIVE FEED</small><h2>New discoveries</h2></div><a href="/updates">All →</a></div><div class="session-feed">{% for u in updates[:8] %}<article><time data-epoch="{{ u.created_at }}"></time><strong>{{ u.title }}</strong><p>{{ u.body }}</p>{% if u.target_type == 'lore' and u.target_key %}<a href="/wiki/{{ u.target_key }}">Open lore →</a>{% endif %}</article>{% else %}<div class="empty-mini">Nothing new has been revealed yet.</div>{% endfor %}</div></div>
-    <div class="session-panel"><div class="panel-title"><span>◇</span><div><small>INVESTIGATION</small><h2>Open mysteries</h2></div><a href="/mysteries">Board →</a></div><div class="session-mystery-list">{% for m in mysteries if m.status == 'open' %}<a href="/mysteries#{{ m.slug }}"><span>?</span><div><strong>{{ m.title }}</strong><small>{{ m.pins|length }} clues pinned</small></div><i>→</i></a>{% else %}<div class="empty-mini">No shared mysteries yet.</div>{% endfor %}</div></div>
-  </section>
+  <div class="session-v5-layout">
+    <section class="session-v5-column primary" data-session-pane="now">
+      <article class="session-v5-panel recap-panel">
+        <header><div><small>PREVIOUSLY ON</small><h2>{% if previous_session %}{{ previous_session.title }}{% else %}Campaign recap{% endif %}</h2></div>{% if previous_session %}<span>{% if previous_session.session_number %}S{{ previous_session.session_number }}{% endif %}</span>{% endif %}</header>
+        {% if previous_session %}<p>{{ previous_session.summary or 'No formal recap was recorded for the previous session.' }}</p><div class="recap-links">{% for l in previous_session.lore[:6] %}<a href="/wiki/{{ l.page_slug }}">{{ l.page_slug|replace('-',' ')|title }}</a>{% endfor %}</div>{% else %}<p>No ended session is in the archive yet.</p>{% endif %}
+      </article>
 
-  <section class="session-section session-party-desk">
-    <div class="section-heading compact"><div><span class="eyebrow">PARTY-OWNED MEMORY</span><h2>Threads & journals</h2></div><p>Keep the plot straight without turning the GM into the party secretary.</p></div>
-    <div class="session-party-grid">
-      <article class="session-party-panel"><header><div><small>OPEN THREADS</small><h3>What are we following?</h3></div>{% if can_author %}<button data-living-new-thread>＋ Thread</button>{% endif %}</header><div class="session-thread-list">{% for t in threads if t.status == 'open' %}<article><div><small>{{ t.priority|upper }}</small><strong>{{ t.title }}</strong><p>{{ t.summary }}</p></div>{% if can_author %}<div><button data-thread-note="{{ t.id }}">＋ Note</button><button data-thread-edit="{{ t.id }}">Edit</button></div>{% endif %}</article>{% else %}<div class="empty-mini">No open party threads.</div>{% endfor %}</div><a class="session-inline-link" href="/campaign#threads">Open full thread board →</a></article>
-      <article class="session-party-panel"><header><div><small>TABLE JOURNAL</small><h3>{% if active_character %}{{ active_character.name }}'s notes & party memory{% else %}What did we write down?{% endif %}</h3></div>{% if can_author %}<button data-new-journal>＋ Note</button>{% endif %}</header>{% if active_character %}<p class="session-note-scope">Private notes you write here belong to <strong>{{ active_character.name }}</strong>. Notes from your other characters stay out of this session view.</p>{% elif character_selection_made and session_characters %}<p class="session-note-scope">You entered without a character. New notes are player-wide and character-specific private notes stay hidden.</p>{% endif %}<div class="session-journal-list">{% for j in party_journals[:8] %}<article><small>{{ j.player_label or 'Player' }}{% if j.character_name %} · ♟ {{ j.character_name }}{% endif %}{% if j.session_id %} · Session {{ j.session_number or j.session_id }}{% endif %}</small><strong>{{ j.title }}</strong><p>{{ j.body }}</p>{% if can_author and player and j.invite_id == player.id %}<button data-edit-journal="{{ j.id }}">Edit mine</button>{% endif %}</article>{% else %}<div class="empty-mini">No notes in this character/session view yet.</div>{% endfor %}</div><a class="session-inline-link" href="/campaign#journal">Open Chronicle →</a></article>
-    </div>
-  </section>
+      <article class="session-v5-panel shared-notes-panel" data-session-pane="notes">
+        <header><div><small>PARTY-OWNED MEMORY · SHARED TABLE NOTES</small><h2>Party notebook</h2></div><span class="sync-indicator" id="partyNoteSync">LIVE</span></header>
+        {% if can_author %}<form id="partyNoteComposer" class="party-note-composer"><textarea id="partyNoteBody" rows="3" placeholder="Write something the whole party should remember…"></textarea><button type="submit">Add note</button></form>{% endif %}
+        <div class="party-note-stream" id="partyNoteStream">
+          {% for n in party_notes %}<article data-party-note-id="{{ n.id }}"><small>{{ n.author_label }} · <time data-epoch="{{ n.updated_at }}"></time></small><p>{{ n.body }}</p>{% if gm_view or (player and n.invite_id == player.id) %}<button data-delete-party-note="{{ n.id }}">Delete</button>{% endif %}</article>{% else %}<div class="empty-mini">No shared notes for this session yet.</div>{% endfor %}
+        </div>
+      </article>
 
-  {% if session and session.handouts %}<section class="session-section"><div class="section-heading compact"><div><span class="eyebrow">HANDED TO THE PARTY</span><h2>Session handouts</h2></div></div><div class="handout-mini-grid">{% for h in session.handouts %}<a href="/handout/{{ h.slug }}" class="handout-mini kind-{{ h.kind }}"><span>✉</span><strong>{{ h.title }}</strong><small>Open handout →</small></a>{% endfor %}</div></section>{% endif %}
+      <article class="session-v5-panel objective-panel" data-session-pane="threads">
+        <header><div><small>WHAT ARE WE TRYING TO DO?</small><h2>Current objectives</h2></div>{% if can_author %}<button type="button" data-new-objective>＋ Add</button>{% endif %}</header>
+        <div class="objective-list" id="sessionObjectiveList">
+          {% for o in objectives %}<article data-objective-id="{{ o.id }}"><span class="objective-status status-{{ o.status }}">{{ o.status|upper }}</span><div><strong>{{ o.title }}</strong><p>{{ o.body }}</p><small>Added by {{ o.creator_label or 'GM' }}</small></div>{% if can_author %}<button data-cycle-objective="{{ o.id }}">Advance</button>{% endif %}</article>{% else %}<div class="empty-mini">No active objectives yet.</div>{% endfor %}
+        </div>
+      </article>
+    </section>
 
-  {% if session_history %}<section class="session-section session-history-section"><div class="section-heading compact"><div><span class="eyebrow">CAMPAIGN JOURNAL</span><h2>Previous sessions</h2></div><p>Recaps stay connected to the lore that appeared at the table.</p></div><div class="session-history-grid">{% for s in session_history %}<article><small>{% if s.session_number %}SESSION {{ s.session_number }} · {% endif %}{{ s.session_date }}</small><h3>{{ s.title }}</h3><p>{{ s.summary or 'No player-facing recap was recorded.' }}</p><div>{% for l in s.lore[:5] %}<a href="/wiki/{{ l.page_slug }}">{{ l.page_slug|replace('-', ' ')|title }}</a>{% endfor %}</div></article>{% endfor %}</div></section>{% endif %}
+    <section class="session-v5-column secondary" data-session-pane="threads">
+      <article class="session-v5-panel mystery-panel">
+        <header><div><small>INVESTIGATION</small><h2>Open mysteries</h2></div><a href="/investigation">My board →</a></header>
+        <div class="session-v5-list">{% for m in mysteries if m.status=='open' %}<a href="/mysteries#{{ m.slug }}"><span>?</span><div><strong>{{ m.title }}</strong><small>{{ m.pins|length }} known clues</small></div><i>→</i></a>{% else %}<div class="empty-mini">No open shared mysteries.</div>{% endfor %}</div>
+      </article>
 
-  <section class="session-quick-actions">{% if player or gm_view %}<a class="schedule-action" href="/schedule">◷<span><strong>Session Planner</strong><small>{{ 'Check the table' if gm_view else 'Mark availability' }}</small></span></a>{% endif %}<a href="/">⌂<span><strong>Codex</strong><small>Browse known lore</small></span></a><a href="/timeline">⌛<span><strong>History</strong><small>Ages & events</small></span></a><a href="/characters">♟<span><strong>Characters</strong><small>Heroes, portraits & inspiration</small></span></a><a href="/calendar">☾<span><strong>{{ calendar.name }}</strong><small>{{ calendar.current_date or 'World calendar' }}</small></span></a><a href="/handouts">✉<span><strong>Handouts</strong><small>Letters & props</small></span></a><a href="/network">⌘<span><strong>Lore Web</strong><small>See connections</small></span></a></section>
+      <article class="session-v5-panel private-notes-panel" data-session-pane="notes">
+        <header><div><small>PRIVATE MEMORY</small><h2>{% if active_character %}{{ active_character.name }}'s notes{% else %}Your journal{% endif %}</h2></div>{% if can_author %}<button data-new-journal>＋ Note</button>{% endif %}</header>
+        <div class="session-v5-note-list">{% for j in party_journals[:8] %}<article><small>{{ j.player_label or 'Player' }}{% if j.character_name %} · {{ j.character_name }}{% endif %}</small><strong>{{ j.title }}</strong><p>{{ j.body }}</p>{% if can_author and player and j.invite_id == player.id %}<button data-edit-journal="{{ j.id }}">Edit</button>{% endif %}</article>{% else %}<div class="empty-mini">No journal entries in this view.</div>{% endfor %}</div>
+        <a class="session-inline-link" href="/campaign#journal">Open full Chronicle →</a>
+      </article>
+
+      {% if session and session.handouts %}<article class="session-v5-panel" data-session-pane="lore"><header><div><small>ON THE TABLE</small><h2>Handouts</h2></div><a href="/handouts">All →</a></header><div class="session-v5-list">{% for h in session.handouts %}<a href="/handout/{{ h.slug }}"><span>✉</span><div><strong>{{ h.title }}</strong><small>{{ h.kind }}</small></div><i>→</i></a>{% endfor %}</div></article>{% endif %}
+    </section>
+
+    <aside class="session-v5-column tertiary" data-session-pane="lore">
+      <article class="session-v5-panel">
+        <header><div><small>FOLLOWING</small><h2>Things you care about</h2></div></header>
+        <div class="session-v5-list">{% for f in followed_pages[:8] %}<a href="/wiki/{{ f.page.slug }}"><span>☆</span><div><strong>{{ f.page.title }}</strong><small>{{ f.page.chapter or 'Lore' }}</small></div><i>→</i></a>{% else %}<div class="empty-mini">Follow Codex entries to keep them close here.</div>{% endfor %}</div>
+      </article>
+
+      {% if campaign_clocks %}<article class="session-v5-panel player-clock-panel">
+        <header><div><small>WORLD IN MOTION</small><h2>Campaign clocks</h2></div></header>
+        <div class="player-clock-list">{% for clock in campaign_clocks %}<article><div><strong>{{ clock.title }}</strong><small>{{ clock.current_segments }}/{{ clock.total_segments }}</small></div>{% if clock.description %}<p>{{ clock.description }}</p>{% endif %}<div class="player-clock-track" aria-label="{{ clock.current_segments }} of {{ clock.total_segments }} segments">{% for i in range(clock.total_segments) %}<i class="{{ 'filled' if i < clock.current_segments else '' }}"></i>{% endfor %}</div></article>{% endfor %}</div>
+      </article>{% endif %}
+
+      <article class="session-v5-panel">
+        <header><div><small>NEW SINCE YOU LOOKED</small><h2>Discoveries</h2></div><a href="/updates">All →</a></header>
+        <div class="session-v5-feed">{% for u in updates[:8] %}<article><time data-epoch="{{ u.created_at }}"></time><strong>{{ u.title }}</strong><p>{{ u.body }}</p>{% if u.target_type=='lore' and u.target_key %}<a href="/wiki/{{ u.target_key }}">Open lore →</a>{% endif %}</article>{% else %}<div class="empty-mini">Nothing new yet.</div>{% endfor %}</div>
+      </article>
+
+      {% if session and session.lore_pages %}<article class="session-v5-panel"><header><div><small>TONIGHT'S CONTEXT</small><h2>Spotlight lore</h2></div></header><div class="session-v5-list">{% for p in session.lore_pages %}<a href="/wiki/{{ p.slug }}"><span>⌘</span><div><strong>{{ p.title }}</strong><small>{{ p.chapter or 'Lore' }}</small></div><i>→</i></a>{% endfor %}</div></article>{% endif %}
+    </aside>
+  </div>
 </main>
 <div class="modal-backdrop hidden" id="livingModal"><div class="modal living-modal"><button class="modal-close" data-living-close>×</button><div id="livingModalContent"></div></div></div><div class="toast-stack" id="toastStack"></div>
-<script>window.LF_LIVING={{ {"threads":threads,"journals":party_journals,"characters":session_characters,"submissions":[],"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":(active_character.id if active_character else none),"session_id":(session.id if session else none),"session_context":true,"character_selection_made":character_selection_made,"sessions":([session] if session else [])}|tojson }};</script>
+<script>window.LF_LIVING={{ {"threads":threads,"journals":party_journals,"characters":session_characters,"submissions":[],"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":(active_character.id if active_character else none),"session_id":(session.id if session else none),"session_context":true,"character_selection_made":character_selection_made,"sessions":([session] if session else [])}|tojson }};window.SEEKER_V5_SESSION={{ {"session_id":(session.id if session else none),"player_id":(player.id if player else none),"gm":gm_view}|tojson }};</script>
 {% endblock %}
-{% block scripts %}{{ super() }}<script src="/static/living.js?v=4300"></script>{% endblock %}
+{% block scripts %}{{ super() }}<script src="/static/living.js?v=5100"></script><script src="/static/session-v5.js?v=5100"></script>{% endblock %}

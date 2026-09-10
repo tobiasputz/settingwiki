@@ -324,3 +324,33 @@ def make_default_campaign(settings: Settings, campaign_id: int) -> dict:
             raise ValueError('An archived campaign cannot be the default.')
         conn.execute("UPDATE campaigns SET is_default=CASE WHEN id=? THEN 1 ELSE 0 END",(cid,))
     return get_campaign(settings,cid) or {}
+
+
+def delete_campaign(settings: Settings, campaign_id: int) -> None:
+    """Permanently delete one non-default campaign and all campaign-scoped state.
+
+    Player identities and player-global availability are intentionally preserved;
+    canonical setting data is shared and is never removed with a table.
+    """
+    cid=int(campaign_id)
+    with connect(settings) as conn:
+        row=conn.execute("SELECT * FROM campaigns WHERE id=?",(cid,)).fetchone()
+        if not row:
+            raise ValueError('Campaign not found.')
+        if int(row['is_default'] or 0):
+            raise ValueError('The default campaign cannot be deleted. Make another campaign the default first.')
+        # Delete every table that explicitly carries campaign_id. This keeps the
+        # cleanup forward-compatible with V5 features while leaving shared canon
+        # and player-global scheduling untouched.
+        tables=[r['name'] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()]
+        protected={'campaigns'}
+        for table in tables:
+            if table in protected: continue
+            try:
+                cols={r['name'] for r in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
+            except Exception:
+                continue
+            if 'campaign_id' in cols:
+                conn.execute(f'DELETE FROM "{table}" WHERE campaign_id=?',(cid,))
+        conn.execute("DELETE FROM campaign_memberships WHERE campaign_id=?",(cid,))
+        conn.execute("DELETE FROM campaigns WHERE id=?",(cid,))

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Previously on… · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="recap-shell">
+  <header class="recap-hero"><span class="eyebrow">BEFORE THE DICE HIT THE TABLE</span><h1>Previously on {{ wiki.active_campaign.name if wiki.active_campaign else 'this campaign' }}…</h1><p>A briefing assembled from the table's actual record — no invented summary, just what Seeker knows you saw, learned, wrote down, and left unresolved.</p><div><a class="primary-button" href="/session">Enter Session Mode →</a><a class="quiet-btn" href="/investigation">Open my investigation board</a></div></header>
+  <section class="recap-grid">
+    <article class="recap-card recap-last-session"><small>LAST SESSION</small>{% if previous %}<h2>{% if previous.session_number %}Session {{ previous.session_number }} · {% endif %}{{ previous.title }}</h2><span>{{ previous.session_date }}</span><p>{{ previous.summary or 'No public recap has been written yet.' }}</p>{% else %}<h2>No completed session yet.</h2><p>Your first recap will appear here after the table closes a session.</p>{% endif %}</article>
+    <article class="recap-card"><small>STILL IN MOTION</small><h2>Current objectives</h2><div class="recap-stack">{% for o in objectives %}<div><strong>{{ o.title }}</strong><p>{{ o.body }}</p></div>{% else %}<p class="empty-mini">No active objectives.</p>{% endfor %}</div></article>
+    <article class="recap-card"><small>WHAT CHANGED</small><h2>Recent discoveries</h2><div class="recap-stack">{% for u in updates %}<div><strong>{{ u.title }}</strong><p>{{ u.body }}</p></div>{% else %}<p class="empty-mini">Nothing new has been recorded.</p>{% endfor %}</div></article>
+    <article class="recap-card"><small>LORE FROM LAST TIME</small><h2>Places, people & clues</h2><div class="recap-links">{% for p in lore %}<a href="/wiki/{{ p.slug }}"><strong>{{ p.title }}</strong><small>{{ p.chapter or 'Codex' }}</small></a>{% else %}<p class="empty-mini">No Codex entries were pinned to the last session.</p>{% endfor %}</div></article>
+    <article class="recap-card"><small>UNRESOLVED</small><h2>Mysteries</h2><div class="recap-stack">{% for m in mysteries if m.status != 'resolved' %}<div><strong>{{ m.title }}</strong><p>{{ m.summary or m.body or '' }}</p></div>{% else %}<p class="empty-mini">No open mysteries.</p>{% endfor %}</div></article>
+    <article class="recap-card"><small>FROM YOUR NOTES</small><h2>Recent journal fragments</h2><div class="recap-stack">{% for n in journals[:8] %}<div><strong>{{ n.title or 'Field note' }}</strong><p>{{ n.body }}</p></div>{% else %}<p class="empty-mini">No recent journal notes.</p>{% endfor %}</div></article>
+  </section>
+</main>
+{% endblock %}

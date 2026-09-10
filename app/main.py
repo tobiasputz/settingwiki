@@ -30,7 +30,7 @@ from .storage import (
     save_codex_presentation, save_text_file, seed_project, set_setting, storage_report, validate_player_invite_session,
 )
 from .features import (
-    add_annotation, add_mystery_pin, add_session_update, aliases, apply_reveals_to_html, campaign_health,
+    add_annotation, delete_annotation, add_mystery_pin, add_session_update, aliases, apply_reveals_to_html, campaign_health,
     delete_mystery_edge, delete_mystery_pin,
     create_snapshot, delete_session, entity_style, fog_regions, get_live_session, init_feature_db,
     list_annotations, list_bookmarks, list_handouts, list_mysteries, list_relationships, list_reveal_blocks_from_wiki, list_reveal_states,
@@ -47,16 +47,31 @@ from .living import (
     map_regions, save_map_region, save_region_history, list_rumors, save_rumor, random_rumor, list_threads, save_thread, add_thread_note, update_thread_note, delete_thread_note, save_thread_link, delete_thread_link,
     list_journals, list_party_journals, save_journal, inbox_items, save_inbox, list_submissions, save_submission, review_submission,
     publishing_state, set_publishing_state, publishing_states, capture_session_state, session_state_snapshots, scan_suggestions, update_suggestion,
-    list_media_catalog, save_media_meta, create_notification, list_notifications, mark_notification_read,
+    list_media_catalog, save_media_meta, create_notification, list_notifications, mark_notification_read, dismiss_notification, delete_notification,
     character_relationships, save_character_relationship, character_arcs, save_character_arc, entity_provenance, continuity_report,
     export_foundry_journal, create_portable_archive, validate_portable_archive_file, media_usage, replace_media_reference,
 )
 from .campaigns import (
-    list_campaigns, get_campaign, campaign_members, save_campaign, archive_campaign, make_default_campaign,
+    list_campaigns, get_campaign, campaign_members, save_campaign, archive_campaign, delete_campaign, make_default_campaign,
     set_campaign_members, invite_has_campaign, resolve_campaign_id, default_campaign_id,
 )
 from .scheduling import (
     init_schedule_db, list_player_availability, save_player_availability, player_campaigns, campaign_schedule,
+)
+from .semantic_search import semantic_search
+
+from .v5 import (
+    init_v5_db, list_follows, set_follow, followers_for_target, list_party_notes, save_party_note, delete_party_note,
+    investigation_board, save_investigation_node, delete_investigation_node, save_investigation_edge, delete_investigation_edge,
+    list_objectives, save_objective, delete_objective, character_milestones, save_character_milestone, delete_character_milestone,
+    save_rsvp, session_rsvps, get_preparation, save_preparation, list_prepared_sessions, map_discovery_states, set_map_discovery,
+    campaign_fog_regions, set_campaign_fog, notification_prefs, set_notification_pref, filter_notifications_for_prefs,
+)
+from .v51 import (
+    init_v51_db, prep_workspace, list_scenes, save_scenes, list_clues, save_clue, delete_clue,
+    list_npc_cards, save_npc_card, delete_npc_card, list_events, add_event, delete_event, list_consequences, save_consequence, delete_consequence,
+    list_clocks, save_clock, delete_clock, record_spotlight, spotlight_status, list_templates, save_template, delete_template,
+    list_random_tables, save_random_table, delete_random_table, roll_random_table, forgotten_items, save_closeout, BUILTIN_TEMPLATES,
 )
 
 settings = load_settings()
@@ -64,6 +79,8 @@ BUILD_LOCK = threading.Lock()
 init_db(settings)
 init_feature_db(settings)
 init_schedule_db(settings)
+init_v5_db(settings)
+init_v51_db(settings)
 seed_project(settings)
 
 app = FastAPI(title="Seeker", docs_url=None, redoc_url=None)
@@ -231,7 +248,7 @@ def ensure_built() -> dict:
     try:
         return load_wiki(settings)
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 4300}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 5000}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -555,7 +572,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 4300
+                    needs_build=int(existing.get("renderer_version") or 0) < 5000
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -696,6 +713,24 @@ def campaign_select_api(request: Request,payload:dict=Body(...)):
     return {"ok":True,"campaign":campaign}
 
 
+@app.get("/tables", response_class=HTMLResponse)
+def all_tables_page(request: Request):
+    if not player_allowed(request): return player_gate_redirect(request)
+    gm=is_gm(request);iid=_invite_id(request);wiki=_visible_wiki(request);maps=list_maps(settings,public=True)
+    campaigns=list_campaigns(settings,invite_id=iid,admin=gm,include_archived=gm)
+    today=__import__('datetime').date.today();end=today+__import__('datetime').timedelta(days=120)
+    cards=[]
+    for c in campaigns:
+        cid=int(c['id']);chars=list_player_characters(settings,invite_id=iid,admin=gm,campaign_id=cid)
+        own=[x for x in chars if iid is not None and int(x.get('invite_id') or -1)==int(iid)]
+        planner=None
+        if gm and c.get('status')=='active':
+            try: planner=campaign_schedule(settings,cid,today.isoformat(),end.isoformat())
+            except Exception: planner=None
+        cards.append({**c,'characters':chars,'own_characters':own,'planner':planner,'live_session':get_live_session(settings,invite_id=iid,admin=gm,campaign_id=cid)})
+    return templates.TemplateResponse('tables.html',{'request':request,'wiki':wiki,'maps':maps,'table_cards':cards,'gm_view':gm,'all_tables_view':True})
+
+
 @app.post("/api/admin/campaigns")
 def admin_campaign_save_api(request:Request,payload:dict=Body(...)):
     require_admin(request)
@@ -710,10 +745,32 @@ def admin_campaign_default_api(request:Request,campaign_id:int):
     except ValueError as exc:raise HTTPException(400,str(exc))
 
 
-@app.delete("/api/admin/campaigns/{campaign_id}")
+@app.post("/api/admin/campaigns/{campaign_id}/archive")
 def admin_campaign_archive_api(request:Request,campaign_id:int):
     require_admin(request)
     try:return archive_campaign(settings,campaign_id)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete("/api/admin/campaigns/{campaign_id}")
+def admin_campaign_delete_api(request:Request,campaign_id:int):
+    require_admin(request)
+    try:
+        row=get_campaign(settings,campaign_id)
+        if not row:raise ValueError('Campaign not found.')
+        # The UI used to make the default campaign effectively undeletable. For an
+        # owner-requested permanent deletion, transparently promote another active
+        # table first. The final remaining campaign is still protected.
+        if int(row.get('is_default') or 0):
+            alternatives=[c for c in list_campaigns(settings,admin=True,include_archived=True) if int(c['id'])!=int(campaign_id)]
+            if not alternatives:raise ValueError('Create another campaign before deleting the final table.')
+            replacement=next((c for c in alternatives if c.get('status')=='active'),alternatives[0])
+            if replacement.get('status')!='active':
+                save_campaign(settings,{**replacement,'status':'active'})
+            make_default_campaign(settings,int(replacement['id']))
+        delete_campaign(settings,campaign_id)
+        if int(request.session.get("campaign_id") or 0)==int(campaign_id):request.session["campaign_id"]=default_campaign_id(settings)
+        return {"ok":True,"deleted":int(campaign_id),"active_campaign_id":request.session.get('campaign_id')}
     except ValueError as exc:raise HTTPException(400,str(exc))
 
 
@@ -842,10 +899,32 @@ def map_page(request: Request, slug: str):
     wiki = _visible_wiki(request); map_data = get_map(settings, slug, public=True)
     if not map_data: raise HTTPException(404, "Map not found")
     map_data["layers"] = map_layers(settings, int(map_data["id"]), public=True)
-    map_data["fog_regions"] = fog_regions(settings, int(map_data["id"]), public=True)
+    cid=_active_campaign_id(request)
+    # Fog geometry is shared canon, while reveal state is table-specific in V5.
+    all_fog=fog_regions(settings, int(map_data["id"]), public=False)
+    map_data["fog_regions"] = campaign_fog_regions(settings,cid,all_fog,admin=is_gm(request))
+    discovery=map_discovery_states(settings,cid,[int(m.get("id")) for m in map_data.get("markers",[]) if m.get("id") is not None])
+    discovery_session_ids={int(r.get("first_session_id")) for r in discovery.values() if r.get("first_session_id")}
+    discovery_session_labels={}
+    if discovery_session_ids:
+        with connect(settings) as conn:
+            q=','.join('?' for _ in discovery_session_ids)
+            for r in conn.execute(f"SELECT id,session_number,title,session_date FROM campaign_sessions WHERE id IN ({q})",tuple(discovery_session_ids)).fetchall():
+                discovery_session_labels[int(r['id'])]=(f"Session {r['session_number']} · " if r['session_number'] else "")+str(r['title'] or r['session_date'] or 'Session')
+    for marker in map_data.get("markers",[]):
+        drow=discovery.get(int(marker.get("id") or 0)) or {}
+        marker["discovery_state"]=drow.get("state") or "discovered"
+        marker["first_session_id"]=drow.get("first_session_id")
+        marker["discovery_session_label"]=discovery_session_labels.get(int(drow.get("first_session_id") or 0),"")
+    if is_gm(request) and all_fog:
+        fog_ids=[int(r['id']) for r in all_fog]
+        q=','.join('?' for _ in fog_ids)
+        with connect(settings) as conn:
+            overrides={int(r['fog_region_id']):bool(r['revealed']) for r in conn.execute(f"SELECT fog_region_id,revealed FROM campaign_fog_reveals WHERE campaign_id=? AND fog_region_id IN ({q})",(cid,*fog_ids)).fetchall()}
+        for fog in map_data["fog_regions"]:fog["campaign_revealed"]=overrides.get(int(fog['id']),bool(fog.get('revealed')))
     if not is_gm(request):
-        kidx=knowledge_index(settings,_invite_id(request),campaign_id=_active_campaign_id(request))
-        map_data["markers"]=[m for m in map_data.get("markers",[]) if _knowledge_visible_from_index(kidx,"map_marker",f"{map_data['id']}:{m.get('id')}")[0]]
+        kidx=knowledge_index(settings,_invite_id(request),campaign_id=cid)
+        map_data["markers"]=[m for m in map_data.get("markers",[]) if m.get("discovery_state")!="unknown" and _knowledge_visible_from_index(kidx,"map_marker",f"{map_data['id']}:{m.get('id')}")[0]]
     else:
         kidx={}
     map_data["regions"] = map_regions(settings, int(map_data["id"]), admin=is_gm(request))
@@ -855,70 +934,51 @@ def map_page(request: Request, slug: str):
     map_data["history_max"] = max([float(h.get("end_sort") if h.get("end_sort") is not None else h.get("start_sort")) for r in map_data["regions"] for h in r.get("history",[]) if h.get("start_sort") is not None], default=0)
     map_data["world_width"] = float(get_setting(settings,"world_width","1000") or 1000)
     map_data["travel_speed"] = float(get_setting(settings,"travel_speed","40") or 40)
-    return templates.TemplateResponse("map.html", {"request": request, "wiki": wiki, "map": map_data, "maps": list_maps(settings,public=True)})
+    live=next((x for x in list_sessions(settings,campaign_id=cid) if x.get("status")=="live"),None)
+    return templates.TemplateResponse("map.html", {"request": request, "wiki": wiki, "map": map_data, "maps": list_maps(settings,public=True),"gm_view":is_gm(request),"live_session_id":(live or {}).get("id")})
 
 
 @app.get("/api/public/search")
 def public_search(request: Request, q: str = ""):
     if not player_allowed(request): raise HTTPException(401)
-    qn = q.strip().lower()
+    qn = q.strip()
     if not qn: return []
     wiki = _visible_wiki(request)
-    # Aliases are already loaded with the spoiler-filtered Codex state; avoid an
-    # extra SQLite connection on every search keystroke.
-    alias_map = wiki.get("aliases", {})
+    pages=wiki.get("pages",[])
     ranked=[]
-    # Aliases and redirects resolve fantasy titles, old spellings, epithets, and
-    # hidden true names to the same canonical entry without duplicate pages.
-    for alias, target in alias_map.items():
-        if qn in alias or alias in qn:
-            p = next((x for x in wiki.get("pages",[]) if x.get("slug")==target), None)
-            if p:
-                ranked.append((88 if qn==alias else 42,{"type":"alias","href":f"/wiki/{p['slug']}","slug":p["slug"],"title":p["title"],"chapter":p.get("chapter"),"excerpt":f"Also known as {alias}. {p.get('excerpt','')}"}))
-    for p in wiki.get("pages", []):
-        visibility = p.get("presentation", {}).get("visibility", "public")
-        title=p["title"].lower()
-        text=(p.get("excerpt", "") if visibility == "teaser" else p.get("plain_text", "")).lower()
-        score=0
-        if qn == title: score += 100
-        else:
-            try:
-                import difflib
-                ratio=difflib.SequenceMatcher(None,qn,title).ratio()
-                if ratio>=0.72: score += int(ratio*24)
-            except Exception:
-                pass
-        if qn in title: score += 30
-        score += min(10, text.count(qn))
-        if all(term in text or term in title for term in qn.split()): score += 5
-        if score:
-            ranked.append((score, {"type":"lore","href":f"/wiki/{p['slug']}","slug":p["slug"],"title":p["title"],"chapter":p.get("chapter"),"excerpt":p.get("excerpt","")}))
-    # Player-owned character dossiers participate in the same command/search
-    # palette as campaign lore. Private characters are returned only to their
-    # owner (and the GM) by list_player_characters.
+    # Local semantic retrieval runs only over the already spoiler-filtered Codex.
+    for hit in semantic_search(pages,qn,limit=18):
+        ranked.append((float(hit.get("score") or 0)+20,{"type":"lore","href":f"/wiki/{hit['slug']}","slug":hit["slug"],"title":hit["title"],"chapter":hit.get("chapter"),"excerpt":hit.get("excerpt","") ,"semantic_matches":hit.get("semantic_matches",[])}))
+    alias_map = wiki.get("aliases", {})
+    low=qn.casefold()
+    by_slug={p.get("slug"):p for p in pages}
+    for alias,target in alias_map.items():
+        if low in alias.casefold() or alias.casefold() in low:
+            p=by_slug.get(target)
+            if p: ranked.append((120 if low==alias.casefold() else 65,{"type":"alias","href":f"/wiki/{p['slug']}","slug":p["slug"],"title":p["title"],"chapter":p.get("chapter"),"excerpt":f"Also known as {alias}. {p.get('excerpt','')}"}))
+    # Character dossiers and map locations stay in the same palette.
     for character in list_player_characters(settings, invite_id=_invite_id(request), admin=is_gm(request),campaign_id=_active_campaign_id(request)):
-        title=(character.get("name") or "").lower(); body=" ".join(str(character.get(k) or "") for k in ("summary","biography","goals","ancestry","class_name")).lower(); score=0
-        if qn==title: score+=100
-        if qn in title: score+=34
-        score+=min(9,body.count(qn))
-        if score:
-            ranked.append((score,{"type":"character","href":f"/characters/{character['id']}","title":character.get("name") or "Character","chapter":"Player Characters","excerpt":character.get("summary") or " · ".join(x for x in (character.get("ancestry"),character.get("class_name")) if x)}))
-
+        title=(character.get("name") or "").casefold(); body=" ".join(str(character.get(k) or "") for k in ("summary","biography","goals","ancestry","class_name")).casefold(); score=0
+        if low==title: score+=115
+        if low in title: score+=45
+        for t in re.findall(r"[\w'-]+",low):
+            if len(t)>2: score+=min(5,body.count(t))
+        if score: ranked.append((score,{"type":"character","href":f"/characters/{character['id']}","title":character.get("name") or "Character","chapter":"Player Characters","excerpt":character.get("summary") or " · ".join(x for x in (character.get("ancestry"),character.get("class_name")) if x)}))
     for map_data in list_maps(settings, public=True):
-        map_title = (map_data.get("name") or "").lower()
-        map_desc = (map_data.get("description") or "").lower()
-        score = (35 if qn in map_title else 0) + min(6, map_desc.count(qn))
-        if score:
-            ranked.append((score, {"type":"map","href":f"/atlas/{map_data['slug']}","title":map_data["name"],"chapter":"Atlas","excerpt":map_data.get("description","")}))
-        for marker in map_data.get("markers", []):
-            title = (marker.get("title") or "").lower(); body=(marker.get("body") or "").lower(); score=0
-            if qn == title: score += 90
-            if qn in title: score += 28
-            score += min(8, body.count(qn))
-            if score:
-                ranked.append((score,{"type":"location","href":f"/atlas/{map_data['slug']}?focus={marker['id']}","title":marker.get("title","Location"),"chapter":map_data["name"],"excerpt":marker.get("body","")}))
-    ranked.sort(key=lambda x:(-x[0],x[1]["title"]))
-    return [item for _,item in ranked[:24]]
+        map_title=(map_data.get("name") or "").casefold();map_desc=(map_data.get("description") or "").casefold();score=(45 if low in map_title else 0)+sum(min(3,map_desc.count(t)) for t in re.findall(r"[\w'-]+",low) if len(t)>2)
+        if score: ranked.append((score,{"type":"map","href":f"/atlas/{map_data['slug']}","title":map_data["name"],"chapter":"Atlas","excerpt":map_data.get("description","")}))
+        for marker in map_data.get("markers",[]):
+            title=(marker.get("title") or "").casefold();body=(marker.get("body") or "").casefold();ms=(100 if low==title else 38 if low in title else 0)+sum(min(3,body.count(t)) for t in re.findall(r"[\w'-]+",low) if len(t)>2)
+            if ms: ranked.append((ms,{"type":"location","href":f"/atlas/{map_data['slug']}?focus={marker['id']}","title":marker.get("title","Location"),"chapter":map_data["name"],"excerpt":marker.get("body","")}))
+    # De-duplicate the same Codex entry when an alias and semantic result both hit.
+    ranked.sort(key=lambda x:(-x[0],str(x[1].get("title") or "").casefold()))
+    out=[];seen=set()
+    for _score,item in ranked:
+        key=item.get("href") or (item.get("type"),item.get("title"))
+        if key in seen: continue
+        seen.add(key);out.append(item)
+        if len(out)>=24: break
+    return out
 
 
 @app.get("/manifest.webmanifest")
@@ -960,39 +1020,81 @@ def service_worker():
 @app.get("/session", response_class=HTMLResponse)
 def player_session_screen(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
-    wiki = _visible_wiki(request); maps = list_maps(settings, public=True); iid=_invite_id(request); cid=_active_campaign_id(request); live = get_live_session(settings,invite_id=iid,admin=is_gm(request),campaign_id=cid)
-    by_slug = {p["slug"]: p for p in wiki.get("pages", [])}
-    if live:
-        live["lore_pages"] = [by_slug[x["page_slug"]] for x in live.get("lore", []) if x.get("page_slug") in by_slug]
-        live["spotlight_map"] = next((m for m in maps if m.get("slug") == live.get("spotlight_map_slug")), None)
-    invite = current_player_invite(request)
-    notes = []
-    history=[x for x in list_sessions(settings,public=True,invite_id=iid,campaign_id=cid) if x.get("status")=="ended"][-12:]
-    if not is_gm(request):
-        allowed={p.get("slug") for p in wiki.get("pages",[])}
-        if live: live["lore"]=[x for x in live.get("lore",[]) if x.get("page_slug") in allowed]
-        for row in history: row["lore"]=[x for x in row.get("lore",[]) if x.get("page_slug") in allowed]
-    mysteries=list_mysteries(settings, admin=is_gm(request),campaign_id=cid)[:6]
-    if not is_gm(request):
-        allowed={p.get("slug") for p in wiki.get("pages",[])}
-        for mystery in mysteries:
-            mystery["pins"]=[x for x in mystery.get("pins",[]) if not x.get("page_slug") or x.get("page_slug") in allowed]
-            pin_ids={x.get("id") for x in mystery["pins"]}
-            mystery["edges"]=[e for e in mystery.get("edges",[]) if e.get("source_pin") in pin_ids and e.get("target_pin") in pin_ids]
-    can_author = is_gm(request) or (not archive_mode() and bool(current_player_invite(request)) and player_role(request) == "player")
-    session_characters,active_character,character_selection_made=_session_character_context(request,live)
+    wiki=_visible_wiki(request);maps=list_maps(settings,public=True);iid=_invite_id(request);cid=_active_campaign_id(request);gm=is_gm(request)
+    live=get_live_session(settings,invite_id=iid,admin=gm,campaign_id=cid)
+    all_sessions=list_sessions(settings,public=False,invite_id=iid,campaign_id=cid)
+    planned=[dict(x) for x in all_sessions if x.get('status')=='planned']
+    # Planned sessions are visible to members for RSVP, but never expose GM-only notes.
+    for row in planned: row.pop('gm_notes',None)
+    upcoming=planned[0] if planned else None
+    session=live or upcoming
+    by_slug={p['slug']:p for p in wiki.get('pages',[])}
+    if session:
+        session['lore_pages']=[by_slug[x['page_slug']] for x in session.get('lore',[]) if x.get('page_slug') in by_slug]
+        session['spotlight_map']=next((m for m in maps if m.get('slug')==session.get('spotlight_map_slug')),None)
+        # Planned sessions loaded through list_sessions do not carry handouts.
+        if 'handouts' not in session:session['handouts']=[]
+    allowed={p.get('slug') for p in wiki.get('pages',[])}
+    if session and not gm:session['lore']=[x for x in session.get('lore',[]) if x.get('page_slug') in allowed]
+    ended=[x for x in all_sessions if x.get('status')=='ended']
+    history=list(reversed(ended[-12:]))
+    if not gm:
+        for row in history:row['lore']=[x for x in row.get('lore',[]) if x.get('page_slug') in allowed]
+    previous=history[0] if history else None
+    invite=current_player_invite(request)
+    can_author=gm or (not archive_mode() and bool(invite) and player_role(request)=='player')
+    session_characters,active_character,character_selection_made=_session_character_context(request,session)
     journal_character_filter=None
-    if not is_gm(request) and character_selection_made:
-        journal_character_filter=int((active_character or {}).get("id") or 0)
-    party_journals=list_party_journals(settings,iid,admin=is_gm(request),character_id=journal_character_filter,campaign_id=cid)
-    return templates.TemplateResponse("session.html", {
-        "request": request, "wiki": wiki, "maps": maps, "session": live, "player": invite,
-        "updates": recent_updates(settings, iid, 12,admin=is_gm(request),campaign_id=cid), "mysteries": mysteries,
-        "session_history":list(reversed(history)),"calendar":_calendar_config(),
-        "threads":list_threads(settings,admin=is_gm(request),invite_id=iid,campaign_id=cid),"party_journals":party_journals,
-        "gm_view":is_gm(request),"can_author":can_author,"archive_mode":archive_mode(),
-        "session_characters":session_characters,"active_character":active_character,
-        "character_selection_made":character_selection_made,
+    if not gm and character_selection_made:journal_character_filter=int((active_character or {}).get('id') or 0)
+    party_journals=list_party_journals(settings,iid,admin=gm,character_id=journal_character_filter,campaign_id=cid)
+    shared_notes=list_party_notes(settings,cid,int(session['id']) if session else None,120)
+    objectives=list_objectives(settings,cid,include_done=False)
+    follows=list_follows(settings,int(iid),cid) if iid is not None and not gm else []
+    followed_pages=[]
+    for f in follows:
+        if f.get('target_type')=='page' and f.get('target_key') in by_slug:followed_pages.append({**f,'page':by_slug[f['target_key']]})
+    mysteries=list_mysteries(settings,admin=gm,campaign_id=cid)[:12]
+    if not gm:
+        for mystery in mysteries:
+            mystery['pins']=[x for x in mystery.get('pins',[]) if not x.get('page_slug') or x.get('page_slug') in allowed]
+            pin_ids={x.get('id') for x in mystery['pins']};mystery['edges']=[e for e in mystery.get('edges',[]) if e.get('source_pin') in pin_ids and e.get('target_pin') in pin_ids]
+    own_rsvp=None
+    if session and invite:
+        own_rsvp=next((r for r in session_rsvps(settings,int(session['id'])) if int(r.get('invite_id') or -1)==int(invite['id'])),None)
+    notifications=filter_notifications_for_prefs(settings,iid,list_notifications(settings,iid,admin=gm,campaign_id=cid)[:12],admin=gm)
+    # Campaign clocks may be private GM pressure trackers or explicitly public.
+    # Never leak GM-only clocks into a player response.
+    campaign_clocks=[c for c in list_clocks(settings,cid) if gm or c.get('visibility')=='player']
+    return templates.TemplateResponse('session.html',{
+        'request':request,'wiki':wiki,'maps':maps,'session':session,'live_session':live,'upcoming_session':upcoming,'previous_session':previous,
+        'player':invite,'updates':recent_updates(settings,iid,16,admin=gm,campaign_id=cid),'mysteries':mysteries,'session_history':history,
+        'calendar':_calendar_config(),'threads':list_threads(settings,admin=gm,invite_id=iid,campaign_id=cid),'party_journals':party_journals,
+        'party_notes':shared_notes,'objectives':objectives,'follows':follows,'followed_pages':followed_pages,'notifications':notifications,
+        'gm_view':gm,'can_author':can_author,'archive_mode':archive_mode(),'session_characters':session_characters,'active_character':active_character,
+        'character_selection_made':character_selection_made,'own_rsvp':own_rsvp,'campaign_clocks':campaign_clocks,
+    })
+
+
+@app.get("/recap", response_class=HTMLResponse)
+def player_recap_screen(request:Request):
+    if not player_allowed(request):return player_gate_redirect(request)
+    wiki=_visible_wiki(request);iid=_invite_id(request);cid=_active_campaign_id(request);gm=is_gm(request)
+    sessions=list_sessions(settings,public=False,invite_id=iid,campaign_id=cid)
+    ended=[x for x in sessions if x.get('status')=='ended'];previous=ended[-1] if ended else None
+    allowed={p.get('slug') for p in wiki.get('pages',[])}
+    by_slug={p.get('slug'):p for p in wiki.get('pages',[])}
+    lore=[]
+    if previous:
+        for ref in previous.get('lore',[]):
+            if ref.get('page_slug') in allowed and ref.get('page_slug') in by_slug:lore.append(by_slug[ref['page_slug']])
+    mysteries=list_mysteries(settings,admin=gm,campaign_id=cid)[:10]
+    if not gm:
+        for m in mysteries:m['pins']=[x for x in m.get('pins',[]) if not x.get('page_slug') or x.get('page_slug') in allowed]
+    journals=list_party_journals(settings,iid,admin=gm,campaign_id=cid)[:16]
+    return templates.TemplateResponse('recap.html',{
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=True),'previous':previous,'lore':lore,
+        'updates':recent_updates(settings,iid,16,admin=gm,campaign_id=cid),'objectives':list_objectives(settings,cid,include_done=False),
+        'mysteries':mysteries,'journals':journals,'gm_view':gm,
     })
 
 
@@ -1201,7 +1303,11 @@ def page_card(request: Request, slug: str):
 @app.get("/api/public/annotations/{slug}")
 def public_annotations(request: Request, slug: str):
     if not player_allowed(request): raise HTTPException(401)
-    return list_annotations(settings,slug,invite_id=_invite_id(request),admin=is_gm(request))
+    iid=_invite_id(request);gm=is_gm(request)
+    rows=list_annotations(settings,slug,invite_id=iid,admin=gm)
+    for row in rows:
+        row["can_delete"]=bool(gm or (iid is not None and row.get("invite_id") is not None and int(row["invite_id"])==int(iid)))
+    return rows
 
 
 @app.post("/api/public/annotations")
@@ -1209,6 +1315,17 @@ def public_add_annotation(request: Request,payload:dict=Body(...)):
     if not player_allowed(request): raise HTTPException(401)
     invite=current_player_invite(request); label="GM" if is_gm(request) else (invite or {}).get("label","Player")
     return add_annotation(settings,payload,invite_id=_invite_id(request),author_label=label,admin=is_gm(request))
+
+
+@app.delete("/api/public/annotations/{annotation_id}")
+def public_delete_annotation(request: Request, annotation_id:int):
+    if not player_allowed(request): raise HTTPException(401)
+    try:
+        ok=delete_annotation(settings,annotation_id,invite_id=_invite_id(request),admin=is_gm(request))
+    except PermissionError as exc:
+        raise HTTPException(403,str(exc))
+    if not ok: raise HTTPException(404,"Note not found.")
+    return {"ok":True}
 
 
 @app.post("/api/public/bookmark/{slug}")
@@ -1264,7 +1381,9 @@ def gm_session_screen(request: Request):
     wiki=_visible_wiki(request); maps=list_maps(settings,public=False); cid=_active_campaign_id(request); live=get_live_session(settings,admin=True,campaign_id=cid)
     chars=list_player_characters(settings,admin=True,campaign_id=cid)
     for c in chars:c["arcs"]=character_arcs(settings,int(c["id"]),owner=True)
-    return templates.TemplateResponse("gm_session.html", {"request":request,"wiki":wiki,"maps":maps,"session":live,"sessions":list_sessions(settings,campaign_id=cid),"reveals":list_reveal_blocks_from_wiki(ensure_built()),"mysteries":list_mysteries(settings,admin=True,campaign_id=cid),"handouts":list_handouts(settings,admin=True,campaign_id=cid),"updates":recent_updates(settings,None,20,admin=True,campaign_id=cid),"fronts":list_fronts(settings,admin=True,campaign_id=cid),"characters":chars,"rumors":list_rumors(settings,admin=True,campaign_id=cid)})
+    all_sessions=list_sessions(settings,campaign_id=cid); objectives=list_objectives(settings,cid,include_done=False)
+    workspace=prep_workspace(settings,cid,int(live['id']),chars,all_sessions,objectives) if live else None
+    return templates.TemplateResponse("gm_session.html", {"request":request,"wiki":wiki,"maps":maps,"session":live,"sessions":all_sessions,"reveals":list_reveal_blocks_from_wiki(ensure_built()),"mysteries":list_mysteries(settings,admin=True,campaign_id=cid),"handouts":list_handouts(settings,admin=True,campaign_id=cid),"updates":recent_updates(settings,None,20,admin=True,campaign_id=cid),"fronts":list_fronts(settings,admin=True,campaign_id=cid),"characters":chars,"rumors":list_rumors(settings,admin=True,campaign_id=cid),"prep":(get_preparation(settings,int(live["id"])) if live else None),"objectives":objectives,"rsvps":(session_rsvps(settings,int(live["id"])) if live else []),"v51_workspace":workspace})
 
 
 @app.get("/admin/campaign", response_class=HTMLResponse)
@@ -1301,8 +1420,9 @@ def character_page(request: Request, character_id:int):
     owner=admin_view or (iid is not None and int(char.get("invite_id") or 0)==int(iid))
     char["arcs"]=character_arcs(settings,character_id,owner=owner)
     char["relationships"]=character_relationships(settings,character_id,owner=owner)
+    char["milestones"]=character_milestones(settings,character_id)
     can_edit=admin_view or (owner and player_role(request)=="player" and not archive_mode())
-    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[]),"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view)})
+    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[]),"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view),"character_sessions":list_sessions(settings,public=False,campaign_id=cid)})
 
 @app.get("/api/player/characters")
 def player_characters_api(request:Request):
@@ -1920,6 +2040,17 @@ def admin_update_marker(request: Request,marker_id:int,payload:dict=Body(...)): 
 @app.delete("/api/admin/markers/{marker_id}")
 def admin_delete_marker(request: Request,marker_id:int): require_admin(request); delete_marker(settings,marker_id); return {"ok":True}
 
+def _notify_page_followers(campaign_id:int, page_slug:str, title:str, body:str, *, kind:str='follow') -> None:
+    slug=str(page_slug or '').split('::',1)[0].strip()
+    if not slug:return
+    audience=followers_for_target(settings,int(campaign_id),'page',slug)
+    if not audience:return
+    create_notification(settings,{
+        'campaign_id':int(campaign_id),'title':str(title or 'Followed lore changed'),'body':str(body or ''),
+        'target_type':'page','target_key':slug,'kind':kind,'audience':audience,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Seeker campaign-runtime APIs
 # ---------------------------------------------------------------------------
@@ -1959,6 +2090,8 @@ def admin_save_session(request: Request,payload:dict=Body(...)):
         capture_session_state(settings,int(row["id"]),"before")
     if row.get("status")=="ended" and (not before or before.get("status")!="ended"):
         capture_session_state(settings,int(row["id"]),"after")
+    if row.get("status")=="planned" and (not before or before.get("status")!="planned" or before.get("session_date")!=row.get("session_date") or before.get("title")!=row.get("title")):
+        create_notification(settings,{"campaign_id":int(row["campaign_id"]),"title":"Session planned · "+str(row.get("title") or "Next session"),"body":str(row.get("session_date") or "A date has been proposed."),"target_type":"session","target_key":str(row["id"]),"kind":"session","audience":[]})
     return row
 
 
@@ -1974,7 +2107,10 @@ def admin_session_lore(request:Request,session_id:int,payload:dict=Body(...)):
 
 @app.post("/api/admin/session-updates")
 def admin_session_update(request:Request,payload:dict=Body(...)):
-    require_gm(request);return add_session_update(settings,_campaign_payload(request,payload))
+    require_gm(request);p=_campaign_payload(request,payload);row=add_session_update(settings,p)
+    if str(row.get("visibility") or "players")!="gm" and str(row.get("target_type") or "") in {"page","lore"}:
+        _notify_page_followers(_active_campaign_id(request),str(row.get("target_key") or ""),str(row.get("title") or "Followed lore changed"),str(row.get("body") or "A followed entry was updated."))
+    return row
 
 
 @app.post("/api/admin/timeline")
@@ -2001,7 +2137,10 @@ def admin_timeline_era_delete(request:Request,era_id:int):
 
 @app.post("/api/admin/relationships")
 def admin_relationship_save(request:Request,payload:dict=Body(...)):
-    require_gm(request);return save_relationship(settings,payload)
+    require_gm(request);row=save_relationship(settings,payload);cid=_active_campaign_id(request)
+    for slug in {str(row.get("source_slug") or ""),str(row.get("target_slug") or "")}:
+        if slug:_notify_page_followers(cid,slug,"A connection changed","A relationship involving this followed entry was updated.")
+    return row
 
 
 @app.delete("/api/admin/relationships/{relationship_id}")
@@ -2018,6 +2157,7 @@ def admin_reveal_save(request:Request,payload:dict=Body(...)):
     if row.get("state") in {"rumor","discovered","public"}:
         title=str(payload.get("title") or payload.get("target_key") or "Lore discovered")
         add_session_update(settings,{"campaign_id":_active_campaign_id(request),"session_id":payload.get("session_id"),"title":title,"body":str(payload.get("update_body") or "New lore has been revealed."),"target_type":payload.get("target_type") or "lore","target_key":payload.get("target_key") or "","visibility":"players","audience":payload.get("audience") or []})
+        _notify_page_followers(_active_campaign_id(request),str(payload.get("target_key") or ""),title,str(payload.get("update_body") or "New information about a followed entry has been revealed."))
     return row
 
 
@@ -2078,7 +2218,10 @@ def admin_mystery_delete(request:Request,mystery_id:int):
 
 @app.post("/api/admin/handouts")
 def admin_handout_save(request:Request,payload:dict=Body(...)):
-    require_gm(request);return save_handout(settings,_campaign_payload(request,payload))
+    require_gm(request);row=save_handout(settings,_campaign_payload(request,payload))
+    if str(row.get("visibility") or "players")!="gm":
+        create_notification(settings,{"campaign_id":_active_campaign_id(request),"title":"New handout · "+str(row.get("title") or "Handout"),"body":"A new letter, relic, or handout is available.","target_type":"handout","target_key":str(row.get("id") or ""),"kind":"handout","audience":[]})
+    return row
 
 
 @app.delete("/api/admin/handouts/{handout_id}")
@@ -2617,13 +2760,40 @@ def admin_notification_create(request:Request,payload:dict=Body(...)):
 @app.get("/api/public/notifications")
 def public_notifications(request:Request,since:float=0):
     if not player_allowed(request):raise HTTPException(401)
-    return list_notifications(settings,_invite_id(request),admin=is_gm(request),since=since,campaign_id=_active_campaign_id(request))
+    rows=list_notifications(settings,_invite_id(request),admin=is_gm(request),since=since,campaign_id=_active_campaign_id(request))
+    iid=_invite_id(request)
+    return rows if is_gm(request) or iid is None else filter_notifications_for_prefs(settings,int(iid),rows)
 @app.post("/api/public/notifications/{nid}/read")
 def public_notification_read(request:Request,nid:int):
     if not player_allowed(request):raise HTTPException(401)
     iid=_invite_id(request)
-    if iid is not None:mark_notification_read(settings,nid,iid)
+    reader_id=int(iid) if iid is not None else (-1 if is_gm(request) else None)
+    if reader_id is not None:mark_notification_read(settings,nid,reader_id)
     return {"ok":True}
+
+@app.delete("/api/public/notifications/{nid}")
+def public_notification_delete(request:Request,nid:int):
+    if not player_allowed(request):raise HTTPException(401)
+    cid=_active_campaign_id(request)
+    rows=list_notifications(settings,_invite_id(request),admin=is_gm(request),since=0,campaign_id=cid)
+    if not any(int(r.get('id') or 0)==int(nid) for r in rows):raise HTTPException(404,'Notification not found.')
+    if is_gm(request):
+        delete_notification(settings,nid,campaign_id=cid)
+        return {"ok":True,"deleted":"global"}
+    iid=_invite_id(request)
+    if iid is None:raise HTTPException(403,'A personal invitation is required.')
+    dismiss_notification(settings,nid,int(iid))
+    return {"ok":True,"deleted":"personal"}
+
+@app.post("/api/v5/notifications/read-all")
+def public_notifications_read_all(request:Request):
+    if not player_allowed(request):raise HTTPException(401)
+    iid=_invite_id(request)
+    reader_id=int(iid) if iid is not None else (-1 if is_gm(request) else None)
+    if reader_id is None:return {"ok":True,"count":0}
+    rows=list_notifications(settings,iid,admin=is_gm(request),since=0,campaign_id=_active_campaign_id(request))
+    for row in rows:mark_notification_read(settings,int(row["id"]),reader_id)
+    return {"ok":True,"count":len(rows)}
 
 
 @app.post("/api/player/characters/{character_id}/relationships")
@@ -2710,14 +2880,12 @@ def lore_assistant_query(request:Request,payload:dict=Body(...)):
     if not player_allowed(request):raise HTTPException(401)
     q=str(payload.get('q') or '').strip()
     if not q:raise HTTPException(400,'Ask a question about the campaign.')
-    wiki=_visible_wiki(request);terms=[x for x in re.findall(r'[A-Za-z0-9]+',q.lower()) if len(x)>2]
-    ranked=[]
-    for p in wiki.get('pages',[]):
-        text=(p.get('plain_text') or '')[:12000];low=text.lower();score=sum(low.count(t) for t in terms)+(8 if any(t in p.get('title','').lower() for t in terms) else 0)
-        if score:ranked.append((score,p))
-    ranked.sort(key=lambda x:-x[0]);context=[]
-    for _,p in ranked[:8]:
-        plain=re.sub(r'\s+',' ',p.get('plain_text','')).strip();context.append({'title':p.get('title'),'slug':p.get('slug'),'text':plain[:1600]})
+    wiki=_visible_wiki(request);pages=wiki.get('pages',[])
+    hits=semantic_search(pages,q,limit=8);by_slug={p.get('slug'):p for p in pages};context=[]
+    for hit in hits:
+        p=by_slug.get(hit.get('slug')) or {}
+        plain=re.sub(r'\s+',' ',p.get('plain_text') or p.get('excerpt') or '').strip()
+        context.append({'title':hit.get('title'),'slug':hit.get('slug'),'text':plain[:1800],'semantic_matches':hit.get('semantic_matches',[])})
     api_key=(os.getenv('SEEKER_AI_API_KEY') or os.getenv('LOREFORGE_AI_API_KEY','')).strip();model=(os.getenv('SEEKER_AI_MODEL') or os.getenv('LOREFORGE_AI_MODEL','')).strip();base=(os.getenv('SEEKER_AI_BASE_URL') or os.getenv('LOREFORGE_AI_BASE_URL','https://api.openai.com/v1')).rstrip('/')
     if api_key and model and payload.get('use_ai',True):
         try:
@@ -2731,11 +2899,11 @@ def lore_assistant_query(request:Request,payload:dict=Body(...)):
             ai_error=str(exc)
         else: ai_error=''
     else:ai_error=''
-    if not context:return {'mode':'local','answer':'I could not find that in the lore currently visible to you.','sources':[],'ai_error':ai_error}
+    if not context:return {'mode':'semantic','answer':'I could not find that in the lore currently visible to you.','sources':[],'ai_error':ai_error}
     snippets=[]
     for c in context[:4]:
         snippets.append(f"{c['title']}: {c['text'][:420].rstrip()}…")
-    return {'mode':'local','answer':'\n\n'.join(snippets),'sources':[{k:c[k] for k in ('title','slug')} for c in context[:4]],'ai_error':ai_error}
+    return {'mode':'semantic','answer':'\n\n'.join(snippets),'sources':[{k:c[k] for k in ('title','slug')} for c in context[:4]],'ai_error':ai_error}
 
 
 @app.put("/api/admin/invitations/{invite_id}/role")
@@ -2747,3 +2915,442 @@ def admin_invitation_role(request:Request,invite_id:int,payload:dict=Body(...)):
         if cur.rowcount!=1:raise HTTPException(404)
         conn.execute('DELETE FROM player_devices WHERE invite_id=?',(int(invite_id),))
     return next((x for x in list_player_invites(settings) if int(x['id'])==invite_id),{})
+
+# ---------------------------------------------------------------------------
+# Seeker V5 · player session companion
+# ---------------------------------------------------------------------------
+
+@app.get('/investigation', response_class=HTMLResponse)
+def investigation_page(request:Request):
+    if not player_allowed(request): return player_gate_redirect(request)
+    invite=current_player_invite(request)
+    if not invite: raise HTTPException(403,'A personal player invitation is required for a private investigation board.')
+    wiki=_visible_wiki(request);cid=_active_campaign_id(request)
+    board=investigation_board(settings,cid,int(invite['id']))
+    return templates.TemplateResponse('investigation.html',{'request':request,'wiki':wiki,'maps':list_maps(settings,public=True),'board':board,'player':invite})
+
+
+@app.get('/api/v5/follows')
+def v5_follows(request:Request):
+    if not player_allowed(request): raise HTTPException(401)
+    invite=current_player_invite(request)
+    if not invite:return []
+    return list_follows(settings,int(invite['id']),_active_campaign_id(request))
+
+
+@app.post('/api/v5/follows')
+def v5_follow_save(request:Request,payload:dict=Body(...)):
+    require_player_author(request);invite=current_player_invite(request)
+    if not invite:raise HTTPException(403)
+    try:enabled=set_follow(settings,int(invite['id']),_active_campaign_id(request),str(payload.get('target_type') or 'page'),str(payload.get('target_key') or ''),bool(payload.get('enabled',True)),str(payload.get('label') or ''))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+    return {'ok':True,'enabled':enabled}
+
+
+@app.get('/api/v5/party-notes')
+def v5_party_notes(request:Request,session_id:int|None=None):
+    if not player_allowed(request):raise HTTPException(401)
+    cid=_active_campaign_id(request)
+    return list_party_notes(settings,cid,session_id,150)
+
+
+@app.post('/api/v5/party-notes')
+def v5_party_note_save(request:Request,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    if not is_gm(request):require_player_author(request)
+    invite=current_player_invite(request);iid=int(invite['id']) if invite else None
+    try:return save_party_note(settings,_active_campaign_id(request),payload.get('session_id'),iid,_player_label(request),payload.get('body',''),payload.get('id'),admin=is_gm(request))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v5/party-notes/{note_id}')
+def v5_party_note_delete(request:Request,note_id:int):
+    if not player_allowed(request):raise HTTPException(401)
+    if not is_gm(request):require_player_author(request)
+    try:delete_party_note(settings,note_id,_invite_id(request),admin=is_gm(request))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    return {'ok':True}
+
+
+@app.get('/api/v5/investigation')
+def v5_investigation_get(request:Request):
+    if not player_allowed(request):raise HTTPException(401)
+    invite=current_player_invite(request)
+    if not invite:raise HTTPException(403)
+    return investigation_board(settings,_active_campaign_id(request),int(invite['id']))
+
+
+@app.post('/api/v5/investigation/nodes')
+def v5_investigation_node_save(request:Request,payload:dict=Body(...)):
+    require_player_author(request);invite=current_player_invite(request)
+    try:return save_investigation_node(settings,_active_campaign_id(request),int(invite['id']),payload)
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v5/investigation/nodes/{node_id}')
+def v5_investigation_node_delete(request:Request,node_id:int):
+    require_player_author(request);invite=current_player_invite(request);delete_investigation_node(settings,node_id,_active_campaign_id(request),int(invite['id']));return {'ok':True}
+
+
+@app.post('/api/v5/investigation/edges')
+def v5_investigation_edge_save(request:Request,payload:dict=Body(...)):
+    require_player_author(request);invite=current_player_invite(request)
+    try:return save_investigation_edge(settings,_active_campaign_id(request),int(invite['id']),payload)
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v5/investigation/edges/{edge_id}')
+def v5_investigation_edge_delete(request:Request,edge_id:int):
+    require_player_author(request);invite=current_player_invite(request);delete_investigation_edge(settings,edge_id,_active_campaign_id(request),int(invite['id']));return {'ok':True}
+
+
+@app.get('/api/v5/objectives')
+def v5_objectives_get(request:Request):
+    if not player_allowed(request):raise HTTPException(401)
+    return list_objectives(settings,_active_campaign_id(request))
+
+
+@app.post('/api/v5/objectives')
+def v5_objective_save(request:Request,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    if not is_gm(request):require_player_author(request)
+    try:return save_objective(settings,_active_campaign_id(request),payload,_invite_id(request),_player_label(request),admin=is_gm(request))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v5/objectives/{objective_id}')
+def v5_objective_delete(request:Request,objective_id:int):
+    if not is_gm(request):require_player_author(request)
+    try:delete_objective(settings,objective_id,_invite_id(request),admin=is_gm(request))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    return {'ok':True}
+
+
+@app.post('/api/v5/characters/{character_id}/milestones')
+def v5_character_milestone_save(request:Request,character_id:int,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    if not is_gm(request):require_player_author(request)
+    char=_character_owned(request,character_id)
+    return save_character_milestone(settings,char,str(payload.get('label') or 'Milestone'),str(payload.get('note') or ''),payload.get('session_id'))
+
+
+@app.delete('/api/v5/characters/{character_id}/milestones/{milestone_id}')
+def v5_character_milestone_delete(request:Request,character_id:int,milestone_id:int):
+    if not is_gm(request):require_player_author(request)
+    _character_owned(request,character_id);delete_character_milestone(settings,milestone_id,character_id);return {'ok':True}
+
+
+@app.post('/api/v5/sessions/{session_id}/rsvp')
+def v5_session_rsvp(request:Request,session_id:int,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    invite=current_player_invite(request)
+    if not invite:raise HTTPException(403,'A personal invitation is required to RSVP.')
+    try:return save_rsvp(settings,session_id,int(invite['id']),str(payload.get('status') or 'maybe'),str(payload.get('note') or ''))
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.get('/api/v5/sessions/{session_id}/rsvps')
+def v5_session_rsvps(request:Request,session_id:int):
+    require_gm(request);return session_rsvps(settings,session_id)
+
+
+@app.get('/gm/prep',response_class=HTMLResponse)
+def gm_prep_page(request:Request,session_id:int|None=None):
+    require_gm(request);cid=_active_campaign_id(request);wiki=_visible_wiki(request);sessions=list_prepared_sessions(settings,cid)
+    selected=None
+    if session_id:selected=next((s for s in sessions if int(s['id'])==int(session_id)),None)
+    if selected is None:selected=next((s for s in sessions if s.get('status') in {'live','planned'}),None)
+    prep=get_preparation(settings,int(selected['id'])) if selected else None
+    chars=list_player_characters(settings,admin=True,campaign_id=cid)
+    for c in chars:c['arcs']=character_arcs(settings,int(c['id']),owner=True)
+    objectives=list_objectives(settings,cid)
+    workspace=prep_workspace(settings,cid,int(selected['id']),chars,sessions,objectives) if selected else {
+        'scenes':[],'clues':list_clues(settings,cid),'npc_cards':list_npc_cards(settings,cid),'events':[],
+        'consequences':list_consequences(settings,cid),'clocks':list_clocks(settings,cid),'spotlights':spotlight_status(settings,cid,chars,sessions),
+        'templates':list_templates(settings,cid),'random_tables':list_random_tables(settings,cid),'forgotten':forgotten_items(settings,cid,chars,sessions,objectives)}
+    return templates.TemplateResponse('gm_prep.html',{
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=False),'sessions':sessions,'selected_session':selected,'prep':prep,
+        'mysteries':list_mysteries(settings,admin=True,campaign_id=cid),'handouts':list_handouts(settings,admin=True,campaign_id=cid),
+        'fronts':list_fronts(settings,admin=True,campaign_id=cid),'rumors':list_rumors(settings,admin=True,campaign_id=cid),
+        'characters':chars,'objectives':objectives,'v51_workspace':workspace,
+    })
+
+
+@app.get('/api/v5/gm/prep/{session_id}')
+def v5_gm_prep_get(request:Request,session_id:int):
+    require_gm(request);return get_preparation(settings,session_id)
+
+
+@app.put('/api/v5/gm/prep/{session_id}')
+def v5_gm_prep_save(request:Request,session_id:int,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_preparation(settings,session_id,_active_campaign_id(request),payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+
+@app.get('/api/v51/gm/workspace/{session_id}')
+def v51_gm_workspace(request:Request,session_id:int):
+    require_gm(request);cid=_active_campaign_id(request)
+    sessions=list_prepared_sessions(settings,cid);selected=next((x for x in sessions if int(x['id'])==int(session_id)),None)
+    if not selected:raise HTTPException(404,'Session not found in this campaign.')
+    chars=list_player_characters(settings,admin=True,campaign_id=cid)
+    return prep_workspace(settings,cid,session_id,chars,sessions,list_objectives(settings,cid))
+
+
+@app.put('/api/v51/gm/scenes/{session_id}')
+def v51_gm_scenes_save(request:Request,session_id:int,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_scenes(settings,_active_campaign_id(request),session_id,payload.get('scenes') or [])
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.post('/api/v51/gm/clues')
+def v51_gm_clue_save(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_clue(settings,_active_campaign_id(request),payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v51/gm/clues/{clue_id}')
+def v51_gm_clue_delete(request:Request,clue_id:int):
+    require_gm(request);delete_clue(settings,_active_campaign_id(request),clue_id);return {'ok':True}
+
+
+@app.post('/api/v51/gm/npc-cards')
+def v51_gm_npc_save(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_npc_card(settings,_active_campaign_id(request),payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v51/gm/npc-cards/{page_slug:path}')
+def v51_gm_npc_delete(request:Request,page_slug:str):
+    require_gm(request);delete_npc_card(settings,_active_campaign_id(request),page_slug);return {'ok':True}
+
+
+@app.post('/api/v51/gm/events/{session_id}')
+def v51_gm_event_add(request:Request,session_id:int,payload:dict=Body(...)):
+    require_gm(request)
+    try:return add_event(settings,_active_campaign_id(request),session_id,payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v51/gm/events/{event_id}')
+def v51_gm_event_delete(request:Request,event_id:int):
+    require_gm(request);delete_event(settings,_active_campaign_id(request),event_id);return {'ok':True}
+
+
+@app.post('/api/v51/gm/consequences')
+def v51_gm_consequence_save(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_consequence(settings,_active_campaign_id(request),payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v51/gm/consequences/{item_id}')
+def v51_gm_consequence_delete(request:Request,item_id:int):
+    require_gm(request);delete_consequence(settings,_active_campaign_id(request),item_id);return {'ok':True}
+
+
+@app.post('/api/v51/gm/clocks')
+def v51_gm_clock_save(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:
+        row=save_clock(settings,_active_campaign_id(request),payload)
+        if row.get('visibility')=='player':
+            create_notification(settings,{'campaign_id':_active_campaign_id(request),'title':row['title'],'body':f"Campaign clock: {row['current_segments']}/{row['total_segments']}",'kind':'notice'})
+        return row
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v51/gm/clocks/{item_id}')
+def v51_gm_clock_delete(request:Request,item_id:int):
+    require_gm(request);delete_clock(settings,_active_campaign_id(request),item_id);return {'ok':True}
+
+
+@app.post('/api/v51/gm/spotlights/{character_id}')
+def v51_gm_spotlight_mark(request:Request,character_id:int,payload:dict=Body(default={})):
+    require_gm(request);cid=_active_campaign_id(request)
+    char=get_player_character(settings,character_id,admin=True,campaign_id=cid)
+    if not char:raise HTTPException(404,'Character not found in this campaign.')
+    return record_spotlight(settings,cid,character_id,payload.get('session_id'),str(payload.get('note') or ''))
+
+
+@app.post('/api/v51/gm/templates')
+def v51_gm_template_save(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_template(settings,_active_campaign_id(request),payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v51/gm/templates/{item_id}')
+def v51_gm_template_delete(request:Request,item_id:int):
+    require_gm(request);delete_template(settings,_active_campaign_id(request),item_id);return {'ok':True}
+
+
+@app.post('/api/v51/gm/random-tables')
+def v51_gm_random_table_save(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_random_table(settings,_active_campaign_id(request),payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v51/gm/random-tables/{item_id}')
+def v51_gm_random_table_delete(request:Request,item_id:int):
+    require_gm(request);delete_random_table(settings,_active_campaign_id(request),item_id);return {'ok':True}
+
+
+@app.post('/api/v51/gm/random-tables/roll')
+def v51_gm_random_table_roll(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:return roll_random_table(settings,_active_campaign_id(request),str(payload.get('table_id') or ''))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.post('/api/v51/gm/push')
+def v51_gm_push(request:Request,payload:dict=Body(...)):
+    require_gm(request);cid=_active_campaign_id(request);kind=str(payload.get('kind') or 'notice')[:50]
+    target_type=str(payload.get('target_type') or '')[:50];target_key=str(payload.get('target_key') or '')[:500]
+    title=str(payload.get('title') or 'New table information')[:250];body=str(payload.get('body') or '')[:5000]
+    # Pushes are intentionally explicit: they notify, but do not silently publish hidden Codex truth.
+    return create_notification(settings,{'campaign_id':cid,'title':title,'body':body,'target_type':target_type,'target_key':target_key,'kind':kind})
+
+
+@app.post('/api/v51/gm/apply-template/{session_id}')
+def v51_gm_apply_template(request:Request,session_id:int,payload:dict=Body(...)):
+    require_gm(request);cid=_active_campaign_id(request);template_id=str(payload.get('template_id') or '')
+    template=next((x for x in list_templates(settings,cid) if str(x.get('id'))==template_id),None)
+    if not template:raise HTTPException(404,'Template not found.')
+    data=template if template.get('builtin') else (template.get('payload') or {})
+    scenes=data.get('scenes') or (data.get('payload') or {}).get('scenes') or []
+    if scenes:save_scenes(settings,cid,session_id,scenes)
+    prep=get_preparation(settings,session_id)
+    source=data.get('prep') or (data.get('payload') or {}).get('prep') or {}
+    for key in ('opening','secrets','contingencies','notes','pacing'):
+        if source.get(key):prep[key]=source[key]
+    if not prep.get('pacing'):prep['pacing']=[{'label':x,'done':False,'note':''} for x in ('Opening','Exploration','Social pressure','Escalation','Climax','Fallout')]
+    save_preparation(settings,session_id,cid,prep)
+    return {'ok':True,'prep':get_preparation(settings,session_id),'scenes':list_scenes(settings,cid,session_id)}
+
+
+@app.post('/api/v51/gm/closeout/{session_id}')
+def v51_gm_closeout(request:Request,session_id:int,payload:dict=Body(...)):
+    require_gm(request);cid=_active_campaign_id(request)
+    sessions=list_prepared_sessions(settings,cid);session=next((x for x in sessions if int(x['id'])==int(session_id)),None)
+    if not session:raise HTTPException(404,'Session not found.')
+
+    # Guided closeout updates. Everything is campaign-scoped and optional so an
+    # old/simple client can still close a session with only summary text.
+    clue_states=payload.get('clue_states') if isinstance(payload.get('clue_states'),dict) else {}
+    if clue_states:
+        by_id={int(x['id']):x for x in list_clues(settings,cid)}
+        for raw_id,state in clue_states.items():
+            try:rid=int(raw_id)
+            except Exception:continue
+            row=by_id.get(rid);state=str(state or '')
+            if row and state in {'not_found','hinted','discovered','misinterpreted'} and state!=row.get('status'):
+                save_clue(settings,cid,{**row,'status':state,'delivered_session_id':(session_id if state=='discovered' else row.get('delivered_session_id'))})
+
+    objective_states=payload.get('objective_states') if isinstance(payload.get('objective_states'),dict) else {}
+    if objective_states:
+        by_id={int(x['id']):x for x in list_objectives(settings,cid,include_done=True)}
+        for raw_id,state in objective_states.items():
+            try:rid=int(raw_id)
+            except Exception:continue
+            row=by_id.get(rid);state=str(state or '')
+            if row and state in {'active','hold','completed','failed'} and state!=row.get('status'):
+                save_objective(settings,cid,{**row,'status':state},None,'GM',admin=True)
+
+    consequence_states=payload.get('consequence_states') if isinstance(payload.get('consequence_states'),dict) else {}
+    if consequence_states:
+        by_id={int(x['id']):x for x in list_consequences(settings,cid,include_resolved=True)}
+        for raw_id,state in consequence_states.items():
+            try:rid=int(raw_id)
+            except Exception:continue
+            row=by_id.get(rid);state=str(state or '')
+            if row and state in {'pending','resolved','cancelled'} and state!=row.get('status'):
+                save_consequence(settings,cid,{**row,'status':state})
+
+    clock_values=payload.get('clock_values') if isinstance(payload.get('clock_values'),dict) else {}
+    if clock_values:
+        by_id={int(x['id']):x for x in list_clocks(settings,cid,include_done=True)}
+        for raw_id,value in clock_values.items():
+            try:rid=int(raw_id);value=int(value)
+            except Exception:continue
+            row=by_id.get(rid)
+            if row and value!=int(row.get('current_segments') or 0):
+                save_clock(settings,cid,{**row,'current_segments':value})
+
+    session=save_session(settings,{**session,'campaign_id':cid,'status':'ended','summary':str(payload.get('summary') or session.get('summary') or '')})
+    next_id=None
+    if bool(payload.get('create_next',True)):
+        nums=[int(x['session_number']) for x in sessions if x.get('session_number') is not None]
+        next_row=save_session(settings,{'campaign_id':cid,'session_number':(max(nums)+1 if nums else None),'title':str(payload.get('next_title') or 'Next session')[:200],'session_date':'','status':'planned','summary':''})
+        next_id=int(next_row['id'])
+        old_prep=get_preparation(settings,session_id);unfinished=[s for s in list_scenes(settings,cid,session_id) if s.get('status') not in {'done','skipped'}]
+
+        # Seed the next runbook from campaign state, not merely from whatever
+        # happened to be typed into the previous prep page.
+        carry_refs=list(old_prep.get('references') or [])
+        seen={(str(r.get('type')),str(r.get('key'))) for r in carry_refs if isinstance(r,dict)}
+        def add_ref(kind,key,label):
+            token=(str(kind),str(key))
+            if token not in seen and len(carry_refs)<120:
+                carry_refs.append({'type':str(kind),'key':str(key),'label':str(label)[:300]});seen.add(token)
+        for obj in list_objectives(settings,cid):
+            if obj.get('status') in {'active','hold'}:add_ref('objective',obj['id'],obj.get('title') or 'Objective')
+        for mystery in list_mysteries(settings,admin=True,campaign_id=cid):
+            if mystery.get('status')=='open':add_ref('mystery',mystery['id'],mystery.get('title') or 'Mystery')
+        for front in list_fronts(settings,admin=True,campaign_id=cid):
+            if front.get('status')=='active':add_ref('front',front['id'],front.get('title') or 'Front')
+        for char in list_player_characters(settings,admin=True,campaign_id=cid):
+            for arc in (char.get('arcs') or []):
+                if arc.get('status')=='active':add_ref('character',char['id'],f"{char.get('name','Character')} · {arc.get('title','Arc')}")
+
+        carry=[]
+        unresolved=str(payload.get('unresolved') or '').strip()
+        if unresolved:carry.append(unresolved)
+        pending_cons=list_consequences(settings,cid)
+        if pending_cons:carry.append('Pending consequences:\n'+'\n'.join('• '+str(x.get('title') or '') for x in pending_cons[:12]))
+        pending_clues=[x for x in list_clues(settings,cid) if x.get('status')!='discovered']
+        if pending_clues:carry.append('Undelivered / unresolved clues:\n'+'\n'.join('• '+str(x.get('title') or '') for x in pending_clues[:12]))
+        if old_prep.get('notes'):carry.append('Previous scratchpad:\n'+str(old_prep.get('notes')))
+        seed={'opening':'','beats':[],'secrets':'','contingencies':'','notes':('CARRY FORWARD\n\n'+'\n\n'.join(carry)) if carry else '', 'references':carry_refs,'pacing':[{'label':x,'done':False,'note':''} for x in ('Opening','Exploration','Social pressure','Escalation','Climax','Fallout')]}
+        save_preparation(settings,next_id,cid,seed)
+        if unfinished:
+            copied=[]
+            for scene in unfinished:
+                copied.append({k:scene.get(k) for k in ('title','purpose','location_slug','npc_slugs','complication','fallback','notes','estimated_minutes')}|{'status':'ready'})
+            save_scenes(settings,cid,next_id,copied)
+    save_closeout(settings,cid,session_id,str(payload.get('summary') or ''),str(payload.get('unresolved') or ''),next_id)
+    return {'ok':True,'session':session,'next_session_id':next_id}
+
+
+@app.post('/api/v5/gm/map-markers/{marker_id}/discovery')
+def v5_map_discovery_save(request:Request,marker_id:int,payload:dict=Body(...)):
+    require_gm(request)
+    try:return set_map_discovery(settings,_active_campaign_id(request),marker_id,str(payload.get('state') or 'discovered'),payload.get('session_id'))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.post('/api/v5/gm/map-fog/{fog_id}')
+def v5_map_fog_save(request:Request,fog_id:int,payload:dict=Body(...)):
+    require_gm(request);set_campaign_fog(settings,_active_campaign_id(request),fog_id,bool(payload.get('revealed')));return {'ok':True}
+
+
+@app.get('/api/v5/notification-prefs')
+def v5_notification_prefs_get(request:Request):
+    if not player_allowed(request):raise HTTPException(401)
+    invite=current_player_invite(request)
+    return notification_prefs(settings,int(invite['id'])) if invite else {}
+
+
+@app.put('/api/v5/notification-prefs/{kind}')
+def v5_notification_pref_save(request:Request,kind:str,payload:dict=Body(...)):
+    require_player_author(request);invite=current_player_invite(request);return set_notification_pref(settings,int(invite['id']),kind,bool(payload.get('enabled',True)))
