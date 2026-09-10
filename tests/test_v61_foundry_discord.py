@@ -85,7 +85,7 @@ def test_v61_public_foundry_manifest_and_install_zip(tmp_path: Path, monkeypatch
     client=TestClient(main.app)
     manifest=client.get('/foundry/seeker-bridge/module.json')
     assert manifest.status_code==200
-    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.1.1'
+    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.1.2'
     assert data['manifest'].endswith('/foundry/seeker-bridge/module.json')
     assert data['download'].endswith('/foundry/seeker-bridge/seeker-bridge.zip')
     package=client.get('/foundry/seeker-bridge/seeker-bridge.zip')
@@ -183,7 +183,7 @@ def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
 def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
     root=Path(__file__).resolve().parents[1]
     bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.1.1"' in bridge
+    assert 'const BRIDGE_VERSION = "1.1.2"' in bridge
     assert 'function normalizedEndpoint' in bridge
     assert 'u.protocol === "http:" && !local' in bridge
     assert 'Seeker Bridge connected' in bridge
@@ -200,3 +200,43 @@ def test_v61_foundry_push_errors_keep_cors_headers(tmp_path: Path, monkeypatch):
     assert bad.status_code==403
     assert bad.headers.get('access-control-allow-origin')=='*'
     assert 'Invalid Foundry bridge token' in bad.text
+
+
+def test_v611_request_host_beats_secondary_railway_domain(tmp_path: Path, monkeypatch):
+    import app.main as main
+    import shutil
+    s=setup(tmp_path);seed_wiki(s);monkeypatch.setattr(main,'settings',s)
+    src=Path(__file__).resolve().parents[1]/'integrations'/'foundry-seeker-bridge'
+    dst=s.root_dir/'integrations'/'foundry-seeker-bridge';dst.parent.mkdir(parents=True,exist_ok=True);shutil.copytree(src,dst)
+    monkeypatch.delenv('SEEKER_PUBLIC_URL',raising=False)
+    monkeypatch.setenv('RAILWAY_ENVIRONMENT','production')
+    monkeypatch.setenv('RAILWAY_PUBLIC_DOMAIN','seeker-default.up.railway.app')
+    client=TestClient(main.app)
+    headers={'host':'seeker.up.railway.app','x-forwarded-host':'seeker.up.railway.app','x-forwarded-proto':'https'}
+    manifest=client.get('/foundry/seeker-bridge/module.json',headers=headers).json()
+    assert manifest['manifest']=='https://seeker.up.railway.app/foundry/seeker-bridge/module.json'
+    assert manifest['download']=='https://seeker.up.railway.app/foundry/seeker-bridge/seeker-bridge.zip'
+    package=client.get('/foundry/seeker-bridge/seeker-bridge.zip',headers=headers)
+    out=tmp_path/'bridge.zip';out.write_bytes(package.content)
+    with zipfile.ZipFile(out) as zf:
+        bridge=zf.read('seeker-bridge.mjs').decode('utf-8')
+        assert 'const BUNDLED_SEEKER_ORIGIN = "https://seeker.up.railway.app";' in bridge
+        assert '__SEEKER_PUBLIC_ORIGIN__' not in bridge
+
+
+def test_v611_explicit_public_url_still_wins(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed_wiki(s);monkeypatch.setattr(main,'settings',s)
+    monkeypatch.setenv('SEEKER_PUBLIC_URL','https://seeker.up.railway.app/')
+    monkeypatch.setenv('RAILWAY_PUBLIC_DOMAIN','other.up.railway.app')
+    client=TestClient(main.app)
+    manifest=client.get('/foundry/seeker-bridge/module.json',headers={'host':'wrong.example'}).json()
+    assert manifest['manifest'].startswith('https://seeker.up.railway.app/')
+
+
+def test_v611_archive_mode_does_not_block_foundry_heartbeat():
+    root=Path(__file__).resolve().parents[1]
+    main=(root/'app/main.py').read_text(encoding='utf-8')
+    assert '"/api/v6/foundry/push/"' in main
+    bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
+    assert 'BUNDLED_SEEKER_ORIGIN' in bridge and 'canonical.host' in bridge

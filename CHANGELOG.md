@@ -1,3 +1,9 @@
+# Seeker 6.1.1 — Foundry Railway origin hotfix
+
+- Fixed Foundry URLs when Railway exposes a secondary/default public domain: Seeker now prefers the actual browser-facing `Host` / `X-Forwarded-Host` over `RAILWAY_PUBLIC_DOMAIN`, while still honoring an explicit `SEEKER_PUBLIC_URL`.
+- Foundry Bridge 1.1.2 is stamped with the manifest origin when downloaded and automatically repairs stale saved bridge hostnames while preserving the campaign ID and private token.
+- Foundry heartbeats remain available in archive/read-only mode because they update transient integration state rather than authored campaign content.
+
 # Seeker 6.1.0 — Foundry bridge & table reliability
 
 - Hardened Foundry connectivity behind Railway/reverse proxies: public integration URLs now honor the canonical HTTPS origin, the bridge automatically upgrades stale public HTTP endpoints, and Foundry surfaces explicit connected/error notifications instead of silently leaving Seeker on “Waiting for Foundry”.

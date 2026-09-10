@@ -2,7 +2,7 @@
   "id": "seeker-bridge",
   "title": "Seeker Bridge",
   "description": "Read-only bridge from Foundry VTT to Seeker. Syncs table context and player-owned character sheets for display in Seeker; it never modifies Foundry documents.",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "authors": [
     {
       "name": "Seeker"

@@ -459,9 +459,9 @@ def foundry_manifest(settings: Settings, base_url: str) -> dict:
     try:
         data=json.loads(source.read_text(encoding='utf-8'))
     except Exception:
-        data={'id':'seeker-bridge','title':'Seeker Bridge','version':'1.1.1','esmodules':['seeker-bridge.mjs']}
+        data={'id':'seeker-bridge','title':'Seeker Bridge','version':'1.1.2','esmodules':['seeker-bridge.mjs']}
     base=base_url.rstrip('/')
-    data['version']='1.1.1'
+    data['version']='1.1.2'
     data['manifest']=f'{base}/foundry/seeker-bridge/module.json'
     data['download']=f'{base}/foundry/seeker-bridge/seeker-bridge.zip'
     data['url']=base
@@ -471,12 +471,22 @@ def foundry_manifest(settings: Settings, base_url: str) -> dict:
 def build_foundry_module_zip(settings: Settings, base_url: str, target: Path) -> Path:
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     target.parent.mkdir(parents=True,exist_ok=True)
-    manifest=foundry_manifest(settings,base_url)
+    base=base_url.rstrip('/')
+    manifest=foundry_manifest(settings,base)
     with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as zf:
         zf.writestr('module.json',json.dumps(manifest,indent=2,ensure_ascii=False))
         for path in source.rglob('*'):
-            if path.is_file() and path.name!='module.json':
-                zf.write(path,path.relative_to(source).as_posix())
+            if not path.is_file() or path.name == 'module.json':
+                continue
+            arcname=path.relative_to(source).as_posix()
+            if path.name == 'seeker-bridge.mjs':
+                # Pin the downloaded bridge to the same public origin as its manifest.
+                # This lets a module update repair a bridge endpoint saved with an old
+                # Railway/generated hostname without hard-coding one deployment in source.
+                bridge=path.read_text(encoding='utf-8').replace('__SEEKER_PUBLIC_ORIGIN__',base)
+                zf.writestr(arcname,bridge)
+            else:
+                zf.write(path,arcname)
     return target
 
 

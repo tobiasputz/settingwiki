@@ -31,7 +31,7 @@ def setup(tmp_path: Path) -> Settings:
 
 def test_v6_release_identity_and_assets():
     root=Path(__file__).resolve().parents[1]
-    assert (root/'VERSION').read_text().strip()=='6.1.0'
+    assert (root/'VERSION').read_text().strip()=='6.1.1'
     sw=(root/'static/sw.js').read_text(encoding='utf-8')
     assert 'seeker-static-v6100' in sw
     shipped='\n'.join((root/'templates'/name).read_text(encoding='utf-8') for name in ['gm_continuity.html','gm_integrations.html','gm_media.html','display.html','lore_history.html'])

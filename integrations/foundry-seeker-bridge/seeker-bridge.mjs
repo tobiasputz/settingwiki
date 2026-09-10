@@ -1,5 +1,6 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.1.1";
+const BRIDGE_VERSION = "1.1.2";
+const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 let pushTimer = null;
 let intervalId = null;
 let bridgeStatus = "";
@@ -16,6 +17,12 @@ function bridgeNotice(kind, message, {force = false} = {}) {
   if (typeof fn === "function") fn.call(notices, message);
 }
 
+function bundledSeekerOrigin() {
+  const value = String(BUNDLED_SEEKER_ORIGIN || "").trim();
+  if (!/^https?:\/\//i.test(value) || value.includes("__SEEKER_PUBLIC_ORIGIN__")) return "";
+  try { return new URL(value).origin; } catch { return ""; }
+}
+
 function normalizedEndpoint(raw) {
   const value = String(raw || "").trim();
   if (!value) return "";
@@ -23,6 +30,16 @@ function normalizedEndpoint(raw) {
     const u = new URL(value);
     const local = ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(u.hostname);
     if (u.protocol === "http:" && !local) u.protocol = "https:";
+
+    // A Railway service can acquire a new/default hostname while the campaign token
+    // and endpoint path remain valid. The public module ZIP is stamped with the origin
+    // it was downloaded from, so an update can repair that stale hostname automatically.
+    const bundled = bundledSeekerOrigin();
+    if (!local && bundled && /^\/api\/v6\/foundry\/push\/\d+\/?$/.test(u.pathname)) {
+      const canonical = new URL(bundled);
+      u.protocol = canonical.protocol;
+      u.host = canonical.host;
+    }
     return u.href;
   } catch { return value; }
 }

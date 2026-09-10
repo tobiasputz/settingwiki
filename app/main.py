@@ -107,25 +107,33 @@ templates = Jinja2Templates(directory=settings.root_dir / "templates")
 def _external_base_url(request: Request) -> str:
     """Return the browser-facing origin when Seeker is behind Railway/reverse proxies.
 
-    Integration URLs must never accidentally use Railway's internal HTTP origin: a
-    Foundry browser will either block that as mixed content or fail the CORS preflight
-    while following the HTTP -> HTTPS redirect.  An explicit SEEKER_PUBLIC_URL wins,
-    followed by Railway's public-domain variable, then standard forwarded headers.
+    Foundry needs the *actual* public origin the GM is using. Railway can expose more
+    than one domain for a service, so RAILWAY_PUBLIC_DOMAIN is only a fallback: a stale
+    or secondary Railway domain must not override the Host/X-Forwarded-Host that reached
+    Seeker (for this deployment, for example, ``seeker.up.railway.app``). An explicit
+    SEEKER_PUBLIC_URL still wins when the deployment owner deliberately pins an origin.
     """
     explicit = os.getenv("SEEKER_PUBLIC_URL", "").strip().rstrip("/")
     if explicit:
         if not re.match(r"^https?://", explicit, flags=re.I):
             explicit = "https://" + explicit
         return explicit
-    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().strip("/")
-    if railway_domain:
-        return "https://" + railway_domain
+
     forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
     forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",", 1)[0].strip()
     host = forwarded_host or (request.headers.get("host") or "").strip()
-    scheme = forwarded_proto or request.url.scheme
-    if host and scheme:
+    host_name = host.rsplit(":", 1)[0].strip("[]").lower() if host else ""
+    local_hosts = {"", "localhost", "127.0.0.1", "0.0.0.0", "::1", "testserver"}
+    if host_name not in local_hosts:
+        scheme = forwarded_proto or request.url.scheme or "https"
+        # Railway's edge is HTTPS even if an upstream/internal hop reports HTTP.
+        if os.getenv("RAILWAY_ENVIRONMENT") or host_name.endswith(".up.railway.app"):
+            scheme = "https"
         return f"{scheme}://{host}".rstrip("/")
+
+    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().strip("/")
+    if railway_domain:
+        return "https://" + railway_domain
     return str(request.base_url).rstrip("/")
 
 
@@ -260,6 +268,7 @@ _ARCHIVE_WRITE_ALLOW = (
     "/api/public/notifications/",
     "/api/public/bookmark/",
     "/api/public/activity",
+    "/api/v6/foundry/push/",
 )
 
 
@@ -3574,7 +3583,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.1.1.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.1.2.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -3582,7 +3591,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.1.1.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.1.2.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 
