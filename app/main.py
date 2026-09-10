@@ -3624,7 +3624,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/6.1.4 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/6.1.5 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -3787,7 +3787,13 @@ def v6_integrations_save(request: Request,payload:dict=Body(...)):
 @app.post('/api/v6/discord/test')
 def v6_discord_test(request: Request):
     require_gm(request);cid=_active_campaign_id(request);camp=get_campaign(settings,cid) or {}
-    try:return discord_post(settings,cid,f"✦ Seeker is connected to **{camp.get('name','this campaign')}**.")
+    cfg=integration_config(settings,cid,include_secret=True)
+    mention=str(cfg.get('discord_mention') or '').strip()
+    if mention.lower().replace(' ','') in {'everyone','@everyone'}: mention='@everyone'
+    elif mention.lower().replace(' ','') in {'here','@here'}: mention='@here'
+    message=f"✦ Seeker is connected to **{camp.get('name','this campaign')}**."
+    if mention: message=f"{mention}\n{message}"
+    try:return discord_post(settings,cid,message)
     except ValueError as exc:raise HTTPException(400,str(exc))
 
 
@@ -3869,7 +3875,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.3.1.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.4.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -3877,7 +3883,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.3.1.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.4.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 

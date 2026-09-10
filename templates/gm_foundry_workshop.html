@@ -148,7 +148,7 @@
           </section>
 
           <section class="fw-form-section" data-fw-section="creature">
-            <div class="fw-section-heading"><span>03</span><div><h2>Attacks</h2><p>Add the strikes that should appear directly in the statblock.</p></div><button class="quiet-btn" type="button" data-fw-add-attack>＋ Add strike</button></div>
+            <div class="fw-section-heading"><span>03</span><div><h2>Attacks</h2><p>Add real NPC Strikes. The attack bonus and damage formula are written directly into PF2e's melee-item data, so the Foundry Damage button rolls the value authored here.</p></div><button class="quiet-btn" type="button" data-fw-add-attack>＋ Add strike</button></div>
             <div class="fw-repeater" data-fw-attacks></div>
           </section>
 
@@ -213,7 +213,7 @@
           </section>
 
           <section class="fw-form-section">
-            <div class="fw-section-heading"><span data-fw-section-number>04</span><div><h2>Rules text & abilities</h2><p>Write the part you would actually read at the table. Creature abilities are created as real PF2e Action items in Foundry.</p></div><button class="quiet-btn" type="button" data-fw-add-ability>＋ Add ability</button></div>
+            <div class="fw-section-heading"><span data-fw-section-number>04</span><div><h2>Rules text & abilities</h2><p>Creature abilities become PF2e Action items. Each one can be passive, free, reaction, or 1–3 actions, with structured triggers, requirements, frequency, clickable checks/DCs, and damage rolls.</p></div><button class="quiet-btn" type="button" data-fw-add-ability>＋ Add ability</button></div>
             <div class="fw-field-grid">
               <label class="span-2"><span>Short summary</span><textarea name="summary" rows="3" placeholder="One-sentence concept or GM-facing reminder."></textarea></label>
               <label class="span-2"><span>Main rules text</span><textarea name="description" rows="7" placeholder="Write the rules text in normal Pathfinder language. This appears in the live preview and is carried into Foundry."></textarea></label>
@@ -222,7 +222,7 @@
           </section>
 
           <section class="fw-form-section" data-fw-section="creature">
-            <div class="fw-section-heading"><span>05</span><div><h2>Spellcasting</h2><p>Create an actual PF2e spellcasting entry and embedded spells, rather than flattening them into notes.</p></div><button class="quiet-btn" type="button" data-fw-add-spell>＋ Add spell</button></div>
+            <div class="fw-section-heading"><span>05</span><div><h2>Spellcasting</h2><p>Create an actual PF2e spellcasting entry and put spells into it. Leave Spell attack blank to use the standard bestiary shortcut of DC − 8.</p></div><button class="quiet-btn" type="button" data-fw-add-spell>＋ Add spell</button></div>
             <div class="fw-stat-group fw-casting-config">
               <div class="fw-field-grid">
                 <label><span>Tradition</span><select name="spell_tradition"><option value="arcane">Arcane</option><option value="divine">Divine</option><option value="occult">Occult</option><option value="primal">Primal</option></select></label>
@@ -231,6 +231,7 @@
                 <label><span>Spell attack</span><div class="fw-number-field"><b>+</b><input name="spell_attack" type="number" step="1" placeholder="10"></div></label>
               </div>
             </div>
+            <div class="fw-common-spells"><small>QUICK ADD COMMON SPELLS</small><div><button type="button" data-fw-common-spell="Heal" data-fw-spell-rank="1">Heal</button><button type="button" data-fw-common-spell="Harm" data-fw-spell-rank="1">Harm</button><button type="button" data-fw-common-spell="Fear" data-fw-spell-rank="1">Fear</button><button type="button" data-fw-common-spell="Invisibility" data-fw-spell-rank="2">Invisibility</button><button type="button" data-fw-common-spell="Dispel Magic" data-fw-spell-rank="2">Dispel Magic</button><button type="button" data-fw-common-spell="Fireball" data-fw-spell-rank="3">Fireball</button><button type="button" data-fw-common-spell="Haste" data-fw-spell-rank="3">Haste</button><button type="button" data-fw-common-spell="Slow" data-fw-spell-rank="3">Slow</button><button type="button" data-fw-common-spell="Lightning Bolt" data-fw-spell-rank="3">Lightning Bolt</button></div><p>Exact names are looked up in the PF2e spell compendia installed in your Foundry world. If a name is not found, Seeker creates the row as a homebrew spell instead.</p></div>
             <div class="fw-repeater fw-spell-repeater" data-fw-spells></div>
             <details>
               <summary>Legacy / extra spellcasting notes</summary>
@@ -303,20 +304,34 @@
     <div class="fw-token-layout">
       <div class="fw-token-stage"><canvas width="720" height="720" data-fw-token-canvas></canvas><div class="fw-token-empty" data-fw-token-empty>Upload or enter portrait art first.</div></div>
       <div class="fw-token-controls">
-        <section><small>FRAME PRESET</small><div class="fw-token-presets"><button type="button" data-token-preset="classic">Classic</button><button type="button" data-token-preset="iron">Iron</button><button type="button" data-token-preset="crimson">Crimson</button><button type="button" data-token-preset="arcane">Arcane</button><button type="button" data-token-preset="nature">Nature</button><button type="button" data-token-preset="shadow">Shadow</button><button type="button" data-token-preset="minimal">Minimal</button><button type="button" data-token-preset="borderless">Borderless</button></div></section>
+        <section><small>FRAME PRESET · 32 STARTING STYLES</small><div class="fw-token-presets">
+          <button type="button" data-token-preset="classic">Classic Gold</button><button type="button" data-token-preset="silver">Silver</button><button type="button" data-token-preset="bronze">Bronze</button><button type="button" data-token-preset="iron">Iron</button>
+          <button type="button" data-token-preset="obsidian">Obsidian</button><button type="button" data-token-preset="crimson">Crimson</button><button type="button" data-token-preset="infernal">Infernal</button><button type="button" data-token-preset="blood">Blood</button>
+          <button type="button" data-token-preset="arcane">Arcane</button><button type="button" data-token-preset="occult">Occult</button><button type="button" data-token-preset="divine">Divine</button><button type="button" data-token-preset="primal">Primal</button>
+          <button type="button" data-token-preset="fey">Fey</button><button type="button" data-token-preset="nature">Forest</button><button type="button" data-token-preset="poison">Poison</button><button type="button" data-token-preset="undead">Undead</button>
+          <button type="button" data-token-preset="frost">Frost</button><button type="button" data-token-preset="sea">Sea</button><button type="button" data-token-preset="storm">Storm</button><button type="button" data-token-preset="sun">Sun</button>
+          <button type="button" data-token-preset="moon">Moon</button><button type="button" data-token-preset="royal">Royal</button><button type="button" data-token-preset="construct">Construct</button><button type="button" data-token-preset="dragon">Dragon</button>
+          <button type="button" data-token-preset="parchment">Parchment</button><button type="button" data-token-preset="etched">Etched Steel</button><button type="button" data-token-preset="rune">Runic</button><button type="button" data-token-preset="boss">Boss</button>
+          <button type="button" data-token-preset="minimal">Minimal</button><button type="button" data-token-preset="portrait">Portrait</button><button type="button" data-token-preset="badge">Badge</button><button type="button" data-token-preset="borderless">Borderless</button>
+        </div></section>
         <section class="fw-token-control-grid">
-          <label><span>Shape</span><select data-token-shape><option value="circle">Circle</option><option value="square">Rounded square</option><option value="hex">Hex</option></select></label>
+          <label><span>Shape</span><select data-token-shape><option value="circle">Circle</option><option value="roundsquare">Rounded square</option><option value="square">Square</option><option value="hex">Hex</option><option value="octagon">Octagon</option><option value="diamond">Diamond</option><option value="shield">Shield</option></select></label>
+          <label><span>Frame pattern</span><select data-token-pattern><option value="clean">Clean</option><option value="ticks">Ticks</option><option value="runes">Runes</option><option value="rivets">Rivets</option><option value="cardinal">Cardinal marks</option><option value="segmented">Segmented ring</option></select></label>
           <label><span>Ring color</span><input type="color" value="#b79661" data-token-ring></label>
           <label><span>Background</span><input type="color" value="#171513" data-token-bg></label>
           <label><span>Inner accent</span><input type="color" value="#e3c68f" data-token-accent></label>
+          <label><span>Line style</span><select data-token-line-style><option value="solid">Solid</option><option value="dash">Dashed</option><option value="dot">Dotted</option></select></label>
         </section>
         <section class="fw-token-sliders">
           <label><span>Artwork scale</span><input type="range" min="0.55" max="2.4" step="0.01" value="1" data-token-scale><output data-token-scale-out>100%</output></label>
           <label><span>Horizontal</span><input type="range" min="-240" max="240" step="1" value="0" data-token-x><output data-token-x-out>0</output></label>
           <label><span>Vertical</span><input type="range" min="-240" max="240" step="1" value="0" data-token-y><output data-token-y-out>0</output></label>
           <label><span>Ring width</span><input type="range" min="0" max="70" step="1" value="30" data-token-width><output data-token-width-out>30</output></label>
+          <label><span>Vignette</span><input type="range" min="0" max="100" step="1" value="18" data-token-vignette><output data-token-vignette-out>18</output></label>
+          <label><span>Brightness</span><input type="range" min="60" max="140" step="1" value="100" data-token-brightness><output data-token-brightness-out>100%</output></label>
+          <label><span>Saturation</span><input type="range" min="0" max="180" step="1" value="100" data-token-saturation><output data-token-saturation-out>100%</output></label>
         </section>
-        <div class="fw-token-options"><label><input type="checkbox" data-token-shadow checked> Drop shadow</label><label><input type="checkbox" data-token-double checked> Double ring</label></div>
+        <div class="fw-token-options"><label><input type="checkbox" data-token-shadow checked> Drop shadow</label><label><input type="checkbox" data-token-double checked> Double ring</label><label><input type="checkbox" data-token-glow> Accent glow</label><label><input type="checkbox" data-token-inner-ring> Inner hairline</label></div>
         <div class="fw-token-modal-actions"><label class="quiet-btn fw-upload-button">Use another image<input type="file" accept="image/png,image/jpeg,image/webp" data-token-source-file hidden></label><button type="button" class="quiet-btn" data-token-reset>Reset</button><button type="button" class="primary-button" data-token-save>Save token to Seeker</button></div>
       </div>
     </div>
@@ -324,4 +339,4 @@
 </div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6400"><script src="/static/foundry-workshop.js?v=6400"></script>{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6500"><script src="/static/foundry-workshop.js?v=6500"></script>{% endblock %}

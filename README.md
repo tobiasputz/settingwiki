@@ -1,3 +1,7 @@
+# Seeker 6.1.5
+
+This build includes Foundry Bridge 1.4.0 with hardened PF2e creature strikes/spellcasting/spell imports, structured special-ability authoring, expanded Token Forge, forced post-push refresh, and Discord mention fixes.
+
 # Seeker — interactive setting & session companion
 
 Seeker turns a normal multi-file LaTeX campaign project into **two synchronized views of the same setting**:

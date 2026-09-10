@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.3.1";
+const BRIDGE_VERSION = "1.4.0";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 
 function seekerSlugify(value) {
@@ -577,11 +577,23 @@ function buildNpcAttack(attack = {}) {
       action: "strike",
       area: null,
       bonus: { value: Math.trunc(numericOr(attack.bonus, 0)) },
-      damageRolls: { "0": { damage: formula, damageType: type, category: type === "bleed" ? "persistent" : null } },
+      // PF2e 8.x stores NPC strike damage in a RecordField named damageRolls.
+      // Use a stable non-empty key and the exact MeleeSystemSource field names.
+      damageRolls: { "seeker-base": { damage: formula, damageType: type, category: type === "bleed" ? "persistent" : null } },
       attackEffects: { value: slugList(attack.effects).map(String) },
       range: ranged ? { increment: range, max: null } : null,
       subjectToMAP: true,
     },
+  };
+}
+function npcAttackPatch(attack = {}) {
+  const { formula, type } = parseDamage(attack);
+  const ranged = String(attack.type || "melee").toLowerCase() === "ranged";
+  const range = ranged ? Math.max(5, Math.round(numericOr(attack.range, 30) / 5) * 5) : 0;
+  return {
+    "system.bonus.value": Math.trunc(numericOr(attack.bonus, 0)),
+    "system.damageRolls": { "seeker-base": { damage: formula, damageType: type, category: type === "bleed" ? "persistent" : null } },
+    "system.range": ranged ? { increment: range, max: null } : null,
   };
 }
 function abilityActionData(ability = {}) {
@@ -590,6 +602,44 @@ function abilityActionData(ability = {}) {
   if (raw === "free") return { type: "free", actions: null };
   if (/^[123]$/.test(raw)) return { type: "action", actions: Number(raw) };
   return { type: "passive", actions: null };
+}
+function abilityFrequency(ability = {}) {
+  const per = String(ability.frequency_per || "").trim();
+  if (!per) return null;
+  const allowed = new Set(["turn", "round", "PT1M", "PT10M", "PT1H", "PT24H", "day", "P1W", "P1M", "P1Y"]);
+  if (!allowed.has(per)) return null;
+  const max = Math.max(1, Math.trunc(numericOr(ability.frequency_max, 1)));
+  return { value: max, max, per };
+}
+function abilityInlineCheck(ability = {}) {
+  const type = String(ability.dc_type || "").trim().toLowerCase();
+  const dc = Math.trunc(numericOr(ability.dc, 0));
+  if (!type || dc <= 0) return "";
+  const params = [type, `dc:${dc}`];
+  if (["fortitude", "reflex", "will"].includes(type) && Boolean(ability.dc_basic)) params.push("basic");
+  const show = String(ability.dc_show || "owner").trim().toLowerCase();
+  if (["gm", "all", "none"].includes(show)) params.push(`showDC:${show}`);
+  return `@Check[${params.join("|")}]`;
+}
+function abilityInlineDamage(ability = {}) {
+  const formula = String(ability.damage || "").trim();
+  if (!formula) return "";
+  const type = validChoice(ability.damage_type, globalThis.CONFIG?.PF2E?.damageTypes, "untyped");
+  return type && type !== "untyped" ? `@Damage[(${formula})[${type}]]` : `@Damage[${formula}]`;
+}
+function buildAbilityDescription(ability = {}) {
+  const chunks = [];
+  const trigger = String(ability.trigger || "").trim();
+  const requirements = String(ability.requirements || "").trim();
+  if (trigger) chunks.push(`<p><strong>Trigger</strong> ${seekerEscapeHTML(trigger)}</p>`);
+  if (requirements) chunks.push(`<p><strong>Requirements</strong> ${seekerEscapeHTML(requirements)}</p>`);
+  const check = abilityInlineCheck(ability);
+  const damage = abilityInlineDamage(ability);
+  const lead = [check, damage].filter(Boolean).join("; ");
+  if (lead) chunks.push(`<p>${lead}</p>`);
+  const description = String(ability.description || "").trim();
+  if (description) chunks.push(htmlDescription("", description));
+  return chunks.join("");
 }
 function buildNpcAbility(ability = {}) {
   const action = abilityActionData(ability);
@@ -600,7 +650,7 @@ function buildNpcAbility(ability = {}) {
     type: "action",
     img: "icons/svg/aura.svg",
     system: {
-      description: { value: htmlDescription("", ability.description) },
+      description: { value: buildAbilityDescription(ability) },
       traits: {
         value: validTraitList(ability.traits, globalThis.CONFIG?.PF2E?.actionTraits),
         otherTags: [],
@@ -610,6 +660,7 @@ function buildNpcAbility(ability = {}) {
       actionType: { value: action.type },
       actions: { value: action.actions },
       category,
+      frequency: abilityFrequency(ability),
     },
   };
 }
@@ -627,24 +678,42 @@ function buildSpellcastingEntry(data = {}) {
     ? String(data.spell_tradition).toLowerCase() : "arcane";
   const mode = ["innate", "spontaneous", "prepared", "focus"].includes(String(data.spell_mode || "").toLowerCase())
     ? String(data.spell_mode).toLowerCase() : "innate";
+  const dc = Math.max(0, Math.trunc(numericOr(data.spell_dc, 10)));
+  const attackRaw = String(data.spell_attack ?? "").trim();
+  // PF2e's own bestiary data convention uses DC - 8 when only a DC is known.
+  const attack = attackRaw === "" ? Math.max(0, dc - 8) : Math.trunc(numericOr(data.spell_attack, 0));
   return {
     name: `${tradition.charAt(0).toUpperCase()}${tradition.slice(1)} ${mode.charAt(0).toUpperCase()}${mode.slice(1)} Spells`,
     type: "spellcastingEntry",
     img: "icons/svg/book.svg",
     system: {
-      description: { value: htmlDescription("", data.spellcasting) },
+      description: { value: htmlDescription("", data.spellcasting), gm: "" },
       traits: { otherTags: [] },
       rules: [],
-      slug: seekerSlugify(`${tradition}-${mode}-spells`),
+      slug: null,
       ability: { value: "cha" },
-      spelldc: { value: Math.trunc(numericOr(data.spell_attack, 0)), dc: Math.max(0, Math.trunc(numericOr(data.spell_dc, 10))) },
+      spelldc: { value: attack, dc },
       tradition: { value: tradition },
       prepared: { value: mode, flexible: false, validItems: null },
       showSlotlessLevels: { value: true },
-      proficiency: { slug: "", value: 1 },
+      proficiency: { slug: "", value: 0 },
       slots: emptySpellSlots(Array.isArray(data.spells) ? data.spells : [], mode),
       autoHeightenLevel: { value: null },
     },
+  };
+}
+function spellcastingPatch(data = {}) {
+  const dc = Math.max(0, Math.trunc(numericOr(data.spell_dc, 10)));
+  const attackRaw = String(data.spell_attack ?? "").trim();
+  const attack = attackRaw === "" ? Math.max(0, dc - 8) : Math.trunc(numericOr(data.spell_attack, 0));
+  const tradition = ["arcane", "divine", "occult", "primal"].includes(String(data.spell_tradition || "").toLowerCase()) ? String(data.spell_tradition).toLowerCase() : "arcane";
+  const mode = ["innate", "spontaneous", "prepared", "focus"].includes(String(data.spell_mode || "").toLowerCase()) ? String(data.spell_mode).toLowerCase() : "innate";
+  return {
+    "system.spelldc.value": attack,
+    "system.spelldc.dc": dc,
+    "system.tradition.value": tradition,
+    "system.prepared.value": mode,
+    "system.showSlotlessLevels.value": true,
   };
 }
 function spellTime(raw) {
@@ -654,10 +723,10 @@ function spellTime(raw) {
   if (/^[123]$/.test(value)) return `${value} action${value === "1" ? "" : "s"}`;
   return value || "2 actions";
 }
-function spellDefense(raw) {
+function spellDefense(raw, basic = false) {
   const value = String(raw || "").trim().toLowerCase();
   if (value === "ac") return { passive: { statistic: "ac" }, save: null };
-  if (["fortitude", "reflex", "will"].includes(value)) return { passive: null, save: { statistic: value, basic: false } };
+  if (["fortitude", "reflex", "will"].includes(value)) return { passive: null, save: { statistic: value, basic: Boolean(basic) } };
   return null;
 }
 function buildHomebrewSpell(spell = {}, entryId = "", data = {}) {
@@ -689,7 +758,7 @@ function buildHomebrewSpell(spell = {}, entryId = "", data = {}) {
       time: { value: spellTime(spell.actions) },
       duration: { value: String(spell.duration || ""), sustained: false },
       damage: damageFormula ? { "0": { formula: damageFormula, kinds: ["damage"], type: damageType, category: null, materials: [] } } : {},
-      defense: spellDefense(spell.save),
+      defense: spellDefense(spell.save, spell.basic),
       cost: { value: "" },
       counteraction: false,
       ritual: null,
@@ -697,14 +766,28 @@ function buildHomebrewSpell(spell = {}, entryId = "", data = {}) {
     },
   };
 }
-async function findCompendiumSpell(name) {
+async function findCompendiumSpell(name, sourceUuid = "") {
+  const exactUuid = String(sourceUuid || "").trim();
+  if (exactUuid && /^(?:Compendium\.|Item\.)/i.test(exactUuid)) {
+    try {
+      const exact = await fromUuid(exactUuid);
+      if (exact?.type === "spell") return exact;
+    } catch (error) {
+      console.debug(`[${MODULE_ID}] Could not resolve exact spell UUID ${exactUuid}`, error);
+    }
+  }
   const needle = String(name || "").trim().toLowerCase();
   if (!needle) return null;
-  const packs = (game.packs?.contents || []).filter(p => p.documentName === "Item" && /spell/i.test(String(p.metadata?.label || p.metadata?.name || p.collection || "")));
+  const preferred = game.packs?.get?.("pf2e.spells-srd");
+  const allItemPacks = (game.packs?.contents || []).filter(p => p.documentName === "Item");
+  const packs = [preferred, ...allItemPacks.filter(p => p !== preferred)].filter(Boolean);
+  const slugNeedle = seekerSlugify(needle);
   for (const pack of packs) {
     try {
       const index = await pack.getIndex({ fields: ["type", "system.slug"] });
-      const hit = index.find(e => String(e.type || "").toLowerCase() === "spell" && String(e.name || "").trim().toLowerCase() === needle);
+      const hit = index.find(e => String(e.type || "").toLowerCase() === "spell" && (
+        String(e.name || "").trim().toLowerCase() === needle || seekerSlugify(e.system?.slug || e.name || "") === slugNeedle
+      ));
       if (!hit) continue;
       const doc = await pack.getDocument(hit._id);
       if (doc?.type === "spell") return doc;
@@ -715,7 +798,7 @@ async function findCompendiumSpell(name) {
   return null;
 }
 async function buildPreparedSpell(spell, entryId, data) {
-  const official = await findCompendiumSpell(spell?.name);
+  const official = await findCompendiumSpell(spell?.name, spell?.source_uuid);
   if (!official) return buildHomebrewSpell(spell, entryId, data);
   const source = official.toObject();
   delete source._id;
@@ -730,17 +813,66 @@ async function buildPreparedSpell(spell, entryId, data) {
   if (enteredRank > 0 && source.system.level) source.system.location.heightenedLevel = Math.max(Number(source.system.level.value || 1), enteredRank);
   return source;
 }
+async function addSpellToEntry(actor, entry, spell, data) {
+  const enteredRank = Math.max(0, Math.min(10, Math.trunc(numericOr(spell?.rank, 0))));
+  const groupId = enteredRank === 0 ? "cantrips" : enteredRank;
+  const official = await findCompendiumSpell(spell?.name, spell?.source_uuid);
+  if (official && entry?.spells?.addSpell) {
+    try {
+      const created = await entry.spells.addSpell(official, { groupId });
+      if (created) {
+        const mode = String(data?.spell_mode || "innate").toLowerCase();
+        const uses = Math.max(1, Math.trunc(numericOr(spell?.uses, 1)));
+        const updates = {};
+        if (mode === "innate") updates["system.location.uses"] = { value: uses, max: uses };
+        if (enteredRank > 0 && created.baseRank && enteredRank >= Number(created.baseRank)) updates["system.location.heightenedLevel"] = enteredRank;
+        if (Object.keys(updates).length) await created.update(updates);
+        return created;
+      }
+    } catch (error) {
+      console.debug(`[${MODULE_ID}] SpellCollection.addSpell failed for ${spell?.name}; falling back to direct embed`, error);
+    }
+  }
+  const source = official ? official.toObject() : buildHomebrewSpell(spell, entry.id, data);
+  if (official) {
+    delete source._id;
+    source.system ||= {};
+    source.system.location = { ...(source.system.location || {}), value: entry.id, signature: false };
+    if (enteredRank > 0) source.system.location.heightenedLevel = enteredRank;
+    if (String(data?.spell_mode || "").toLowerCase() === "innate") {
+      const uses = Math.max(1, Math.trunc(numericOr(spell?.uses, 1)));
+      source.system.location.uses = { value: uses, max: uses };
+    }
+  }
+  const docs = await actor.createEmbeddedDocuments("Item", [source]);
+  return docs?.[0] || null;
+}
 async function populatePreparedActor(actor, payload) {
   const data = payload?.data || {};
   const report = { attacks: 0, abilities: 0, spells: 0, spellcasting: 0, warnings: [] };
   const attacks = (Array.isArray(data.attacks) ? data.attacks : []).filter(a => String(a?.name || a?.damage || "").trim());
   if (attacks.length) {
-    try {
-      const created = await actor.createEmbeddedDocuments("Item", attacks.map(buildNpcAttack));
-      report.attacks = created.length;
-    } catch (error) {
-      console.warn(`[${MODULE_ID}] Could not create prepared NPC attacks`, error);
-      report.warnings.push(`attacks: ${error?.message || error}`);
+    for (const attack of attacks) {
+      try {
+        const created = (await actor.createEmbeddedDocuments("Item", [buildNpcAttack(attack)]))?.[0];
+        if (!created) throw new Error("Strike document was not created.");
+        // Re-apply numeric/damage data after creation. This avoids migrations/defaults
+        // in different PF2e releases eating the custom values from the create source.
+        await created.update(npcAttackPatch(attack));
+        const { formula, type } = parseDamage(attack);
+        const storedDamage = Object.values(created.system?.damageRolls || {}).find(d => String(d?.damage || "").trim() === formula);
+        if (!storedDamage) {
+          // Some PF2e releases migrate a newly-created melee item before the first
+          // update finishes. A second, source-shaped replacement is harmless and
+          // makes the intended damage roll deterministic across those releases.
+          await created.update({ "system.damageRolls": { "seeker-base": { damage: formula, damageType: type, category: type === "bleed" ? "persistent" : null } } });
+        }
+        if (!Object.values(created.system?.damageRolls || {}).length) throw new Error("PF2e did not retain the strike damage roll.");
+        report.attacks += 1;
+      } catch (error) {
+        console.warn(`[${MODULE_ID}] Could not create prepared NPC attack ${attack?.name || "Strike"}`, error);
+        report.warnings.push(`attack ${attack?.name || "Strike"}: ${error?.message || error}`);
+      }
     }
   }
   const abilities = (Array.isArray(data.abilities) ? data.abilities : []).filter(a => String(a?.name || a?.description || "").trim());
@@ -759,15 +891,32 @@ async function populatePreparedActor(actor, payload) {
       const entries = await actor.createEmbeddedDocuments("Item", [buildSpellcastingEntry(data)]);
       const entry = entries?.[0];
       if (!entry) throw new Error("Spellcasting entry was not created.");
+      await entry.update(spellcastingPatch(data));
+      const wantedDC = Math.max(0, Math.trunc(numericOr(data.spell_dc, 10)));
+      const attackRaw = String(data.spell_attack ?? "").trim();
+      const wantedAttack = attackRaw === "" ? Math.max(0, wantedDC - 8) : Math.trunc(numericOr(data.spell_attack, 0));
+      // Verify the source values PF2e actually retained. These are the two
+      // explicit NPC spell statistic inputs used by PF2e when it prepares the
+      // spell attack and spell DC statistics.
+      if (Number(entry.system?.spelldc?.dc) !== wantedDC || Number(entry.system?.spelldc?.value) !== wantedAttack) {
+        await entry.update({ "system.spelldc": { value: wantedAttack, dc: wantedDC } });
+      }
       report.spellcasting = 1;
-      const sources = [];
-      for (const spell of spells) sources.push(await buildPreparedSpell(spell, entry.id, data));
-      const created = await actor.createEmbeddedDocuments("Item", sources);
-      report.spells = created.length;
+      const created = [];
+      for (const spell of spells) {
+        try {
+          const doc = await addSpellToEntry(actor, entry, spell, data);
+          if (doc) { created.push(doc); report.spells += 1; }
+          else report.warnings.push(`spell ${spell?.name || "unknown"}: Foundry did not add the spell.`);
+        } catch (error) {
+          console.warn(`[${MODULE_ID}] Could not add spell ${spell?.name || "unknown"}`, error);
+          report.warnings.push(`spell ${spell?.name || "unknown"}: ${error?.message || error}`);
+        }
+      }
       if (String(data.spell_mode || "").toLowerCase() === "prepared") {
         const slotPatch = {};
         for (let rank = 1; rank <= 10; rank += 1) {
-          const rankSpells = created.filter((doc, i) => Math.max(0, Math.trunc(numericOr(spells[i]?.rank, 1))) === rank);
+          const rankSpells = created.filter(doc => Math.max(0, Math.trunc(numericOr(doc?.rank ?? doc?.system?.level?.value, 1))) === rank);
           if (!rankSpells.length) continue;
           slotPatch[`system.slots.slot${rank}.max`] = rankSpells.length;
           slotPatch[`system.slots.slot${rank}.value`] = rankSpells.length;
@@ -777,7 +926,7 @@ async function populatePreparedActor(actor, payload) {
       }
     } catch (error) {
       console.warn(`[${MODULE_ID}] Could not create prepared NPC spellcasting`, error);
-      report.warnings.push(`spells: ${error?.message || error}`);
+      report.warnings.push(`spellcasting: ${error?.message || error}`);
     }
   }
   return report;

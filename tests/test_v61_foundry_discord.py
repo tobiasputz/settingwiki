@@ -88,7 +88,7 @@ def test_v61_public_foundry_manifest_and_install_zip(tmp_path: Path, monkeypatch
     client=TestClient(main.app)
     manifest=client.get('/foundry/seeker-bridge/module.json')
     assert manifest.status_code==200
-    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.3.1'
+    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.4.0'
     assert data['manifest'].endswith('/foundry/seeker-bridge/module.json')
     assert data['download'].endswith('/foundry/seeker-bridge/seeker-bridge.zip')
     package=client.get('/foundry/seeker-bridge/seeker-bridge.zip')
@@ -132,7 +132,13 @@ def test_v61_discord_confirmed_date_uses_campaign_mention(tmp_path: Path, monkey
     out=discord_session_confirmation(s,cid,{'id':2,'title':'The Moon Gate','session_date':'2026-10-03','status':'planned'},base_url='https://seeker.example')
     assert out['ok'] and captured['body']['content'].startswith('<@&123456789>\n📅 **Session confirmed')
     assert 'Saturday, 3 October 2026' in captured['body']['content'] and 'https://seeker.example/session' in captured['body']['content']
-    assert 'roles' in captured['body']['allowed_mentions']['parse']
+    assert captured['body']['allowed_mentions']['roles']==['123456789']
+    assert 'roles' not in captured['body']['allowed_mentions']['parse']
+
+    save_integration_config(s,cid,{'discord_webhook':'https://discord.invalid/api/webhooks/1/token','discord_enabled':True,'discord_mention':'everyone','discord_auto_session_confirmed':True})
+    discord_session_confirmation(s,cid,{'id':3,'title':'The Gate Opens','session_date':'2026-10-10','status':'planned'})
+    assert captured['body']['content'].startswith('@everyone\n')
+    assert 'everyone' in captured['body']['allowed_mentions']['parse']
 
 
 def test_v61_session_save_triggers_discord_only_when_date_is_new_or_changed(tmp_path: Path, monkeypatch):
@@ -162,7 +168,7 @@ def test_v61_scroll_contract_and_foundry_frontend_assets():
     assert 'data-foundry-manifest' in integrations and 'Automatically announce confirmed session dates' in integrations
     assert '/api/v61/characters/' in chars and 'data-foundry-tab' in chars
     assert 'data-notification-pref="spotlight"' not in base
-    assert 'seeker-static-v6400' in sw
+    assert 'seeker-static-v6500' in sw
 
 
 def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
@@ -186,7 +192,7 @@ def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
 def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
     root=Path(__file__).resolve().parents[1]
     bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.3.1"' in bridge
+    assert 'const BRIDGE_VERSION = "1.4.0"' in bridge
     assert 'function normalizedEndpoint' in bridge
     assert 'u.protocol === "http:" && !local' in bridge
     assert 'processCommands(endpoint, body?.commands || [])' in bridge
@@ -227,7 +233,7 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200
     assert 'Homebrew Forge' in workshop.text and 'foundryWorkshopForm' in workshop.text
-    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=6400' in workshop.text
+    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=6500' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})
@@ -293,6 +299,12 @@ def test_v613_structured_pf2e_import_contract_and_token_support():
     assert 'weapon_damage_dice' in workshop and 'weapon_group' in workshop and 'weapon_reload' in workshop
     assert 'system.damage' in bridge and 'system.group' in bridge and 'system.runes' in bridge
     assert 'commandsEndpoint' in bridge and 'queuePush(200)' in bridge
+    assert 'npcAttackPatch' in bridge and 'system.damageRolls' in bridge
+    assert 'spellcastingPatch' in bridge and 'system.spelldc.value' in bridge and 'system.spelldc.dc' in bridge
+    assert 'addSpellToEntry' in bridge and 'source_uuid' in js
+    assert 'data-ability-dc-type' in js and 'data-ability-cost' in js and 'frequency_per' in js
+    assert workshop.count('data-token-preset=') >= 30
+    assert 'data-token-pattern' in workshop and 'data-token-vignette' in workshop
 
 
 def test_v613_bestiary_visibility_and_asset_upload(tmp_path: Path, monkeypatch):

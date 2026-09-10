@@ -1,8 +1,8 @@
-const STATIC='seeker-static-v6400';
-const PRIVATE='seeker-private-v6400';
-const META='seeker-offline-meta-v6400';
+const STATIC='seeker-static-v6500';
+const PRIVATE='seeker-private-v6500';
+const META='seeker-offline-meta-v6500';
 const ENABLE_KEY='/__seeker_offline_enabled__';
-const SHELL=['/static/wiki.css?v=6400','/static/wiki.js?v=6400','/static/tour.css?v=6400','/static/tour.js?v=6400','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png'];
+const SHELL=['/static/wiki.css?v=6500','/static/wiki.js?v=6500','/static/tour.css?v=6500','/static/tour.js?v=6500','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png'];
 const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/structures','/archive','/schedule','/tables','/investigation','/recap'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
 const privateAsset=u=>u.pathname.startsWith('/project-asset/')||u.pathname.startsWith('/uploads/');
 async function offlineEnabled(){const c=await caches.open(META);return !!(await c.match(ENABLE_KEY))}

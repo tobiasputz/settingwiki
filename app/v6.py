@@ -6,6 +6,7 @@ import hashlib
 import html
 import json
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -268,7 +269,7 @@ def normalize_foundry_sheet(sheet: Any) -> dict:
 
 
 def _foundry_module_version() -> str:
-    return '1.3.1'
+    return '1.4.0'
 
 
 def _validate_foundry_token(settings: Settings, campaign_id: int, token: str) -> None:
@@ -473,16 +474,50 @@ def save_integration_config(settings: Settings, campaign_id: int, payload: dict)
     return integration_config(settings, cid, include_secret=True)
 
 
+def _normalize_discord_mention(value: Any) -> str:
+    raw=str(value or '').strip()
+    if not raw:
+        return ''
+    lowered=raw.lower().replace(' ', '')
+    if lowered in {'everyone','@everyone'}:
+        return '@everyone'
+    if lowered in {'here','@here'}:
+        return '@here'
+    return raw
+
+
+def _discord_allowed_mentions(content: str) -> dict:
+    """Build a narrow Discord allowed_mentions payload from explicit markup.
+
+    Avoid the broad ``parse: ['roles','users']`` mode: Seeker should only ping
+    IDs the GM actually typed. @everyone/@here is enabled only when it is
+    literally present in the outgoing message.
+    """
+    text=str(content or '')
+    parse=[]
+    if re.search(r'(?<!\w)@(everyone|here)\b',text,re.I):
+        parse.append('everyone')
+    roles=list(dict.fromkeys(re.findall(r'<@&(\d{2,24})>',text)))[:100]
+    users=list(dict.fromkeys(re.findall(r'<@!?(\d{2,24})>',text)))[:100]
+    out={'parse':parse}
+    if roles:
+        out['roles']=roles
+    if users:
+        out['users']=users
+    return out
+
+
 def discord_post(settings: Settings, campaign_id: int, content: str, *, username: str = 'Seeker') -> dict:
     cfg = integration_config(settings, campaign_id, include_secret=True)
     if not cfg.get('discord_enabled') or not cfg.get('discord_webhook'):
         raise ValueError('Discord webhook is not enabled for this campaign.')
+    message=str(content or '')[:1900]
     body = json.dumps({
-        'content': str(content or '')[:1900],
+        'content': message,
         'username': username[:80],
-        'allowed_mentions': {'parse': ['roles', 'users', 'everyone']},
+        'allowed_mentions': _discord_allowed_mentions(message),
     }).encode('utf-8')
-    req = urllib.request.Request(str(cfg['discord_webhook']), data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/6.1'}, method='POST')
+    req = urllib.request.Request(str(cfg['discord_webhook']), data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/6.1.5'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             return {'ok': 200 <= int(resp.status) < 300, 'status': int(resp.status)}
@@ -507,7 +542,7 @@ def discord_session_confirmation(settings: Settings, campaign_id: int, session: 
     except Exception:
         pretty = raw
     camp = _row(settings, 'SELECT name FROM campaigns WHERE id=?', (int(campaign_id),)) or {'name': 'Campaign'}
-    mention = str(cfg.get('discord_mention') or '').strip()
+    mention = _normalize_discord_mention(cfg.get('discord_mention'))
     title = str(session.get('title') or 'Next session').strip()
     lines = []
     if mention:

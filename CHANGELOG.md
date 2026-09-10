@@ -1,3 +1,14 @@
+# Seeker 6.1.5 — PF2e creature importer hardening
+
+- Foundry Bridge **1.4.0** now writes and verifies PF2e NPC strike `damageRolls`, so authored strike formulas survive document creation/migration and power the native Foundry Damage button.
+- NPC spellcasting now explicitly persists and verifies `spelldc.value` (spell attack) and `spelldc.dc` (DC). Leaving attack blank uses the standard bestiary DC − 8 shortcut.
+- Spell rows can import official spells by exact Compendium UUID or by name from installed PF2e spell packs, with a structured homebrew fallback, rank/innate uses, basic-save support, and prepared-slot population.
+- Creature abilities now have fast action-economy buttons (passive/free/reaction/1–3 actions), save/check DC shortcuts, PF2e inline check and damage links, trigger/requirements, frequency controls, and quick ability templates.
+- Token Forge expands to **32 presets**, 7 token silhouettes, 6 frame patterns, solid/dashed/dotted rings, vignette, brightness/saturation, glow, inner ring, custom palette, and existing art positioning/crop controls.
+- Foundry submissions now actively watch the queued command until Foundry acknowledges it, then refresh Seeker again after the bridge's immediate state sync.
+- Discord `@everyone` / `@here` are normalized and explicitly enabled in `allowed_mentions`; exact role/user ID markup is allowed without enabling broad accidental role/user parsing. Discord channel permissions still apply.
+- Static cache generation bumped to **6500**.
+
 # Seeker 6.1.4 — Foundry compatibility, artwork workflow & real weapons
 
 - Fixed the Foundry runtime error `foundry.utils.slugify is not a function`. Bridge **1.3.1** now uses its own small compatibility-safe slug/HTML helpers instead of version-sensitive Foundry utility functions. This unblocks the structured creature import path used by strikes, actions/passives, spellcasting entries and homebrew spells.
