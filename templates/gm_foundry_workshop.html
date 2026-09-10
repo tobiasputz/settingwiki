@@ -103,8 +103,8 @@
               <label data-fw-show="homebrew"><span>Foundry document</span><select name="homebrew_document"><option value="equipment">Item / equipment</option><option value="feat">Feat</option><option value="action">Action</option><option value="npc">NPC / creature</option></select></label>
               <label class="span-2"><span>Traits</span><input name="traits" placeholder="human, humanoid, fire"></label>
               <label class="span-2"><span>Subtitle / source line</span><input name="subtitle" maxlength="180" placeholder="Elite guardian of the Cinder Gate"></label>
-              <label class="span-2"><span>Portrait artwork</span><div class="fw-art-field"><input name="img" inputmode="url" placeholder="https://… or upload below"><label class="quiet-btn fw-upload-button">Upload art<input type="file" accept="image/png,image/jpeg,image/webp" data-fw-art-upload hidden></label></div></label>
-              <label class="span-2" data-fw-show="creature"><span>Prototype token</span><div class="fw-art-field"><input name="token_img" inputmode="url" placeholder="Separate token image URL (optional)"><button class="quiet-btn" type="button" data-fw-token-maker>Make token from art</button></div><small class="fw-field-help">If left empty, Foundry uses the portrait. The token maker saves a separate PNG and assigns it to the creature's prototype token.</small></label>
+              <label class="span-2"><span>Portrait artwork</span><div class="fw-art-field"><input name="img" inputmode="url" placeholder="https://… or upload below"><button class="quiet-btn" type="button" data-fw-art-import>Import link</button><label class="quiet-btn fw-upload-button">Upload art<input type="file" accept="image/png,image/jpeg,image/webp" data-fw-art-upload hidden></label><button class="quiet-btn" type="button" data-fw-art-crop>Crop / frame</button></div><small class="fw-field-help" data-fw-art-status>Uploaded/imported art is automatically resized, compressed to WebP, and deduplicated in Seeker.</small></label>
+              <label class="span-2" data-fw-show="creature"><span>Prototype token</span><div class="fw-art-field"><input name="token_img" inputmode="url" placeholder="Separate token image URL (optional)"><button class="quiet-btn" type="button" data-fw-token-maker>Make token from art</button></div><small class="fw-field-help">If left empty, Foundry uses the portrait. The token maker saves a compact WebP and assigns it to the creature's prototype token.</small></label>
             </div>
           </section>
 
@@ -161,6 +161,24 @@
               <label><span>Hands</span><select name="hands"><option value="">—</option><option value="1">1</option><option value="2">2</option></select></label>
               <label><span>Quantity</span><input name="quantity" type="number" min="0" step="1" value="1"></label>
               <label><span>Category / group</span><input name="item_category" placeholder="adventuring gear"></label>
+            </div>
+            <div class="fw-weapon-card" data-fw-weapon-details>
+              <div class="fw-subsection-heading"><div><strong>Weapon statistics</strong><small>These fields create an actual PF2e weapon instead of generic equipment.</small></div></div>
+              <div class="fw-field-grid">
+                <label><span>Weapon category</span><select name="weapon_category"><option value="simple">Simple</option><option value="martial">Martial</option><option value="advanced">Advanced</option><option value="unarmed">Unarmed</option></select></label>
+                <label><span>Weapon group</span><input name="weapon_group" list="fwWeaponGroups" placeholder="sword"><datalist id="fwWeaponGroups"><option value="axe"><option value="bomb"><option value="bow"><option value="brawling"><option value="club"><option value="crossbow"><option value="dart"><option value="firearm"><option value="flail"><option value="hammer"><option value="knife"><option value="pick"><option value="polearm"><option value="shield"><option value="sling"><option value="spear"><option value="sword"></datalist></label>
+                <label><span>Damage dice</span><input name="weapon_damage_dice" type="number" min="0" max="8" step="1" value="1"></label>
+                <label><span>Damage die</span><select name="weapon_damage_die"><option value="d4">d4</option><option value="d6" selected>d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option></select></label>
+                <label><span>Damage type</span><select name="weapon_damage_type"><option value="bludgeoning">Bludgeoning</option><option value="piercing">Piercing</option><option value="slashing" selected>Slashing</option><option value="acid">Acid</option><option value="cold">Cold</option><option value="electricity">Electricity</option><option value="fire">Fire</option><option value="force">Force</option><option value="mental">Mental</option><option value="poison">Poison</option><option value="sonic">Sonic</option><option value="spirit">Spirit</option><option value="void">Void</option></select></label>
+                <label><span>Flat damage modifier</span><input name="weapon_damage_modifier" type="number" step="1" value="0"></label>
+                <label><span>Attack item bonus</span><div class="fw-number-field"><b>+</b><input name="weapon_bonus" type="number" step="1" value="0"></div></label>
+                <label><span>Held / usage</span><select name="weapon_usage"><option value="held-in-one-hand">Held in 1 hand</option><option value="held-in-one-plus-hands">Held in 1+ hands</option><option value="held-in-two-hands">Held in 2 hands</option><option value="worngloves">Worn gloves / unarmed</option></select></label>
+                <label><span>Range increment</span><select name="weapon_range"><option value="">Melee / none</option><option value="10">10 ft</option><option value="15">15 ft</option><option value="20">20 ft</option><option value="30">30 ft</option><option value="40">40 ft</option><option value="50">50 ft</option><option value="60">60 ft</option><option value="70">70 ft</option><option value="80">80 ft</option><option value="90">90 ft</option><option value="100">100 ft</option><option value="110">110 ft</option><option value="120">120 ft</option><option value="140">140 ft</option><option value="150">150 ft</option><option value="180">180 ft</option><option value="200">200 ft</option><option value="240">240 ft</option><option value="300">300 ft</option></select></label>
+                <label><span>Reload</span><select name="weapon_reload"><option value="">—</option><option value="-">—</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="10">10</option></select></label>
+                <label><span>Potency rune</span><select name="weapon_potency"><option value="0">None</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option></select></label>
+                <label><span>Striking rune</span><select name="weapon_striking"><option value="0">None</option><option value="1">Striking</option><option value="2">Greater striking</option><option value="3">Major striking</option><option value="4">4</option></select></label>
+                <label class="span-2"><span>Base weapon slug <em>optional</em></span><input name="weapon_base" placeholder="longsword, shortbow… (leave blank for true homebrew)"></label>
+              </div>
             </div>
           </section>
 
@@ -261,6 +279,24 @@
   </section>
 </main>
 
+<div class="fw-token-modal hidden" data-fw-crop-modal aria-hidden="true">
+  <div class="fw-token-card fw-crop-card">
+    <header><div><span class="eyebrow">ARTWORK EDITOR</span><h2>Crop portrait artwork</h2><p>Reframe the selected image before it is used in the Seeker Codex and Foundry. The current image is only replaced when you save the crop.</p></div><button type="button" class="fw-token-close" data-fw-crop-close>×</button></header>
+    <div class="fw-token-layout">
+      <div class="fw-crop-stage"><canvas width="800" height="1000" data-fw-crop-canvas></canvas><div class="fw-token-empty" data-fw-crop-empty>No artwork loaded.</div></div>
+      <div class="fw-token-controls">
+        <section class="fw-token-control-grid"><label><span>Crop ratio</span><select data-crop-aspect><option value="4:5">Portrait 4:5</option><option value="3:4">Portrait 3:4</option><option value="1:1">Square 1:1</option><option value="16:9">Wide 16:9</option></select></label><label><span>Background</span><input type="color" value="#171513" data-crop-bg></label></section>
+        <section class="fw-token-sliders">
+          <label><span>Zoom</span><input type="range" min="0.5" max="3" step="0.01" value="1" data-crop-scale><output data-crop-scale-out>100%</output></label>
+          <label><span>Horizontal</span><input type="range" min="-400" max="400" step="1" value="0" data-crop-x><output data-crop-x-out>0</output></label>
+          <label><span>Vertical</span><input type="range" min="-400" max="400" step="1" value="0" data-crop-y><output data-crop-y-out>0</output></label>
+        </section>
+        <div class="fw-token-modal-actions"><button type="button" class="quiet-btn" data-crop-reset>Reset</button><button type="button" class="quiet-btn" data-fw-crop-close>Keep current image</button><button type="button" class="primary-button" data-crop-save>Save crop to Seeker</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="fw-token-modal hidden" data-fw-token-modal aria-hidden="true">
   <div class="fw-token-card">
     <header><div><span class="eyebrow">TOKEN MAKER</span><h2>Build prototype token</h2><p>Compose a Foundry-ready token from the creature art. Presets change the frame; the source image is never modified.</p></div><button type="button" class="fw-token-close" data-fw-token-close>×</button></header>
@@ -288,4 +324,4 @@
 </div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6300"><script src="/static/foundry-workshop.js?v=6300"></script>{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6400"><script src="/static/foundry-workshop.js?v=6400"></script>{% endblock %}

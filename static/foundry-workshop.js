@@ -2,7 +2,7 @@
   const root=document.querySelector('[data-foundry-workshop]');
   if(!root) return;
   const initial=(()=>{try{return JSON.parse(document.getElementById('foundryWorkshopState')?.textContent||'{}')}catch{return {}}})();
-  const state={actors:initial.actors||[],entries:initial.prepared_content||[],commands:initial.commands||[],filter:'all',query:'',attacks:[],abilities:[],spells:[],savedSnapshot:'',currentId:null,tokenImage:null};
+  const state={actors:initial.actors||[],entries:initial.prepared_content||[],commands:initial.commands||[],filter:'all',query:'',attacks:[],abilities:[],spells:[],savedSnapshot:'',currentId:null,tokenImage:null,cropImage:null};
   const form=document.getElementById('foundryWorkshopForm');
   const list=document.getElementById('foundryPrepList');
   const log=document.getElementById('foundryCommandLog');
@@ -47,7 +47,11 @@
     $$('[data-fw-template]').forEach(b=>b.classList.toggle('visible',b.dataset.fwTemplateKind===k));
     if(resetCollections){state.attacks=[];state.abilities=[];renderRepeaters()}
     editingLabel.textContent=`${state.currentId?'EDITING':'NEW'} ${kindName(k).toUpperCase()}`;
-    updateToolbar();renderPreview();setDirty();
+    updateItemSubtype();updateToolbar();renderPreview();setDirty();
+  }
+  function updateItemSubtype(){
+    const weapon=fieldValue('kind')==='item'&&fieldValue('item_type')==='weapon';
+    $('[data-fw-weapon-details]')?.classList.toggle('fw-hidden',!weapon);
   }
   function updateToolbar(){toolbarTitle.textContent=fieldValue('title').trim()||`Untitled ${kindName(fieldValue('kind')).toLowerCase()}`}
 
@@ -102,7 +106,7 @@
     $$('[data-spell-index]').forEach(row=>{const i=+row.dataset.spellIndex;state.spells[i] ||= {};$$('[data-rkey]',row).forEach(el=>state.spells[i][el.dataset.rkey]=el.value)});
   }
 
-  const payloadFields=['img','token_img','level','rarity','size','actor_role','traits','item_type','feat_category','homebrew_document','price','bulk','usage','hands','quantity','item_category','action_cost','frequency','prerequisites','trigger','requirements','activation_actions','activation_frequency','activation_trigger','activation_requirements','homebrew_actions','homebrew_frequency','homebrew_trigger','perception','speed','senses','languages','skills','ac','fortitude','reflex','will','hp','immunities','weaknesses','resistances','str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod','description','spellcasting','spell_tradition','spell_mode','spell_dc','spell_attack','gm_notes','codex_visibility','codex_category','codex_blurb'];
+  const payloadFields=['img','token_img','level','rarity','size','actor_role','traits','item_type','feat_category','homebrew_document','price','bulk','usage','hands','quantity','item_category','action_cost','frequency','prerequisites','trigger','requirements','activation_actions','activation_frequency','activation_trigger','activation_requirements','homebrew_actions','homebrew_frequency','homebrew_trigger','perception','speed','senses','languages','skills','ac','fortitude','reflex','will','hp','immunities','weaknesses','resistances','str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod','description','spellcasting','spell_tradition','spell_mode','spell_dc','spell_attack','gm_notes','codex_visibility','codex_category','codex_blurb','weapon_category','weapon_group','weapon_damage_dice','weapon_damage_die','weapon_damage_type','weapon_damage_modifier','weapon_bonus','weapon_usage','weapon_range','weapon_reload','weapon_potency','weapon_striking','weapon_base'];
   function collectData(sync=true){
     if(sync)syncRepeaters();
     const kind=fieldValue('kind')||'monster';
@@ -113,10 +117,10 @@
     form.reset();state.currentId=entry?.id||null;state.attacks=[];state.abilities=[];state.spells=[];
     setField('id',entry?.id||'');setField('title',entry?.title||'');setField('subtitle',entry?.subtitle||'');setField('summary',entry?.summary||'');
     const p=entry?.payload||{};payloadFields.forEach(k=>setField(k,p[k]??''));
-    if(!entry){setField('level','1');setField('rarity','common');setField('size','med');setField('quantity','1');['str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod'].forEach(k=>setField(k,'0'))}
+    if(!entry){setField('level','1');setField('rarity','common');setField('size','med');setField('quantity','1');setField('weapon_category','simple');setField('weapon_damage_dice','1');setField('weapon_damage_die','d6');setField('weapon_damage_type','slashing');setField('weapon_damage_modifier','0');setField('weapon_bonus','0');setField('weapon_usage','held-in-one-hand');setField('weapon_potency','0');setField('weapon_striking','0');['str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod'].forEach(k=>setField(k,'0'))}
     if(field('codex_publish'))field('codex_publish').checked=!!p.codex_publish;
     state.attacks=Array.isArray(p.attacks)?structuredClone(p.attacks):[];state.abilities=Array.isArray(p.abilities)?structuredClone(p.abilities):[];state.spells=Array.isArray(p.spells)?structuredClone(p.spells):[];
-    setKind(entry?.kind||'monster');renderRepeaters();updateToolbar();renderPreview();
+    setKind(entry?.kind||'monster');renderRepeaters();updateItemSubtype();updateArtStatus();updateToolbar();renderPreview();
     state.savedSnapshot=JSON.stringify(collectData());
     setDirty();
     $('[data-fw-duplicate]').disabled=!entry;
@@ -155,7 +159,12 @@
       <p>${defenses}</p><p><strong>HP</strong> ${num(p.hp)}${extras?`; ${extras}`:''}</p><hr class="fw-stat-divider">
       <p><strong>Speed</strong> ${num(p.speed,'25')} feet</p>${attacks}${p.description?`<div class="fw-stat-action"><p class="fw-stat-desc">${lines(p.description)}</p></div>`:''}${abilityPreview(p.abilities)}${spellPreview(p)}${d.summary?`<div class="fw-preview-note">${lines(d.summary)}</div>`:''}</div>`;
   }
-  function itemPreview(d){const p=d.payload||{},act=actionGlyph(p.activation_actions);return `${p.img?`<img class="fw-preview-image" src="${esc(p.img)}" alt="">`:''}<header class="fw-stat-top fw-item-top"><h3>${esc(d.title||'Untitled item')}</h3><span class="fw-stat-level">ITEM ${esc(num(p.level,'0'))}</span></header>${d.subtitle?`<div class="fw-stat-subtitle">${esc(d.subtitle)}</div>`:''}${traitHtml('item',p)}<div class="fw-stat-body">${p.price?`<p><strong>Price</strong> ${esc(p.price)}</p>`:''}<p><strong>Usage</strong> ${esc(p.usage||'—')}${p.hands?`; <strong>Hands</strong> ${esc(p.hands)}`:''}; <strong>Bulk</strong> ${esc(p.bulk||'—')}</p>${p.activation_actions||p.activation_frequency||p.activation_trigger||p.activation_requirements?`<hr class="fw-stat-divider"><p><strong>Activate</strong> ${act?`<span class="fw-action-glyphs">${act}</span>`:''}${p.activation_frequency?` ${esc(p.activation_frequency)}`:''}</p>${p.activation_trigger?`<p><strong>Trigger</strong> ${esc(p.activation_trigger)}</p>`:''}${p.activation_requirements?`<p><strong>Requirements</strong> ${esc(p.activation_requirements)}</p>`:''}`:''}<hr class="fw-stat-divider">${p.description?`<p class="fw-stat-desc">${lines(p.description)}</p>`:'<p class="fw-stat-desc">Describe the item’s rules here.</p>'}${abilityPreview(p.abilities)}${d.summary?`<div class="fw-preview-note">${lines(d.summary)}</div>`:''}</div>`}
+  function itemPreview(d){
+    const p=d.payload||{},act=actionGlyph(p.activation_actions),weapon=p.item_type==='weapon';
+    const dice=weapon?`${num(p.weapon_damage_dice,'1')}${esc(p.weapon_damage_die||'d6')}${Number(p.weapon_damage_modifier||0)?`${Number(p.weapon_damage_modifier)>0?'+':''}${esc(p.weapon_damage_modifier)}`:''} ${esc(p.weapon_damage_type||'slashing')}`:'';
+    const weaponMeta=weapon?`<hr class="fw-stat-divider"><p><strong>Weapon</strong> ${esc(p.weapon_category||'simple')}${p.weapon_group?` · ${esc(p.weapon_group)} group`:''}${p.weapon_range?` · range ${esc(p.weapon_range)} ft`:''}${p.weapon_reload?` · reload ${esc(p.weapon_reload)}`:''}</p><p><strong>Damage</strong> ${dice}${Number(p.weapon_bonus||0)?`; <strong>Item bonus</strong> ${signed(p.weapon_bonus)}`:''}${Number(p.weapon_potency||0)?`; <strong>Potency</strong> +${esc(p.weapon_potency)}`:''}${Number(p.weapon_striking||0)?`; <strong>Striking</strong> ${esc(p.weapon_striking)}`:''}</p>`:'';
+    return `${p.img?`<img class="fw-preview-image" src="${esc(p.img)}" alt="">`:''}<header class="fw-stat-top fw-item-top"><h3>${esc(d.title||'Untitled item')}</h3><span class="fw-stat-level">ITEM ${esc(num(p.level,'0'))}</span></header>${d.subtitle?`<div class="fw-stat-subtitle">${esc(d.subtitle)}</div>`:''}${traitHtml('item',p)}<div class="fw-stat-body">${p.price?`<p><strong>Price</strong> ${esc(p.price)}</p>`:''}<p><strong>Usage</strong> ${esc(p.usage||p.weapon_usage||'—')}${p.hands?`; <strong>Hands</strong> ${esc(p.hands)}`:''}; <strong>Bulk</strong> ${esc(p.bulk||'—')}</p>${weaponMeta}${p.activation_actions||p.activation_frequency||p.activation_trigger||p.activation_requirements?`<hr class="fw-stat-divider"><p><strong>Activate</strong> ${act?`<span class="fw-action-glyphs">${act}</span>`:''}${p.activation_frequency?` ${esc(p.activation_frequency)}`:''}</p>${p.activation_trigger?`<p><strong>Trigger</strong> ${esc(p.activation_trigger)}</p>`:''}${p.activation_requirements?`<p><strong>Requirements</strong> ${esc(p.activation_requirements)}</p>`:''}`:''}<hr class="fw-stat-divider">${p.description?`<p class="fw-stat-desc">${lines(p.description)}</p>`:'<p class="fw-stat-desc">Describe the item’s rules here.</p>'}${abilityPreview(p.abilities)}${d.summary?`<div class="fw-preview-note">${lines(d.summary)}</div>`:''}</div>`
+  }
   function featPreview(d){const p=d.payload||{},act=actionGlyph(p.action_cost);return `${p.img?`<img class="fw-preview-image" src="${esc(p.img)}" alt="">`:''}<header class="fw-stat-top fw-feat-top"><h3>${esc(d.title||'Untitled feat')} ${act?`<span class="fw-action-glyphs">${act}</span>`:''}</h3><span class="fw-stat-level">FEAT ${esc(num(p.level,'1'))}</span></header>${d.subtitle?`<div class="fw-stat-subtitle">${esc(d.subtitle)}</div>`:''}${traitHtml('feat',p)}<div class="fw-stat-body">${p.prerequisites?`<p><strong>Prerequisites</strong> ${esc(p.prerequisites)}</p>`:''}${p.frequency?`<p><strong>Frequency</strong> ${esc(p.frequency)}</p>`:''}${p.trigger?`<p><strong>Trigger</strong> ${esc(p.trigger)}</p>`:''}${p.requirements?`<p><strong>Requirements</strong> ${esc(p.requirements)}</p>`:''}${(p.prerequisites||p.frequency||p.trigger||p.requirements)?'<hr class="fw-stat-divider">':''}${p.description?`<p class="fw-stat-desc">${lines(p.description)}</p>`:'<p class="fw-stat-desc">Describe what the feat does.</p>'}${abilityPreview(p.abilities)}${d.summary?`<div class="fw-preview-note">${lines(d.summary)}</div>`:''}</div>`}
   function homebrewPreview(d){const p=d.payload||{},act=actionGlyph(p.homebrew_actions);return `${p.img?`<img class="fw-preview-image" src="${esc(p.img)}" alt="">`:''}<header class="fw-stat-top fw-free-top"><h3>${esc(d.title||'Untitled homebrew')} ${act?`<span class="fw-action-glyphs">${act}</span>`:''}</h3><span class="fw-stat-level">${esc(String(p.homebrew_document||'HOMEBREW').toUpperCase())} ${esc(num(p.level,''))}</span></header>${d.subtitle?`<div class="fw-stat-subtitle">${esc(d.subtitle)}</div>`:''}${traitHtml('homebrew',p)}<div class="fw-stat-body">${p.homebrew_frequency?`<p><strong>Frequency</strong> ${esc(p.homebrew_frequency)}</p>`:''}${p.homebrew_trigger?`<p><strong>Trigger</strong> ${esc(p.homebrew_trigger)}</p>`:''}${p.description?`<p class="fw-stat-desc">${lines(p.description)}</p>`:'<p class="fw-stat-desc">Freeform rules text goes here.</p>'}${abilityPreview(p.abilities)}${d.summary?`<div class="fw-preview-note">${lines(d.summary)}</div>`:''}</div>`}
   function renderPreview(){
@@ -170,11 +179,21 @@
     const saved=await send('/api/v61/foundry/content','POST',data);state.currentId=saved.id;setField('id',saved.id);state.savedSnapshot=JSON.stringify(collectData());setDirty();$('[data-fw-duplicate]').disabled=false;if(!silent)toast('Homebrew saved.');await refresh();return saved
   }
   async function pushCurrent(target='world'){
-    try{const saved=await saveCurrent({silent:true});const payload={target_type:target};if(target==='actor'){const actorId=$('[data-fw-actor-target]')?.value;if(!actorId)throw Error('Choose a Foundry actor first.');payload.actor_id=actorId}await send(`/api/v61/foundry/content/${saved.id}/push`,'POST',payload);toast(target==='actor'?'Queued for that actor.':'Queued for the Foundry world.');await refresh()}catch(e){toast(e.message||'Could not queue the Foundry push.',true)}
+    try{
+      const saved=await saveCurrent({silent:true});const payload={target_type:target};
+      if(target==='actor'){const actorId=$('[data-fw-actor-target]')?.value;if(!actorId)throw Error('Choose a Foundry actor first.');payload.actor_id=actorId}
+      await send(`/api/v61/foundry/content/${saved.id}/push`,'POST',payload);
+      toast(target==='actor'?'Sent to Foundry — refreshing the sheet.':'Sent to Foundry — refreshing the world state.');
+      await refresh();
+      // Bridge 1.3.1 polls the tiny command endpoint every ~3 seconds. Refresh
+      // Seeker again after that hand-off so the action log reflects the result.
+      setTimeout(()=>refresh().catch(()=>{}),3400);
+      setTimeout(()=>refresh().catch(()=>{}),6500);
+    }catch(e){toast(e.message||'Could not queue the Foundry push.',true)}
   }
 
   form.addEventListener('submit',async e=>{e.preventDefault();try{await saveCurrent()}catch(err){toast(err.message||'Could not save.',true)}});
-  form.addEventListener('input',()=>{renderPreview();setDirty()});form.addEventListener('change',()=>{renderPreview();setDirty()});
+  form.addEventListener('input',()=>{renderPreview();setDirty()});form.addEventListener('change',e=>{if(e.target?.name==='item_type')updateItemSubtype();renderPreview();setDirty()});
   $$('[data-fw-kind]').forEach(b=>b.addEventListener('click',()=>setKind(b.dataset.fwKind)));
   $$('[data-fw-template]').forEach(b=>b.addEventListener('click',()=>{
     const key=b.dataset.fwTemplate;
@@ -185,7 +204,7 @@
       social:{actor_role:'npc',size:'med',str_mod:'0',dex_mod:'1',con_mod:'0',int_mod:'2',wis_mod:'2',cha_mod:'4',speed:'25',skills:'Diplomacy, Deception, Society',summary:'A conversation-first NPC built around influence, information, and social pressure.'},
       ally:{actor_role:'ally',size:'med',str_mod:'2',dex_mod:'2',con_mod:'2',int_mod:'0',wis_mod:'2',cha_mod:'1',speed:'25',summary:'A simple allied NPC designed to be useful without stealing the spotlight.'},
       consumable:{item_type:'consumable',quantity:'1',bulk:'L',usage:'held in 1 hand',summary:'A single-use item with one clear effect.'},
-      weapon:{item_type:'weapon',quantity:'1',usage:'held in 1 or 2 hands',summary:'A distinctive weapon whose special rules are easy to read at the table.'},
+      weapon:{item_type:'weapon',quantity:'1',usage:'held in 1 hand',weapon_category:'martial',weapon_group:'sword',weapon_damage_dice:'1',weapon_damage_die:'d8',weapon_damage_type:'slashing',weapon_damage_modifier:'0',weapon_bonus:'0',weapon_usage:'held-in-one-hand',weapon_potency:'0',weapon_striking:'0',summary:'A distinctive weapon with complete PF2e strike data and readable special rules.'},
       worn:{item_type:'equipment',quantity:'1',usage:'worn',summary:'A worn magic item with a passive benefit or a limited activation.'},
       'passive-feat':{feat_category:'general',action_cost:'',summary:'A passive feat that changes how the character approaches a recurring situation.'},
       'action-feat':{feat_category:'class',action_cost:'1',summary:'A one-action feat with a clear tactical purpose.'},
@@ -197,7 +216,7 @@
     if(key==='brute' && !state.attacks.length)state.attacks=[{name:'Heavy Strike',type:'melee',bonus:'',damage:'',damage_type:'bludgeoning',range:'',traits:'',effects:''}];
     if(key==='skirmisher' && !state.attacks.length)state.attacks=[{name:'Agile Strike',type:'melee',bonus:'',damage:'',damage_type:'slashing',range:'',traits:'agile',effects:''}];
     if(key==='caster' && !state.abilities.length)state.abilities=[{name:'Signature Magic',actions:'2',traits:'magical',description:''}];
-    renderRepeaters();renderPreview();setDirty();toast('Quick-start template applied. Fill in level-appropriate numbers.');
+    updateItemSubtype();renderRepeaters();renderPreview();setDirty();toast('Quick-start template applied. Fill in level-appropriate numbers.');
   }));
   $('[data-fw-add-attack]')?.addEventListener('click',()=>{syncRepeaters();state.attacks.push({name:'',type:'melee',bonus:'',damage:'',damage_type:'slashing',range:'',traits:'',effects:''});renderRepeaters();renderPreview();setDirty();$('[data-fw-attacks] .fw-repeat-row:last-child input')?.focus()});
   $('[data-fw-add-ability]')?.addEventListener('click',()=>{syncRepeaters();state.abilities.push({name:'',actions:'',category:'offensive',traits:'',description:''});renderRepeaters();renderPreview();setDirty();$('[data-fw-abilities] .fw-repeat-row:last-child input')?.focus()});
@@ -220,9 +239,71 @@
     const r=await fetch('/api/v61/foundry/assets',{method:'POST',body:fd});
     const body=await r.json().catch(()=>({}));if(!r.ok)throw Error(body.detail||'Image upload failed.');return body;
   }
+  const artStatus=$('[data-fw-art-status]');
+  function updateArtStatus(out=null){
+    const raw=fieldValue('img').trim();
+    if(!artStatus)return;
+    if(out?.bytes){artStatus.textContent=`Stored efficiently in Seeker · ${out.width}×${out.height} WebP · ${Math.max(1,Math.round(out.bytes/1024))} KB.`;return}
+    if(raw.startsWith('/uploads/foundry/')){artStatus.textContent='Stored locally in Seeker as optimized WebP. Token Forge and crop tools can use it safely.';return}
+    if(/^https?:\/\//i.test(raw)){artStatus.textContent='External artwork link. Import it before cropping/token creation; Seeker will optimize and deduplicate the local copy.';return}
+    artStatus.textContent='Uploaded/imported art is automatically resized, compressed to WebP, and deduplicated in Seeker.';
+  }
+  async function importLinkedArt(){
+    const raw=fieldValue('img').trim();
+    if(!raw)throw Error('Enter an artwork URL first.');
+    let parsed;try{parsed=new URL(raw,location.href)}catch{throw Error('That artwork URL is not valid.')}
+    if(parsed.origin===location.origin){updateArtStatus();return raw}
+    if(!/^https?:$/i.test(parsed.protocol))throw Error('Use a public http(s) artwork URL.');
+    const out=await send('/api/v61/foundry/assets/import','POST',{url:raw,kind:'art'});
+    setField('img',out.url);updateArtStatus(out);renderPreview();setDirty();
+    toast('Linked artwork imported and optimized.');
+    return out.url;
+  }
+  async function ensureEditableArt(){
+    const raw=fieldValue('img').trim();
+    if(!raw)throw Error('Add portrait artwork first.');
+    try{const u=new URL(raw,location.href);if(u.origin!==location.origin&&/^https?:$/.test(u.protocol))return await importLinkedArt()}catch{}
+    return raw;
+  }
+  $('[data-fw-art-import]')?.addEventListener('click',async()=>{try{await importLinkedArt()}catch(err){toast(err.message,true)}});
+  field('img')?.addEventListener('change',updateArtStatus);
   $('[data-fw-art-upload]')?.addEventListener('change',async e=>{
     const file=e.currentTarget.files?.[0];if(!file)return;
-    try{const out=await uploadFoundryAsset(file,'art');setField('img',out.url);renderPreview();setDirty();toast('Artwork uploaded to Seeker.')}catch(err){toast(err.message,true)}finally{e.currentTarget.value=''}
+    try{const out=await uploadFoundryAsset(file,'art');setField('img',out.url);updateArtStatus(out);renderPreview();setDirty();toast('Artwork optimized and stored in Seeker. You can crop it if desired.')}catch(err){toast(err.message,true)}finally{e.currentTarget.value=''}
+  });
+
+  const cropModal=$('[data-fw-crop-modal]'),cropCanvas=$('[data-fw-crop-canvas]'),cropEmpty=$('[data-fw-crop-empty]'),cropCtx=cropCanvas?.getContext('2d');
+  const cropSettings={aspect:'4:5',bg:'#171513',scale:1,x:0,y:0};
+  function cropDimensions(){
+    const [a,b]=String(cropSettings.aspect||'4:5').split(':').map(Number);const max=1000;
+    return a>=b?{w:max,h:Math.round(max*b/a)}:{w:Math.round(max*a/b),h:max};
+  }
+  function syncCropControls(){
+    const map=[['aspect','[data-crop-aspect]'],['bg','[data-crop-bg]'],['scale','[data-crop-scale]'],['x','[data-crop-x]'],['y','[data-crop-y]']];
+    map.forEach(([k,s])=>{const el=$(s);if(el)el.value=cropSettings[k]});
+    $('[data-crop-scale-out]').textContent=`${Math.round(cropSettings.scale*100)}%`;$('[data-crop-x-out]').textContent=String(cropSettings.x);$('[data-crop-y-out]').textContent=String(cropSettings.y);
+  }
+  function drawCrop(){
+    if(!cropCtx||!cropCanvas)return;const {w,h}=cropDimensions();cropCanvas.width=w;cropCanvas.height=h;const ctx=cropCtx;ctx.clearRect(0,0,w,h);ctx.fillStyle=cropSettings.bg;ctx.fillRect(0,0,w,h);
+    const img=state.cropImage;if(img){const base=Math.max(w/img.naturalWidth,h/img.naturalHeight)*Number(cropSettings.scale||1);const iw=img.naturalWidth*base,ih=img.naturalHeight*base,x=(w-iw)/2+Number(cropSettings.x||0),y=(h-ih)/2+Number(cropSettings.y||0);ctx.drawImage(img,x,y,iw,ih)}
+    cropEmpty?.classList.toggle('hidden',!!img);
+  }
+  async function loadImage(src){
+    const img=new Image();img.decoding='async';await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(Error('Seeker could not load that artwork.'));img.src=src});return img;
+  }
+  async function openCropMaker(){
+    cropModal?.classList.remove('hidden');cropModal?.setAttribute('aria-hidden','false');Object.assign(cropSettings,{scale:1,x:0,y:0});syncCropControls();
+    try{const src=await ensureEditableArt();state.cropImage=await loadImage(src);drawCrop()}catch(err){state.cropImage=null;drawCrop();toast(err.message,true)}
+  }
+  $('[data-fw-art-crop]')?.addEventListener('click',openCropMaker);
+  $$('[data-fw-crop-close]').forEach(b=>b.addEventListener('click',()=>{cropModal?.classList.add('hidden');cropModal?.setAttribute('aria-hidden','true')}));
+  cropModal?.addEventListener('click',e=>{if(e.target===cropModal){cropModal.classList.add('hidden');cropModal.setAttribute('aria-hidden','true')}});
+  const cropControlMap={'[data-crop-aspect]':'aspect','[data-crop-bg]':'bg','[data-crop-scale]':'scale','[data-crop-x]':'x','[data-crop-y]':'y'};
+  Object.entries(cropControlMap).forEach(([selector,key])=>$(selector)?.addEventListener('input',e=>{cropSettings[key]=['scale','x','y'].includes(key)?Number(e.currentTarget.value):e.currentTarget.value;syncCropControls();drawCrop()}));
+  $('[data-crop-reset]')?.addEventListener('click',()=>{Object.assign(cropSettings,{scale:1,x:0,y:0});syncCropControls();drawCrop()});
+  $('[data-crop-save]')?.addEventListener('click',async()=>{
+    if(!state.cropImage)return toast('Load artwork first.',true);
+    try{const blob=await new Promise((resolve,reject)=>cropCanvas.toBlob(b=>b?resolve(b):reject(Error('Could not render crop.')),'image/webp',.9));const file=new File([blob],`${(fieldValue('title')||'entry').replace(/[^a-z0-9_-]+/gi,'-')}-portrait.webp`,{type:'image/webp'});const out=await uploadFoundryAsset(file,'art');setField('img',out.url);updateArtStatus(out);renderPreview();setDirty();cropModal.classList.add('hidden');cropModal.setAttribute('aria-hidden','true');toast('Cropped portrait saved and assigned.')}catch(err){toast(err.message||'Could not save crop.',true)}
   });
 
   const tokenModal=$('[data-fw-token-modal]'),tokenCanvas=$('[data-fw-token-canvas]'),tokenEmpty=$('[data-fw-token-empty]');
@@ -259,12 +340,11 @@
   }
   async function loadTokenSource(src){
     if(!src)throw Error('Add portrait artwork first.');
-    const img=new Image();img.decoding='async';try{const u=new URL(src,location.href);if(u.origin!==location.origin)img.crossOrigin='anonymous'}catch{}
-    await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(Error('Seeker could not load that artwork for token editing. Upload the image to Seeker first.'));img.src=src});state.tokenImage=img;drawToken();
+    const img=await loadImage(src);state.tokenImage=img;drawToken();
   }
   async function openTokenMaker(){
     tokenModal?.classList.remove('hidden');tokenModal?.setAttribute('aria-hidden','false');syncTokenControls();
-    try{await loadTokenSource(fieldValue('img'))}catch(err){state.tokenImage=null;drawToken();toast(err.message,true)}
+    try{const src=await ensureEditableArt();await loadTokenSource(src)}catch(err){state.tokenImage=null;drawToken();toast(err.message,true)}
   }
   $('[data-fw-token-maker]')?.addEventListener('click',openTokenMaker);$('[data-fw-token-close]')?.addEventListener('click',()=>{tokenModal?.classList.add('hidden');tokenModal?.setAttribute('aria-hidden','true')});tokenModal?.addEventListener('click',e=>{if(e.target===tokenModal){tokenModal.classList.add('hidden');tokenModal.setAttribute('aria-hidden','true')}});
   $$('[data-token-preset]').forEach(b=>b.addEventListener('click',()=>{Object.assign(tokenSettings,tokenPresets[b.dataset.tokenPreset]||{});syncTokenControls();drawToken();$$('[data-token-preset]').forEach(x=>x.classList.toggle('active',x===b))}));
@@ -272,12 +352,12 @@
   Object.entries(tokenControlMap).forEach(([selector,key])=>$(selector)?.addEventListener('input',e=>{tokenSettings[key]=['scale','x','y','width'].includes(key)?Number(e.currentTarget.value):e.currentTarget.value;syncTokenControls();drawToken()}));
   $('[data-token-shadow]')?.addEventListener('change',e=>{tokenSettings.shadow=e.currentTarget.checked;drawToken()});$('[data-token-double]')?.addEventListener('change',e=>{tokenSettings.double=e.currentTarget.checked;drawToken()});
   $('[data-token-reset]')?.addEventListener('click',()=>{Object.assign(tokenSettings,{...tokenPresets.classic,scale:1,x:0,y:0,shadow:true});syncTokenControls();drawToken()});
-  $('[data-token-source-file]')?.addEventListener('change',async e=>{const file=e.currentTarget.files?.[0];if(!file)return;try{const out=await uploadFoundryAsset(file,'art');setField('img',out.url);await loadTokenSource(out.url);renderPreview();setDirty();toast('New token source uploaded.')}catch(err){toast(err.message,true)}finally{e.currentTarget.value=''}});
+  $('[data-token-source-file]')?.addEventListener('change',async e=>{const file=e.currentTarget.files?.[0];if(!file)return;try{const out=await uploadFoundryAsset(file,'art');setField('img',out.url);updateArtStatus(out);await loadTokenSource(out.url);renderPreview();setDirty();toast('New token source optimized and loaded.')}catch(err){toast(err.message,true)}finally{e.currentTarget.value=''}});
   $('[data-token-save]')?.addEventListener('click',async()=>{
     if(!state.tokenImage)return toast('Load artwork first.',true);
     try{
-      const blob=await new Promise((resolve,reject)=>{try{tokenCanvas.toBlob(b=>b?resolve(b):reject(Error('Could not render token.')),'image/png')}catch{reject(Error('That remote image blocks token export. Upload it to Seeker first.'))}});
-      const file=new File([blob],`${(fieldValue('title')||'creature').replace(/[^a-z0-9_-]+/gi,'-')}-token.png`,{type:'image/png'});const out=await uploadFoundryAsset(file,'token');setField('token_img',out.url);setDirty();toast('Token saved and assigned.');tokenModal.classList.add('hidden');tokenModal.setAttribute('aria-hidden','true');
+      const blob=await new Promise((resolve,reject)=>{try{tokenCanvas.toBlob(b=>b?resolve(b):reject(Error('Could not render token.')),'image/webp',.92)}catch{reject(Error('Could not export this token.'))}});
+      const file=new File([blob],`${(fieldValue('title')||'creature').replace(/[^a-z0-9_-]+/gi,'-')}-token.webp`,{type:'image/webp'});const out=await uploadFoundryAsset(file,'token');setField('token_img',out.url);setDirty();toast('Token optimized, saved, and assigned.');tokenModal.classList.add('hidden');tokenModal.setAttribute('aria-hidden','true');
     }catch(err){toast(err.message||'Could not save token.',true)}
   });
 

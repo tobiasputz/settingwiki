@@ -1,3 +1,13 @@
+# Seeker 6.1.4 — Foundry compatibility, artwork workflow & real weapons
+
+- Fixed the Foundry runtime error `foundry.utils.slugify is not a function`. Bridge **1.3.1** now uses its own small compatibility-safe slug/HTML helpers instead of version-sensitive Foundry utility functions. This unblocks the structured creature import path used by strikes, actions/passives, spellcasting entries and homebrew spells.
+- Linked portrait art can now be **imported into Seeker** from the Artwork field. Token Forge and the crop editor automatically localize an external image first when necessary, avoiding cross-origin canvas failures.
+- Added an optional **Artwork Editor** for portrait cropping/reframing (4:5, 3:4, square and wide crops, zoom, pan and background). Saving a crop replaces the portrait only after confirmation.
+- Reworked Foundry Workshop image storage for Railway efficiency: originals are discarded after processing, portrait/token files are bounded in resolution, encoded as WebP, named by content hash for true de-duplication, and abandoned unreferenced workshop images are pruned after a grace period.
+- Added a lightweight **3-second Foundry command poll** while a GM client is visible. After a queued command executes, the bridge forces a full state sync back to Seeker; the Workshop also refreshes its action log after submission.
+- Expanded Item → Weapon authoring with PF2e weapon category, group, damage dice/die/type/modifier, attack item bonus, hand usage, valid range increments, reload, base weapon, potency rune and striking rune. The bridge now creates a real PF2e weapon source and carries common physical-item price/bulk metadata.
+- Bumped static assets to **6400** so existing browsers/PWA installs do not keep the older workshop JavaScript/CSS.
+
 # Seeker 6.1.3 — PF2e creature import, token forge & Monster Codex
 
 - Upgraded **Seeker Bridge to 1.3.0** so prepared creatures create real PF2e Strike (`melee`) items, Action/Passive items and spellcasting entries instead of flattening those sections into actor notes. Named spells are resolved against installed PF2e compendia when possible, with a structured homebrew-spell fallback.

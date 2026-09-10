@@ -3,18 +3,21 @@ from __future__ import annotations
 import functools
 import hashlib
 import hmac
+import io
+import ipaddress
 import json
 import os
 import re
 import secrets
 import shutil
+import socket
 import tempfile
 import threading
 import time
 import zipfile
 from pathlib import Path
-from urllib.parse import quote, unquote
-from urllib.request import Request as UrlRequest, urlopen
+from urllib.parse import quote, unquote, urlparse
+from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener, urlopen
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -80,7 +83,7 @@ from .v6 import (
     init_v6_db, integration_config, save_integration_config, discord_post, discord_session_confirmation,
     foundry_accept, foundry_state, foundry_actors, foundry_link, foundry_link_for_character, foundry_manifest, build_foundry_module_zip,
     list_foundry_prepared_content, save_foundry_prepared_content, delete_foundry_prepared_content,
-    queue_foundry_command, complete_foundry_commands, recent_foundry_commands,
+    queue_foundry_command, claim_foundry_commands, complete_foundry_commands, recent_foundry_commands,
     calendar_feed, session_ics,
     sync_lore_revisions, lore_revisions, lore_revision_diff, restore_lore_source_revision, page_update_status, knowledge_matrix, converge_campaigns,
     changes_since_last_session, continuity_v6, player_dashboard, command_rows, save_map_annotation, list_map_annotations, delete_map_annotation,
@@ -3513,21 +3516,160 @@ def v61_foundry_workshop_page(request: Request):
     })
 
 
+def _foundry_image_bucket(campaign_id:int,kind:str) -> Path:
+    bucket='tokens' if str(kind or '').lower()=='token' else 'art'
+    folder=settings.uploads_dir/'foundry'/str(int(campaign_id))/bucket
+    folder.mkdir(parents=True,exist_ok=True)
+    return folder
+
+
+def _optimize_foundry_image(source:Path,campaign_id:int,kind:str,stem_hint:str='art') -> dict:
+    """Normalize workshop art to compact, deduplicated WebP files.
+
+    Foundry and modern browsers handle WebP well. Keeping a single bounded format
+    avoids storing multi-megabyte phone/PNG originals for portraits and tokens.
+    """
+    try:
+        from PIL import Image, ImageOps, UnidentifiedImageError
+    except Exception as exc:
+        raise HTTPException(500,'Image optimization is unavailable on this Seeker install.') from exc
+    try:
+        with Image.open(source) as opened:
+            image=ImageOps.exif_transpose(opened)
+            image.load()
+    except (UnidentifiedImageError,OSError,ValueError) as exc:
+        raise HTTPException(400,'That file is not a readable image.') from exc
+    max_side=1024 if str(kind or '').lower()=='token' else 1600
+    if max(image.size)>max_side:
+        image.thumbnail((max_side,max_side),Image.Resampling.LANCZOS)
+    has_alpha='A' in image.getbands() or ('transparency' in getattr(image,'info',{}))
+    image=image.convert('RGBA' if has_alpha else 'RGB')
+    out=io.BytesIO()
+    # Tokens get a little more quality because hard frame edges expose compression;
+    # portraits favor smaller storage. WebP preserves alpha for token frames.
+    quality=88 if str(kind or '').lower()=='token' else 82
+    image.save(out,format='WEBP',quality=quality,method=4,exact=bool(has_alpha))
+    data=out.getvalue()
+    digest=hashlib.sha256(data).hexdigest()[:24]
+    folder=_foundry_image_bucket(campaign_id,kind)
+    # The content hash *is* the filename. This makes de-duplication independent
+    # of whether the same artwork was uploaded as monster.png, portrait.jpg, etc.
+    filename=f'{digest}.webp'
+    target=folder/filename
+    existed=target.exists()
+    if not existed:
+        target.write_bytes(data)
+    rel=target.relative_to(settings.uploads_dir).as_posix()
+    return {
+        'ok':True,
+        'url':'/uploads/'+quote(rel,safe='/'),
+        'ref':'upload:'+rel,
+        'name':filename,
+        'width':int(image.width),'height':int(image.height),'bytes':len(data),
+        'deduplicated':existed,
+    }
+
+
+def _prune_unused_foundry_images(campaign_id:int,grace_seconds:int=86400) -> dict:
+    """Remove abandoned workshop images without touching referenced art.
+
+    The creator can generate several crops/tokens while experimenting. We keep
+    unreferenced files for a short grace period so an unsaved browser draft is
+    not destroyed, then reclaim them automatically. Originals are never kept:
+    only the optimized WebP derivative reaches this bucket.
+    """
+    cid=int(campaign_id);root=settings.uploads_dir/'foundry'/str(cid)
+    if not root.exists():return {'removed':0,'bytes':0}
+    keep=set()
+    prefix=f'/uploads/foundry/{cid}/'
+    for row in list_foundry_prepared_content(settings,cid):
+        data=row.get('payload') or {}
+        for key in ('img','token_img'):
+            raw=str(data.get(key) or '')
+            if raw.startswith(prefix):keep.add(unquote(raw[len('/uploads/'):]).lstrip('/'))
+    cutoff=time.time()-max(0,int(grace_seconds));removed=0;reclaimed=0
+    for path in root.rglob('*.webp'):
+        try:
+            rel=path.relative_to(settings.uploads_dir).as_posix()
+            if rel in keep or path.stat().st_mtime>cutoff:continue
+            reclaimed+=path.stat().st_size;path.unlink();removed+=1
+        except OSError:continue
+    for folder in sorted((p for p in root.rglob('*') if p.is_dir()),key=lambda p:len(p.parts),reverse=True):
+        try:folder.rmdir()
+        except OSError:pass
+    return {'removed':removed,'bytes':reclaimed}
+
+
+def _validate_public_remote_url(raw:str) -> str:
+    value=str(raw or '').strip()
+    if len(value)>4000:raise HTTPException(400,'Artwork URL is too long.')
+    parsed=urlparse(value)
+    if parsed.scheme not in {'http','https'} or not parsed.hostname:
+        raise HTTPException(400,'Use a public http(s) image URL.')
+    host=parsed.hostname.strip().lower()
+    if host in {'localhost','localhost.localdomain'}:
+        raise HTTPException(400,'Local/private artwork URLs cannot be imported.')
+    try:
+        infos=socket.getaddrinfo(host,parsed.port or (443 if parsed.scheme=='https' else 80),type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise HTTPException(400,'Seeker could not resolve that image host.') from exc
+    for info in infos:
+        try:ip=ipaddress.ip_address(info[4][0])
+        except ValueError:continue
+        if not ip.is_global:
+            raise HTTPException(400,'Local/private artwork URLs cannot be imported.')
+    return value
+
+
+def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
+    url=_validate_public_remote_url(raw_url)
+    temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/6.1.4 (+Foundry Workshop)','Accept':'image/*'})
+    class _SafeImageRedirect(HTTPRedirectHandler):
+        def redirect_request(self,request,fp,code,msg,headers,newurl):
+            return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
+    opener=build_opener(_SafeImageRedirect())
+    try:
+        with opener.open(req,timeout=10) as response, temp.open('wb') as fh:
+            final=_validate_public_remote_url(response.geturl())
+            ctype=str(response.headers.get('Content-Type') or '').split(';',1)[0].lower()
+            if ctype and not ctype.startswith('image/'):
+                raise HTTPException(400,'That URL did not return an image.')
+            total=0
+            while True:
+                chunk=response.read(1024*1024)
+                if not chunk:break
+                total+=len(chunk)
+                if total>20_000_000:raise HTTPException(413,'Remote artwork is limited to 20 MB.')
+                fh.write(chunk)
+        hint=Path(urlparse(final).path).stem or 'linked-art'
+        return _optimize_foundry_image(temp,campaign_id,kind,hint)
+    except HTTPException:raise
+    except Exception as exc:
+        raise HTTPException(400,'Seeker could not import that remote artwork. The host may block server-side downloads.') from exc
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 @app.post('/api/v61/foundry/assets')
 async def v613_foundry_asset_upload(request:Request,image:UploadFile=File(...),kind:str=Form('art')):
     require_gm(request)
     suffix=Path(image.filename or 'image.png').suffix.lower()
     if suffix not in {'.png','.jpg','.jpeg','.webp'}:
         raise HTTPException(400,'Foundry artwork must be PNG, JPG, or WebP.')
-    bucket='tokens' if str(kind or '').lower()=='token' else 'art'
-    folder=settings.uploads_dir/'foundry'/str(_active_campaign_id(request))/bucket
-    folder.mkdir(parents=True,exist_ok=True)
-    stem=''.join(c for c in Path(image.filename or bucket).stem if c.isalnum() or c in '-_ ').strip().replace(' ','-')[:70] or bucket
-    filename=f"{int(time.time())}-{secrets.token_hex(4)}-{stem}{suffix}"
-    target=folder/filename
-    await _stream_upload(image,target,20_000_000,'Foundry artwork is limited to 20 MB per image.')
-    rel=target.relative_to(settings.uploads_dir).as_posix()
-    return {'ok':True,'url':'/uploads/'+quote(rel,safe='/'),'ref':'upload:'+rel,'name':image.filename or filename}
+    cid=_active_campaign_id(request)
+    temp=Path(tempfile.gettempdir())/f'seeker-foundry-upload-{secrets.token_hex(8)}{suffix}'
+    try:
+        await _stream_upload(image,temp,20_000_000,'Foundry artwork is limited to 20 MB per image.')
+        return _optimize_foundry_image(temp,cid,kind,Path(image.filename or 'art').stem)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+@app.post('/api/v61/foundry/assets/import')
+def v614_foundry_asset_import(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    return _download_remote_foundry_image(str(payload.get('url') or ''),_active_campaign_id(request),str(payload.get('kind') or 'art'))
 
 
 def _published_bestiary_rows(campaign_id:int) -> list[dict]:
@@ -3669,6 +3811,11 @@ def v61_foundry_push_ack_options(campaign_id:int):
     return Response(status_code=204,headers=_FOUNDRY_CORS)
 
 
+@app.options('/api/v6/foundry/push/{campaign_id}/commands')
+def v614_foundry_commands_options(campaign_id:int):
+    return Response(status_code=204,headers=_FOUNDRY_CORS)
+
+
 @app.post('/api/v6/foundry/push/{campaign_id}')
 def v6_foundry_push(campaign_id:int,token:str='',payload:dict=Body(...)):
     try:
@@ -3692,6 +3839,21 @@ def v61_foundry_push_ack(campaign_id:int,token:str='',payload:dict=Body(...)):
         return JSONResponse({'detail':'Seeker could not acknowledge the Foundry action results.'},status_code=500,headers=_FOUNDRY_CORS)
 
 
+@app.post('/api/v6/foundry/push/{campaign_id}/commands')
+def v614_foundry_commands(campaign_id:int,token:str=''):
+    """Tiny command-only poll so Seeker → Foundry actions feel immediate.
+
+    The regular actor snapshot remains low-frequency; a visible GM client only
+    checks this lightweight endpoint for queued actions.
+    """
+    try:
+        return JSONResponse({'commands':claim_foundry_commands(settings,campaign_id,token,limit=25)},headers=_FOUNDRY_CORS)
+    except PermissionError as exc:
+        return JSONResponse({'detail':str(exc)},status_code=403,headers=_FOUNDRY_CORS)
+    except Exception:
+        return JSONResponse({'detail':'Seeker could not read the Foundry action queue.'},status_code=500,headers=_FOUNDRY_CORS)
+
+
 @app.get('/api/v6/foundry/state')
 def v6_foundry_state(request:Request):
     require_gm(request);return foundry_state(settings,_active_campaign_id(request))
@@ -3707,7 +3869,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.3.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.3.1.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -3715,7 +3877,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.3.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.3.1.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 
@@ -3746,13 +3908,17 @@ def v61_foundry_workshop_state(request:Request):
 @app.post('/api/v61/foundry/content')
 def v61_foundry_content_save(request:Request,payload:dict=Body(...)):
     require_gm(request)
-    try:return save_foundry_prepared_content(settings,_active_campaign_id(request),payload)
+    cid=_active_campaign_id(request)
+    try:
+        out=save_foundry_prepared_content(settings,cid,payload)
+        _prune_unused_foundry_images(cid)
+        return out
     except ValueError as exc:raise HTTPException(400,str(exc))
 
 
 @app.delete('/api/v61/foundry/content/{item_id}')
 def v61_foundry_content_delete(request:Request,item_id:int):
-    require_gm(request);delete_foundry_prepared_content(settings,_active_campaign_id(request),item_id);return {'ok':True}
+    require_gm(request);cid=_active_campaign_id(request);delete_foundry_prepared_content(settings,cid,item_id);_prune_unused_foundry_images(cid);return {'ok':True}
 
 
 @app.post('/api/v61/foundry/content/{item_id}/push')

@@ -268,7 +268,7 @@ def normalize_foundry_sheet(sheet: Any) -> dict:
 
 
 def _foundry_module_version() -> str:
-    return '1.3.0'
+    return '1.3.1'
 
 
 def _validate_foundry_token(settings: Settings, campaign_id: int, token: str) -> None:

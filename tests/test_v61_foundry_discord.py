@@ -88,7 +88,7 @@ def test_v61_public_foundry_manifest_and_install_zip(tmp_path: Path, monkeypatch
     client=TestClient(main.app)
     manifest=client.get('/foundry/seeker-bridge/module.json')
     assert manifest.status_code==200
-    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.3.0'
+    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.3.1'
     assert data['manifest'].endswith('/foundry/seeker-bridge/module.json')
     assert data['download'].endswith('/foundry/seeker-bridge/seeker-bridge.zip')
     package=client.get('/foundry/seeker-bridge/seeker-bridge.zip')
@@ -162,7 +162,7 @@ def test_v61_scroll_contract_and_foundry_frontend_assets():
     assert 'data-foundry-manifest' in integrations and 'Automatically announce confirmed session dates' in integrations
     assert '/api/v61/characters/' in chars and 'data-foundry-tab' in chars
     assert 'data-notification-pref="spotlight"' not in base
-    assert 'seeker-static-v6200' in sw
+    assert 'seeker-static-v6400' in sw
 
 
 def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
@@ -186,13 +186,16 @@ def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
 def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
     root=Path(__file__).resolve().parents[1]
     bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.3.0"' in bridge
+    assert 'const BRIDGE_VERSION = "1.3.1"' in bridge
     assert 'function normalizedEndpoint' in bridge
     assert 'u.protocol === "http:" && !local' in bridge
     assert 'processCommands(endpoint, body?.commands || [])' in bridge
     assert 'Seeker Bridge connected' in bridge
     assert 'Seeker Bridge cannot reach Seeker' in bridge
     assert 'Could not serialize actor' in bridge
+    assert 'foundry.utils.slugify' not in bridge
+    assert 'function seekerSlugify' in bridge
+    assert 'setupCommandInterval' in bridge and '3000' in bridge
 
 
 def test_v61_foundry_push_errors_keep_cors_headers(tmp_path: Path, monkeypatch):
@@ -224,7 +227,7 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200
     assert 'Homebrew Forge' in workshop.text and 'foundryWorkshopForm' in workshop.text
-    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=6300' in workshop.text
+    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=6400' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})
@@ -285,6 +288,11 @@ def test_v613_structured_pf2e_import_contract_and_token_support():
     assert 'data-fw-token-maker' in workshop and 'data-fw-token-canvas' in workshop
     assert 'data-fw-spells' in workshop and 'data-fw-add-spell' in workshop
     assert "payload.codex_publish" in js and 'token_img' in js
+    assert 'data-fw-art-crop' in workshop and 'data-fw-crop-canvas' in workshop
+    assert '/api/v61/foundry/assets/import' in js and 'ensureEditableArt' in js
+    assert 'weapon_damage_dice' in workshop and 'weapon_group' in workshop and 'weapon_reload' in workshop
+    assert 'system.damage' in bridge and 'system.group' in bridge and 'system.runes' in bridge
+    assert 'commandsEndpoint' in bridge and 'queuePush(200)' in bridge
 
 
 def test_v613_bestiary_visibility_and_asset_upload(tmp_path: Path, monkeypatch):
@@ -302,8 +310,14 @@ def test_v613_bestiary_visibility_and_asset_upload(tmp_path: Path, monkeypatch):
         'payload':{'level':'3','ac':'19','hp':'45','codex_publish':True,'codex_visibility':'full','codex_blurb':'A translucent hunting beast.'}
     })
     assert full.status_code==200
-    upload=gm.post('/api/v61/foundry/assets',files={'image':('token.png',b'not-a-real-png-but-storage-does-not-decode','image/png')},data={'kind':'token'})
-    assert upload.status_code==200 and '/uploads/foundry/' in upload.json()['url']
+    from PIL import Image
+    import io
+    image=Image.new('RGB',(1800,1200),(120,80,45));raw=io.BytesIO();image.save(raw,format='PNG');source=raw.getvalue()
+    upload=gm.post('/api/v61/foundry/assets',files={'image':('token.png',source,'image/png')},data={'kind':'token'})
+    assert upload.status_code==200 and '/uploads/foundry/' in upload.json()['url'] and upload.json()['url'].endswith('.webp')
+    assert upload.json()['width']<=1024 and upload.json()['height']<=1024 and upload.json()['bytes']<len(source)
+    duplicate=gm.post('/api/v61/foundry/assets',files={'image':('token-copy.png',source,'image/png')},data={'kind':'token'})
+    assert duplicate.status_code==200 and duplicate.json()['url']==upload.json()['url'] and duplicate.json()['deduplicated'] is True
     with_art=gm.post('/api/v61/foundry/content',json={
         'kind':'monster','target_type':'world','title':'Token Beast','payload':{'hp':'10','img':upload.json()['url'],'token_img':upload.json()['url']}
     })
@@ -322,3 +336,29 @@ def test_v613_bestiary_visibility_and_asset_upload(tmp_path: Path, monkeypatch):
     rough_page=player.get(f"/bestiary/{rough.json()['id']}");assert rough_page.status_code==200
     assert 'Incomplete field knowledge' in rough_page.text and '<strong>AC</strong> 25' not in rough_page.text and 'Secret elite guardian' not in rough_page.text
     full_page=player.get(f"/bestiary/{full.json()['id']}");assert full_page.status_code==200 and '<strong>AC</strong> 19' in full_page.text
+
+
+def test_v614_remote_art_import_is_local_optimized_webp(tmp_path: Path, monkeypatch):
+    import app.main as main
+    from PIL import Image
+    import io
+    s=setup(tmp_path);seed_wiki(s);monkeypatch.setattr(main,'settings',s)
+    gm=TestClient(main.app);gm.post('/admin/login',data={'password':'admin'})
+    image=Image.new('RGB',(2400,1600),(70,110,150));buf=io.BytesIO();image.save(buf,format='JPEG',quality=95);source=buf.getvalue()
+
+    class FakeResponse(io.BytesIO):
+        def __init__(self,data):
+            super().__init__(data);self.headers={'Content-Type':'image/jpeg'}
+        def geturl(self):return 'https://images.example.test/art.jpg'
+        def __enter__(self):return self
+        def __exit__(self,*args):self.close();return False
+    class FakeOpener:
+        def open(self,request,timeout=0):return FakeResponse(source)
+    monkeypatch.setattr(main,'build_opener',lambda *a,**k:FakeOpener())
+    monkeypatch.setattr(main.socket,'getaddrinfo',lambda *a,**k:[(2,1,6,'',('93.184.216.34',443))])
+
+    imported=gm.post('/api/v61/foundry/assets/import',json={'url':'https://images.example.test/art.jpg','kind':'art'})
+    assert imported.status_code==200
+    body=imported.json();assert body['url'].startswith('/uploads/foundry/') and body['url'].endswith('.webp')
+    assert body['width']<=1600 and body['height']<=1600 and body['bytes']<len(source)
+    local=gm.get(body['url']);assert local.status_code==200 and local.headers['content-type'].startswith('image/webp')

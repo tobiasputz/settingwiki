@@ -36,8 +36,8 @@ async function queueFoundryAction(body,button){
   if(button){button.disabled=true;button.dataset.busy='1'}
   try{
     await send(`/api/v61/characters/${single.id}/foundry/action`,'POST',body);
-    toast('Sent to Foundry. The bridge will apply it on the next sync.');
-    setTimeout(()=>location.reload(),900);
+    toast('Sent to Foundry. The bridge is checking the queue now.');
+    setTimeout(()=>location.reload(),3600);
   }catch(err){toast(err.message||'Could not reach Foundry.',true)}
   finally{if(button){button.disabled=false;delete button.dataset.busy}}
 }

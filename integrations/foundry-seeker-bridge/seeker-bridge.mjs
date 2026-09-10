@@ -1,8 +1,18 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.3.0";
+const BRIDGE_VERSION = "1.3.1";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
+
+function seekerSlugify(value) {
+  const raw = String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return raw.replace(/[’']/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 128) || "seeker-entry";
+}
+function seekerEscapeHTML(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch] || ch));
+}
 let pushTimer = null;
 let intervalId = null;
+let commandIntervalId = null;
+let commandPollActive = false;
 let bridgeStatus = "";
 let lastBridgeNotice = 0;
 
@@ -240,12 +250,17 @@ function ackEndpoint(rawEndpoint) {
   u.pathname = `${u.pathname.replace(/\/+$/, "")}/ack`;
   return u.href;
 }
+function commandsEndpoint(rawEndpoint) {
+  const u = new URL(normalizedEndpoint(rawEndpoint));
+  u.pathname = `${u.pathname.replace(/\/+$/, "")}/commands`;
+  return u.href;
+}
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 function htmlDescription(summary, detail) {
   const parts = [String(summary || "").trim(), String(detail || "").trim()].filter(Boolean);
-  return parts.map(chunk => `<p>${foundry.utils.escapeHTML(chunk).replace(/\n/g, "<br>")}</p>`).join("");
+  return parts.map(chunk => `<p>${seekerEscapeHTML(chunk).replace(/\n/g, "<br>")}</p>`).join("");
 }
 function slugList(input) {
   return String(input || "").split(",").map(x => x.trim()).filter(Boolean);
@@ -260,7 +275,7 @@ function preparedAbilityHtml(data) {
     const actions = String(a?.actions || "");
     const glyph = actions === "reaction" ? "↺" : actions === "free" ? "◇" : actions === "1" ? "◆" : actions === "2" ? "◆◆" : actions === "3" ? "◆◆◆" : "";
     const traits = String(a?.traits || "").trim();
-    return `<p><strong>${foundry.utils.escapeHTML(String(a?.name || "Ability"))}${glyph ? ` ${glyph}` : ""}</strong>${traits ? ` <em>(${foundry.utils.escapeHTML(traits)})</em>` : ""}<br>${foundry.utils.escapeHTML(String(a?.description || "")).replace(/\n/g,"<br>")}</p>`;
+    return `<p><strong>${seekerEscapeHTML(String(a?.name || "Ability"))}${glyph ? ` ${glyph}` : ""}</strong>${traits ? ` <em>(${seekerEscapeHTML(traits)})</em>` : ""}<br>${seekerEscapeHTML(String(a?.description || "")).replace(/\n/g,"<br>")}</p>`;
   }).join("");
 }
 function preparedAttackHtml(data) {
@@ -270,20 +285,20 @@ function preparedAttackHtml(data) {
     const bonus = Number(a?.bonus);
     const bonusText = Number.isFinite(bonus) ? `${bonus >= 0 ? "+" : ""}${bonus}` : "";
     const traits = String(a?.traits || "").trim();
-    return `<p><strong>${type}</strong> ${foundry.utils.escapeHTML(String(a?.name || "Strike"))} ${bonusText}${traits ? ` (${foundry.utils.escapeHTML(traits)})` : ""}, <strong>Damage</strong> ${foundry.utils.escapeHTML(String(a?.damage || "—"))}</p>`;
+    return `<p><strong>${type}</strong> ${seekerEscapeHTML(String(a?.name || "Strike"))} ${bonusText}${traits ? ` (${seekerEscapeHTML(traits)})` : ""}, <strong>Damage</strong> ${seekerEscapeHTML(String(a?.damage || "—"))}</p>`;
   }).join("");
 }
 function preparedDetailsHtml(payload) {
   const data = payload?.data || {};
   const rows = [];
-  const add = (label, value) => { const raw = String(value || "").trim(); if (raw) rows.push(`<p><strong>${label}</strong> ${foundry.utils.escapeHTML(raw)}</p>`); };
+  const add = (label, value) => { const raw = String(value || "").trim(); if (raw) rows.push(`<p><strong>${label}</strong> ${seekerEscapeHTML(raw)}</p>`); };
   add("Source", payload?.subtitle);
   add("Price", data.price); add("Bulk", data.bulk); add("Usage", data.usage);
   add("Prerequisites", data.prerequisites); add("Frequency", data.frequency || data.activation_frequency || data.homebrew_frequency);
   add("Trigger", data.trigger || data.activation_trigger || data.homebrew_trigger); add("Requirements", data.requirements || data.activation_requirements);
   add("Senses", data.senses); add("Languages", data.languages); add("Skills", data.skills);
   add("Immunities", data.immunities); add("Weaknesses", data.weaknesses); add("Resistances", data.resistances);
-  if (data.spellcasting) rows.push(`<p><strong>Spellcasting</strong><br>${foundry.utils.escapeHTML(String(data.spellcasting)).replace(/\n/g,"<br>")}</p>`);
+  if (data.spellcasting) rows.push(`<p><strong>Spellcasting</strong><br>${seekerEscapeHTML(String(data.spellcasting)).replace(/\n/g,"<br>")}</p>`);
   return rows.join("") + preparedAttackHtml(data) + preparedAbilityHtml(data);
 }
 function absoluteSeekerAsset(raw, endpoint = "") {
@@ -292,19 +307,92 @@ function absoluteSeekerAsset(raw, endpoint = "") {
   if (/^(?:https?:|data:|icons\/|systems\/|modules\/)/i.test(value)) return value;
   try { return new URL(value, normalizedEndpoint(endpoint)).href; } catch { return value; }
 }
+function parsedCoins(raw) {
+  const out = {};
+  const text = String(raw || "").toLowerCase();
+  for (const match of text.matchAll(/(\d+(?:\.\d+)?)\s*(pp|gp|sp|cp)\b/g)) {
+    const amount = Number(match[1]);
+    if (Number.isFinite(amount) && amount >= 0) out[match[2]] = (out[match[2]] || 0) + amount;
+  }
+  return out;
+}
+function parsedBulk(raw) {
+  const value = String(raw || "").trim().toUpperCase();
+  if (!value || value === "-" || value === "—") return 0;
+  if (value === "L") return 1;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 10) : 0;
+}
+function validWeaponRange(raw) {
+  const value = Math.trunc(numericOr(raw, 0));
+  const allowed = new Set([10,15,20,30,40,50,60,70,80,90,100,110,120,140,150,180,200,240,300]);
+  return allowed.has(value) ? value : null;
+}
 function buildPreparedItem(payload, endpoint = "") {
   const data = payload?.data || {};
   const kind = String(payload?.prepared_kind || "item").toLowerCase();
   const type = kind === "feat" ? "feat" : kind === "homebrew" ? (String(data.homebrew_document || data.item_type || "equipment") || "equipment") : (String(data.item_type || "equipment") || "equipment");
   const description = htmlDescription(payload?.summary, data.description) + preparedDetailsHtml(payload);
+  const traitChoices = type === "weapon" ? globalThis.CONFIG?.PF2E?.weaponTraits
+    : type === "feat" ? globalThis.CONFIG?.PF2E?.featTraits
+    : type === "action" ? globalThis.CONFIG?.PF2E?.actionTraits
+    : globalThis.CONFIG?.PF2E?.equipmentTraits;
   const system = {
     description: { value: description },
     level: { value: numericOr(data.level, 0) },
     quantity: Math.max(0, numericOr(data.quantity, 1)),
-    traits: { value: slugList(data.traits), rarity: String(data.rarity || "common").toLowerCase() || "common" },
-    slug: foundry.utils.slugify(String(payload?.title || "prepared-item")),
+    traits: { value: validTraitList(data.traits, traitChoices), rarity: String(data.rarity || "common").toLowerCase() || "common" },
+    slug: seekerSlugify(String(payload?.title || "prepared-item")),
     source: { value: "Seeker" },
   };
+  const physicalTypes = new Set(["weapon","armor","shield","equipment","consumable","backpack","treasure","kit"]);
+  if (physicalTypes.has(type)) {
+    const hands = Math.max(0, Math.min(2, Math.trunc(numericOr(data.hands, 0))));
+    system.price = { value: parsedCoins(data.price), per: 1 };
+    system.bulk = { value: parsedBulk(data.bulk) };
+    system.hp = { value: 0, max: 0 };
+    system.hardness = 0;
+    system.equipped = { carryType: "worn", handsHeld: hands, invested: null };
+    system.identification = { status: "identified", unidentified: null };
+    system.containerId = null;
+    system.material = { type: null, grade: null };
+    system.size = "med";
+  }
+  if (type === "weapon") {
+    const dice = Math.max(0, Math.min(8, Math.trunc(numericOr(data.weapon_damage_dice, 1))));
+    const die = ["d4","d6","d8","d10","d12"].includes(String(data.weapon_damage_die || "").toLowerCase()) ? String(data.weapon_damage_die).toLowerCase() : "d6";
+    const damageType = validChoice(data.weapon_damage_type, globalThis.CONFIG?.PF2E?.damageTypes, "slashing");
+    const group = choiceSlug(data.weapon_group, globalThis.CONFIG?.PF2E?.weaponGroups) || null;
+    const category = validChoice(data.weapon_category, globalThis.CONFIG?.PF2E?.weaponCategories, "simple");
+    const allowedUsage = new Set(["worngloves","held-in-one-hand","held-in-one-plus-hands","held-in-two-hands"]);
+    const usage = allowedUsage.has(String(data.weapon_usage || "")) ? String(data.weapon_usage) : (String(data.hands) === "2" ? "held-in-two-hands" : "held-in-one-hand");
+    const baseSlug = String(data.weapon_base || "").trim() ? seekerSlugify(data.weapon_base) : "";
+    const baseChoices = globalThis.CONFIG?.PF2E?.baseWeaponTypes;
+    const baseItem = baseSlug && baseChoices && Object.prototype.hasOwnProperty.call(baseChoices, baseSlug) ? baseSlug : null;
+    const range = validWeaponRange(data.weapon_range);
+    const reloadCandidate = String(data.weapon_reload || "").trim();
+    const reloadRaw = new Set(["-","0","1","2","3","10"]).has(reloadCandidate) ? reloadCandidate : "";
+    system.category = category;
+    system.group = group;
+    system.baseItem = baseItem;
+    system.bonus = { value: Math.trunc(numericOr(data.weapon_bonus, 0)) };
+    system.damage = {
+      dice,
+      die: dice > 0 ? die : null,
+      damageType,
+      modifier: Math.trunc(numericOr(data.weapon_damage_modifier, 0)),
+      persistent: null,
+    };
+    system.splashDamage = { value: 0 };
+    system.range = range;
+    system.reload = { value: reloadRaw || null };
+    system.usage = { value: usage };
+    system.runes = {
+      potency: Math.max(0, Math.min(4, Math.trunc(numericOr(data.weapon_potency, 0)))),
+      striking: Math.max(0, Math.min(4, Math.trunc(numericOr(data.weapon_striking, 0)))),
+      property: [],
+    };
+  }
   if (type === "feat" || type === "action") {
     const action = String(data.action_cost || data.homebrew_actions || "");
     system.actionType = { value: action === "reaction" ? "reaction" : action === "free" ? "free" : action ? "action" : "passive" };
@@ -326,7 +414,7 @@ function tokenGridSize(size) {
 function choiceSlug(raw, choices) {
   const value = String(raw || "").trim();
   if (!value) return "";
-  const direct = foundry.utils.slugify(value);
+  const direct = seekerSlugify(value);
   if (!choices || typeof choices !== "object") return direct;
   if (Object.prototype.hasOwnProperty.call(choices, direct)) return direct;
   const lowered = value.toLowerCase();
@@ -351,7 +439,7 @@ function parsedNpcSkills(raw) {
   for (const row of rows) {
     const match = row.match(/^(.+?)\s*([+-]\s*\d+)(?:\s*\((.+)\))?$/);
     if (!match) continue;
-    const slug = foundry.utils.slugify(match[1]);
+    const slug = seekerSlugify(match[1]);
     const base = Number(match[2].replace(/\s+/g, ""));
     if (!slug || !Number.isFinite(base)) continue;
     result[slug] = { base, note: String(match[3] || "") };
@@ -452,7 +540,7 @@ function validChoice(value, choices, fallback = "") {
 }
 function validTraitList(input, choices) {
   return slugList(input)
-    .map(t => foundry.utils.slugify(String(t || "")))
+    .map(t => seekerSlugify(String(t || "")))
     .filter(Boolean)
     .filter(t => !choices || typeof choices !== "object" || Object.prototype.hasOwnProperty.call(choices, t));
 }
@@ -485,7 +573,7 @@ function buildNpcAttack(attack = {}) {
         otherTags: [],
       },
       rules: [],
-      slug: foundry.utils.slugify(String(attack.name || "strike")),
+      slug: seekerSlugify(String(attack.name || "strike")),
       action: "strike",
       area: null,
       bonus: { value: Math.trunc(numericOr(attack.bonus, 0)) },
@@ -518,7 +606,7 @@ function buildNpcAbility(ability = {}) {
         otherTags: [],
       },
       rules: [],
-      slug: foundry.utils.slugify(String(ability.name || "special-ability")),
+      slug: seekerSlugify(String(ability.name || "special-ability")),
       actionType: { value: action.type },
       actions: { value: action.actions },
       category,
@@ -547,7 +635,7 @@ function buildSpellcastingEntry(data = {}) {
       description: { value: htmlDescription("", data.spellcasting) },
       traits: { otherTags: [] },
       rules: [],
-      slug: foundry.utils.slugify(`${tradition}-${mode}-spells`),
+      slug: seekerSlugify(`${tradition}-${mode}-spells`),
       ability: { value: "cha" },
       spelldc: { value: Math.trunc(numericOr(data.spell_attack, 0)), dc: Math.max(0, Math.trunc(numericOr(data.spell_dc, 10))) },
       tradition: { value: tradition },
@@ -592,7 +680,7 @@ function buildHomebrewSpell(spell = {}, entryId = "", data = {}) {
       description: { value: htmlDescription("", spell.description) },
       traits: { value: traits, rarity: "common", traditions: [tradition] },
       rules: [],
-      slug: foundry.utils.slugify(String(spell.name || "homebrew-spell")),
+      slug: seekerSlugify(String(spell.name || "homebrew-spell")),
       level: { value: rank },
       requirements: "",
       target: { value: String(spell.target || "") },
@@ -785,6 +873,26 @@ async function processCommands(endpoint, commands = []) {
   queuePush(200);
 }
 
+async function pollCommands() {
+  if (commandPollActive || !game.user?.isGM || !setting("enabled") || document.visibilityState !== "visible") return;
+  const endpoint = normalizedEndpoint(String(setting("endpoint") || "").trim());
+  if (!endpoint) return;
+  commandPollActive = true;
+  try {
+    const response = await fetch(commandsEndpoint(endpoint), {
+      method: "POST", mode: "cors", credentials: "omit", cache: "no-store",
+      headers: {"Content-Type": "application/json"}
+    });
+    if (!response.ok) return;
+    const body = await response.json().catch(() => ({}));
+    await processCommands(endpoint, body?.commands || []);
+  } catch (error) {
+    console.debug(`[${MODULE_ID}] Lightweight command poll failed`, error);
+  } finally {
+    commandPollActive = false;
+  }
+}
+
 async function sendState() {
   if (!game.user?.isGM || !setting("enabled")) return;
   const configuredEndpoint = String(setting("endpoint") || "").trim();
@@ -891,6 +999,13 @@ function setupInterval() {
   }, seconds * 1000);
 }
 
+function setupCommandInterval() {
+  if (commandIntervalId) clearInterval(commandIntervalId);
+  // Keep mechanical snapshots inexpensive, but make Seeker → Foundry actions feel
+  // immediate. This endpoint carries no actor sheet payload unless work exists.
+  commandIntervalId = setInterval(pollCommands, 3000);
+}
+
 async function openDeepLinkedActor() {
   if (!game.user) return;
   const u = new URL(window.location.href);
@@ -911,6 +1026,7 @@ Hooks.once("ready", () => {
   openDeepLinkedActor();
   if (!game.user?.isGM) return;
   setupInterval();
+  setupCommandInterval();
   queuePush(250);
   Hooks.on("canvasReady", () => queuePush());
   Hooks.on("updateScene", () => queuePush());
@@ -924,6 +1040,6 @@ Hooks.once("ready", () => {
   Hooks.on("updateCombat", () => queuePush(350));
   Hooks.on("deleteCombat", () => queuePush());
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") queuePush(100);
+    if (document.visibilityState === "visible") { pollCommands(); queuePush(100); }
   });
 });
