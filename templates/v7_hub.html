@@ -124,7 +124,7 @@
 
   <section class="v7-workspace" data-v7-pane="logic">
     <header class="v7-section-head"><div><span class="eyebrow">WORLD STATE DEPENDENCIES</span><h2>Catch contradictions before the players do.</h2><p>Rules can watch an entity state and warn when session prep or another dependency conflicts with it. Seeker also automatically checks inactive/dead entities referenced by upcoming prep.</p></div><button class="v7-button" data-v7-new-dependency>＋ New rule</button></header>
-    <div class="v7-dashboard-grid"><section class="v7-panel v7-panel-large"><header class="v7-panel-head"><h2>Current warnings</h2></header><div id="v7LogicWarnings" class="v7-stack"></div></section><section class="v7-panel"><header class="v7-panel-head"><h2>Relationship evolution</h2></header><p class="v7-muted">Open any entity to record relationship states over time. V7 preserves each transition by session instead of replacing the previous state.</p></section></div>
+    <div class="v7-dashboard-grid"><section class="v7-panel v7-panel-large"><header class="v7-panel-head"><h2>Current warnings</h2></header><div id="v7LogicWarnings" class="v7-stack"></div></section><section class="v7-panel"><header class="v7-panel-head"><h2>Relationship evolution</h2></header><p class="v7-muted">Open any entity to record relationship states over time. Seeker preserves each transition by session instead of replacing the previous state.</p></section></div>
   </section>
 
   <section class="v7-workspace" data-v7-pane="assets">
@@ -134,7 +134,7 @@
   </section>
 
   <section class="v7-workspace" data-v7-pane="access">
-    <header class="v7-section-head"><div><span class="eyebrow">ACCESS MATRIX</span><h2>Roles stay simple. Capabilities stay precise.</h2><p>Owner, co-GM, player and spectator are useful defaults. V7 lets you tune what each role can actually do without sharing administrative access.</p></div></header>
+    <header class="v7-section-head"><div><span class="eyebrow">ACCESS MATRIX</span><h2>Roles stay simple. Capabilities stay precise.</h2><p>Owner, co-GM, player and spectator are useful defaults. Seeker lets you tune what each role can actually do without sharing administrative access.</p></div></header>
     <div id="v7PermissionMatrix" class="v7-permission-matrix"></div>
     <section class="v7-panel"><header class="v7-panel-head"><div><span class="eyebrow">PER-PERSON OVERRIDES</span><h2>Exceptions without new roles</h2></div></header><p class="v7-muted">Leave a capability inherited for normal role behavior, or explicitly allow/deny it for one invitation.</p><div id="v7MemberPermissions" class="v7-member-permissions"></div></section>
     <section class="v7-panel"><header class="v7-panel-head"><h2>Integration capabilities</h2></header><div id="v7IntegrationGrid" class="v7-integration-grid"></div></section>
@@ -145,5 +145,5 @@
 </main>
 <script id="v7State" type="application/json">{{ v7|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7030">{% endblock %}
-{% block scripts %}<script src="/static/v7.js?v=7030"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7040">{% endblock %}
+{% block scripts %}<script src="/static/v7.js?v=7040"></script>{% endblock %}

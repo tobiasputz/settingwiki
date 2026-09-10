@@ -1,3 +1,16 @@
+# Seeker 7.0.4 — Codex & Relay
+
+- Adds full in-place **Monster Codex editing** for monster/NPC names, descriptions, visibility and structured PF2e mechanics, plus a safe **Remove from Codex** action that preserves the underlying Workshop/Creature Vault source.
+- Sanitizes malformed Archives of Nethys summaries so AoN navigation/menu chrome can never become a creature description; existing imported entries are cleaned at presentation time as well as future imports.
+- Reworks Discord mention delivery to send explicit `allowed_mentions`, use webhook `wait=true`, and inspect Discord's returned Message object so Seeker distinguishes a posted `@everyone`/role string from a notification Discord actually activated.
+- Replaces ambiguous Foundry queue feedback with persistent delivery states: **Waiting for Foundry → Delivered → Applying → Applied / Failed**, including attempt counts, concrete errors, automatic stale-delivery retries and GM retry controls.
+- Foundry Bridge **1.7.0** polls the lightweight command queue even when the Foundry tab is in the background, resolves actors by ID/UUID/name fallback, verifies resource and item-quantity writes by reading them back, and forces a fresh state sync after command execution.
+- Actor item grants now use Foundry's actor embedded-document API (`createEmbeddedDocuments`) and verify the created item is present before acknowledging success. Command IDs are stored on granted items so a retry cannot duplicate an already-delivered item.
+- Character and phone Table App controls now follow the actual Foundry command result instead of blindly reloading after a fixed delay.
+- Command-start telemetry is best-effort: a transient status-ack failure can no longer prevent the actual Foundry write from executing.
+- Visible product naming uses **Seeker / Living Table** rather than presenting the feature family as “V7”.
+- Static/PWA cache generation moves to **7040**.
+
 # Seeker 7.0.3 — Layered Knowledge & Party Deductions
 
 - Adds three Recall Knowledge disclosure fidelities: **Exact**, **Vague**, and **Comparative**. The GM can reveal a qualitative weakness or relative save ranking without exposing the stored number.

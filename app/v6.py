@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -83,6 +84,10 @@ CREATE TABLE IF NOT EXISTS foundry_command_queue (
     updated_at REAL NOT NULL,
     dispatched_at REAL,
     completed_at REAL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at REAL,
+    started_at REAL,
+    last_error TEXT NOT NULL DEFAULT '',
     FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_foundry_command_campaign_status ON foundry_command_queue(campaign_id,status,created_at,id);
@@ -216,6 +221,15 @@ def init_v6_db(settings: Settings) -> None:
             conn.execute("ALTER TABLE campaign_integrations ADD COLUMN discord_mention TEXT NOT NULL DEFAULT ''")
         if cols and 'discord_auto_session_confirmed' not in cols:
             conn.execute("ALTER TABLE campaign_integrations ADD COLUMN discord_auto_session_confirmed INTEGER NOT NULL DEFAULT 0")
+        command_cols={str(r[1]) for r in conn.execute("PRAGMA table_info(foundry_command_queue)").fetchall()}
+        if command_cols and 'attempt_count' not in command_cols:
+            conn.execute("ALTER TABLE foundry_command_queue ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0")
+        if command_cols and 'last_attempt_at' not in command_cols:
+            conn.execute("ALTER TABLE foundry_command_queue ADD COLUMN last_attempt_at REAL")
+        if command_cols and 'started_at' not in command_cols:
+            conn.execute("ALTER TABLE foundry_command_queue ADD COLUMN started_at REAL")
+        if command_cols and 'last_error' not in command_cols:
+            conn.execute("ALTER TABLE foundry_command_queue ADD COLUMN last_error TEXT NOT NULL DEFAULT ''")
 
 
 def _json(raw: Any, default: Any):
@@ -269,7 +283,7 @@ def normalize_foundry_sheet(sheet: Any) -> dict:
 
 
 def _foundry_module_version() -> str:
-    return '1.6.0'
+    return '1.7.0'
 
 
 def _validate_foundry_token(settings: Settings, campaign_id: int, token: str) -> None:
@@ -338,30 +352,63 @@ def queue_foundry_command(settings: Settings, campaign_id: int, command_type: st
         raise ValueError('Unsupported Foundry action scope.')
     now=time.time()
     with connect(settings) as conn:
-        cur=conn.execute('''INSERT INTO foundry_command_queue(campaign_id,actor_id,scope,command_type,payload_json,requested_by,status,result_json,created_at,updated_at)
-                            VALUES(?,?,?,?,?,?,?,?,?,?)''',
+        cur=conn.execute('INSERT INTO foundry_command_queue(campaign_id,actor_id,scope,command_type,payload_json,requested_by,status,result_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
                          (int(campaign_id),str(actor_id or '')[:300],sc,ctype,json.dumps(payload or {},ensure_ascii=False),str(requested_by or '')[:160],'queued','{}',now,now))
         out=int(cur.lastrowid or 0)
-    return _command_row(_row(settings,'SELECT * FROM foundry_command_queue WHERE id=?',(out,)) or {})
+    return get_foundry_command(settings,campaign_id,out) or {}
+
+
+def _decorate_command(row: dict) -> dict:
+    item=_command_row(row)
+    status=str(item.get('status') or 'queued')
+    labels={'queued':'Waiting for Foundry','dispatched':'Delivered to bridge','executing':'Applying in Foundry','done':'Applied','failed':'Failed','cancelled':'Cancelled'}
+    item['delivery_label']=labels.get(status,status.replace('_',' ').title())
+    # Never offer a second copy of an action while the bridge may still be
+    # executing it. Stale in-flight commands are retried automatically; manual
+    # retry is reserved for an explicit terminal failure.
+    item['can_retry']=status == 'failed'
+    item['terminal']=status in {'done','failed','cancelled'}
+    return item
+
+
+def get_foundry_command(settings: Settings, campaign_id: int, command_id: int) -> dict | None:
+    row=_row(settings,'SELECT * FROM foundry_command_queue WHERE campaign_id=? AND id=?',(int(campaign_id),int(command_id)))
+    return _decorate_command(row) if row else None
 
 
 def claim_foundry_commands(settings: Settings, campaign_id: int, token: str, limit: int = 25) -> list[dict]:
     _validate_foundry_token(settings,campaign_id,token)
-    cid=int(campaign_id); now=time.time(); stale=now-90
+    cid=int(campaign_id); now=time.time(); dispatched_stale=now-30; executing_stale=now-180
     with connect(settings) as conn:
         conn.execute('BEGIN IMMEDIATE')
-        rows=[dict(r) for r in conn.execute('''SELECT * FROM foundry_command_queue
-                                              WHERE campaign_id=? AND (status='queued' OR (status='dispatched' AND dispatched_at<?))
-                                              ORDER BY created_at,id LIMIT ?''',(cid,stale,int(limit))).fetchall()]
+        stuck=[dict(r) for r in conn.execute("SELECT id FROM foundry_command_queue WHERE campaign_id=? AND attempt_count>=5 AND ((status='dispatched' AND COALESCE(last_attempt_at,dispatched_at,0)<?) OR (status='executing' AND COALESCE(started_at,last_attempt_at,0)<?))",(cid,dispatched_stale,executing_stale)).fetchall()]
+        for r in stuck:
+            msg='Foundry did not acknowledge this action after several delivery attempts. The action was kept and can be retried.'
+            conn.execute("UPDATE foundry_command_queue SET status='failed',last_error=?,result_json=?,updated_at=?,completed_at=? WHERE id=? AND campaign_id=?",(msg,json.dumps({'message':msg}),now,now,int(r['id']),cid))
+        rows=[dict(r) for r in conn.execute("SELECT * FROM foundry_command_queue WHERE campaign_id=? AND attempt_count<5 AND (status='queued' OR (status='dispatched' AND COALESCE(last_attempt_at,dispatched_at,0)<?) OR (status='executing' AND COALESCE(started_at,last_attempt_at,0)<?)) ORDER BY created_at,id LIMIT ?",(cid,dispatched_stale,executing_stale,int(limit))).fetchall()]
         if rows:
-            ids=[int(r['id']) for r in rows]
-            marks=','.join('?' for _ in ids)
-            conn.execute(f'''UPDATE foundry_command_queue SET status='dispatched',updated_at=?,dispatched_at=? WHERE id IN ({marks})''',(now,now,*ids))
+            ids=[int(r['id']) for r in rows];marks=','.join('?' for _ in ids)
+            conn.execute(f"UPDATE foundry_command_queue SET status='dispatched',attempt_count=COALESCE(attempt_count,0)+1,updated_at=?,dispatched_at=?,last_attempt_at=?,started_at=NULL,last_error='' WHERE id IN ({marks})",(now,now,now,*ids))
     fresh=[]
     for row in rows:
-        row['status']='dispatched'; row['updated_at']=now; row['dispatched_at']=now
-        fresh.append(_command_row(row))
+        row['status']='dispatched'; row['updated_at']=now; row['dispatched_at']=now; row['last_attempt_at']=now
+        row['attempt_count']=int(row.get('attempt_count') or 0)+1; row['started_at']=None;row['last_error']=''
+        fresh.append(_decorate_command(row))
     return fresh
+
+
+def start_foundry_commands(settings: Settings, campaign_id: int, token: str, command_ids: list[int]) -> dict:
+    _validate_foundry_token(settings,campaign_id,token)
+    ids=[]
+    for raw in command_ids or []:
+        try: ids.append(int(raw))
+        except Exception: continue
+    ids=list(dict.fromkeys(x for x in ids if x>0))[:50]
+    if not ids:return {'ok':True,'started':0}
+    now=time.time();marks=','.join('?' for _ in ids)
+    with connect(settings) as conn:
+        cur=conn.execute(f"UPDATE foundry_command_queue SET status='executing',started_at=?,updated_at=? WHERE campaign_id=? AND id IN ({marks}) AND status='dispatched'",(now,now,int(campaign_id),*ids))
+    return {'ok':True,'started':int(cur.rowcount or 0)}
 
 
 def complete_foundry_commands(settings: Settings, campaign_id: int, token: str, results: list[dict]) -> dict:
@@ -372,17 +419,28 @@ def complete_foundry_commands(settings: Settings, campaign_id: int, token: str, 
             try: cmd_id=int(item.get('id') or 0)
             except Exception: continue
             status='done' if str(item.get('status') or 'done').lower() in {'ok','done','skipped'} else 'failed'
-            result=json.dumps(item.get('result') if isinstance(item.get('result'),dict) else {'message':str(item.get('result') or '')},ensure_ascii=False)
-            cur=conn.execute('''UPDATE foundry_command_queue SET status=?,result_json=?,updated_at=?,completed_at=?
-                                WHERE id=? AND campaign_id=?''',(status,result,now,now,cmd_id,cid))
+            result_obj=item.get('result') if isinstance(item.get('result'),dict) else {'message':str(item.get('result') or '')}
+            result=json.dumps(result_obj,ensure_ascii=False)
+            last_error='' if status=='done' else str(result_obj.get('message') or 'Foundry rejected this action.')[:2000]
+            cur=conn.execute('UPDATE foundry_command_queue SET status=?,result_json=?,last_error=?,updated_at=?,completed_at=? WHERE id=? AND campaign_id=?',(status,result,last_error,now,now,cmd_id,cid))
             if cur.rowcount:
-                done += status=='done'
-                failed += status=='failed'
+                done += status=='done'; failed += status=='failed'
     return {'ok':True,'completed':done,'failed':failed}
 
 
+def retry_foundry_command(settings: Settings, campaign_id: int, command_id: int) -> dict:
+    cid=int(campaign_id);cmd=int(command_id);now=time.time()
+    with connect(settings) as conn:
+        row=conn.execute('SELECT * FROM foundry_command_queue WHERE campaign_id=? AND id=?',(cid,cmd)).fetchone()
+        if not row:raise ValueError('Foundry action not found.')
+        if str(row['status'])=='done':raise ValueError('This Foundry action has already been applied.')
+        conn.execute("UPDATE foundry_command_queue SET status='queued',result_json='{}',last_error='',attempt_count=0,updated_at=?,dispatched_at=NULL,last_attempt_at=NULL,started_at=NULL,completed_at=NULL WHERE campaign_id=? AND id=?",(now,cid,cmd))
+    return get_foundry_command(settings,cid,cmd) or {}
+
+
 def recent_foundry_commands(settings: Settings, campaign_id: int, limit: int = 24) -> list[dict]:
-    return [_command_row(r) for r in _rows(settings,'SELECT * FROM foundry_command_queue WHERE campaign_id=? ORDER BY created_at DESC,id DESC LIMIT ?',(int(campaign_id),int(limit)))]
+    rows=_rows(settings,'SELECT * FROM foundry_command_queue WHERE campaign_id=? ORDER BY created_at DESC,id DESC LIMIT ?',(int(campaign_id),int(limit)))
+    return [_decorate_command(r) for r in rows]
 
 
 def _row(settings: Settings, sql: str, params: tuple = ()) -> dict | None:
@@ -450,7 +508,11 @@ def save_integration_config(settings: Settings, campaign_id: int, payload: dict)
     current = integration_config(settings, cid, include_secret=True)
     webhook = str(payload.get('discord_webhook', current.get('discord_webhook') or '')).strip()[:3000]
     enabled = 1 if payload.get('discord_enabled', current.get('discord_enabled')) else 0
-    mention = str(payload.get('discord_mention', current.get('discord_mention') or '')).strip()[:250]
+    mention = _normalize_discord_mention(payload.get('discord_mention', current.get('discord_mention') or ''))[:250]
+    if mention.startswith('@') and mention.lower() not in {'@everyone','@here'}:
+        raise ValueError('Discord webhooks cannot resolve a role name such as @Players. Paste the role ID (or <@&ROLE_ID>) instead.')
+    if mention.startswith('<@&') and not re.fullmatch(r'<@&\d{2,24}>',mention):
+        raise ValueError('That Discord role mention is malformed. Paste the numeric role ID from Discord.')
     auto_session = 1 if payload.get('discord_auto_session_confirmed', current.get('discord_auto_session_confirmed')) else 0
     foundry = str(current.get('foundry_bridge_token') or secrets.token_urlsafe(24))
     calendar = str(current.get('calendar_token') or secrets.token_urlsafe(24))
@@ -483,6 +545,11 @@ def _normalize_discord_mention(value: Any) -> str:
         return '@everyone'
     if lowered in {'here','@here'}:
         return '@here'
+    # Raw Discord role IDs are unambiguous and convenient to paste. Plain role
+    # names cannot be resolved by an incoming webhook because the webhook has no
+    # guild role-directory API.
+    if re.fullmatch(r'\d{2,24}', raw):
+        return f'<@&{raw}>'
     return raw
 
 
@@ -512,17 +579,47 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     if not cfg.get('discord_enabled') or not cfg.get('discord_webhook'):
         raise ValueError('Discord webhook is not enabled for this campaign.')
     message=str(content or '')[:1900]
+    allowed=_discord_allowed_mentions(message)
     body = json.dumps({
         'content': message,
         'username': username[:80],
-        'allowed_mentions': _discord_allowed_mentions(message),
+        'allowed_mentions': allowed,
     }).encode('utf-8')
-    req = urllib.request.Request(str(cfg['discord_webhook']), data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.0.3'}, method='POST')
+    # wait=true returns the actual Discord Message object. That lets Seeker tell
+    # the difference between “message posted” and “Discord activated the ping”.
+    raw_url=str(cfg['discord_webhook'])
+    parts=urllib.parse.urlsplit(raw_url)
+    query=urllib.parse.parse_qsl(parts.query,keep_blank_values=True)
+    query=[(k,v) for k,v in query if k.lower()!='wait']+[('wait','true')]
+    webhook_url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,parts.path,urllib.parse.urlencode(query),parts.fragment))
+    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.0.4'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
-            return {'ok': 200 <= int(resp.status) < 300, 'status': int(resp.status)}
+            status=int(resp.status)
+            raw=b''
+            try: raw=resp.read()
+            except Exception: pass
+            created={}
+            if raw:
+                try: created=json.loads(raw.decode('utf-8'))
+                except Exception: created={}
+            requested_everyone=bool(re.search(r'(?<!\w)@(everyone|here)\b',message,re.I))
+            requested_roles=list(dict.fromkeys(re.findall(r'<@&(\d{2,24})>',message)))
+            requested_users=list(dict.fromkeys(re.findall(r'<@!?(\d{2,24})>',message)))
+            mention_everyone=bool(created.get('mention_everyone')) if isinstance(created,dict) else False
+            mention_roles=[str(x) for x in (created.get('mention_roles') or [])] if isinstance(created,dict) else []
+            mentioned_users=[str(x.get('id')) for x in (created.get('mentions') or []) if isinstance(x,dict) and x.get('id')] if isinstance(created,dict) else []
+            ping_ok=(not requested_everyone or mention_everyone) and all(r in mention_roles for r in requested_roles) and all(u in mentioned_users for u in requested_users)
+            warning=''
+            if (requested_everyone or requested_roles or requested_users) and created and not ping_ok:
+                warning='Discord posted the message but did not activate every requested mention. Check the channel/server “Mention @everyone, @here, and All Roles” permission; specific roles must be mentionable or addressed by role ID.'
+            return {'ok': 200 <= status < 300, 'status': status, 'ping_ok': ping_ok, 'warning': warning,
+                    'mention_everyone': mention_everyone, 'mention_roles': mention_roles, 'mentioned_users': mentioned_users}
     except urllib.error.HTTPError as exc:
-        raise ValueError(f'Discord rejected the webhook ({exc.code}).') from exc
+        detail=''
+        try: detail=exc.read().decode('utf-8','replace')[:500]
+        except Exception: pass
+        raise ValueError(f'Discord rejected the webhook ({exc.code}){": "+detail if detail else "."}') from exc
     except Exception as exc:
         raise ValueError(f'Could not reach Discord: {exc}') from exc
 

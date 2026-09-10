@@ -31,13 +31,33 @@ $$('[data-delete-character-image]').forEach(b=>b.onclick=async()=>{if(!confirm('
 $$('[data-foundry-tab]').forEach(b=>b.onclick=()=>{const key=b.dataset.foundryTab;$$('[data-foundry-tab]').forEach(x=>x.classList.toggle('active',x===b));$$('[data-foundry-pane]').forEach(x=>x.classList.toggle('active',x.dataset.foundryPane===key))});
 $('[data-foundry-refresh]')?.addEventListener('click',()=>location.reload());
 const foundryRoot=$('[data-foundry-character]');
+async function waitForFoundryCommand(id){
+  const deadline=Date.now()+18000; let last='';
+  while(Date.now()<deadline){
+    const row=await api(`/api/v6/foundry/commands/${encodeURIComponent(id)}`);
+    const status=String(row.status||'queued');
+    if(status!==last){
+      last=status;
+      const label=row.delivery_label||status;
+      toast(status==='queued'?`${label}…`:status==='dispatched'?`${label}…`:status==='executing'?`${label}…`:label,status==='failed');
+    }
+    if(status==='done')return row;
+    if(status==='failed'||status==='cancelled')throw Error(row.last_error||row.result?.message||'Foundry rejected the action.');
+    await new Promise(r=>setTimeout(r,700));
+  }
+  return null;
+}
 async function queueFoundryAction(body,button){
   if(!single?.id)return;
   if(button){button.disabled=true;button.dataset.busy='1'}
   try{
-    await send(`/api/v61/characters/${single.id}/foundry/action`,'POST',body);
-    toast('Sent to Foundry. The bridge is checking the queue now.');
-    setTimeout(()=>location.reload(),3600);
+    const queued=await send(`/api/v61/characters/${single.id}/foundry/action`,'POST',body);
+    const id=queued?.command?.id;
+    if(!id)throw Error('Seeker did not create a Foundry delivery record.');
+    toast('Queued · waiting for the Foundry GM bridge…');
+    const result=await waitForFoundryCommand(id);
+    if(result){toast(result.result?.message||'Applied in Foundry.');setTimeout(()=>location.reload(),350)}
+    else toast('Still queued. You can keep using Seeker; the action remains in the delivery queue.',true);
   }catch(err){toast(err.message||'Could not reach Foundry.',true)}
   finally{if(button){button.disabled=false;delete button.dataset.busy}}
 }

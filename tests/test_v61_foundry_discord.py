@@ -88,7 +88,7 @@ def test_v61_public_foundry_manifest_and_install_zip(tmp_path: Path, monkeypatch
     client=TestClient(main.app)
     manifest=client.get('/foundry/seeker-bridge/module.json')
     assert manifest.status_code==200
-    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.6.0'
+    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.7.0'
     assert data['manifest'].endswith('/foundry/seeker-bridge/module.json')
     assert data['download'].endswith('/foundry/seeker-bridge/seeker-bridge.zip')
     package=client.get('/foundry/seeker-bridge/seeker-bridge.zip')
@@ -168,7 +168,7 @@ def test_v61_scroll_contract_and_foundry_frontend_assets():
     assert 'data-foundry-manifest' in integrations and 'Automatically announce confirmed session dates' in integrations
     assert '/api/v61/characters/' in chars and 'data-foundry-tab' in chars
     assert 'data-notification-pref="spotlight"' not in base
-    assert 'seeker-static-v7030' in sw
+    assert 'seeker-static-v7040' in sw
 
 
 def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
@@ -192,7 +192,7 @@ def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
 def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
     root=Path(__file__).resolve().parents[1]
     bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.6.0"' in bridge
+    assert 'const BRIDGE_VERSION = "1.7.0"' in bridge
     assert 'function normalizedEndpoint' in bridge
     assert 'u.protocol === "http:" && !local' in bridge
     assert 'processCommands(endpoint, body?.commands || [])' in bridge
@@ -201,7 +201,7 @@ def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
     assert 'Could not serialize actor' in bridge
     assert 'foundry.utils.slugify' not in bridge
     assert 'function seekerSlugify' in bridge
-    assert 'setupCommandInterval' in bridge and '3000' in bridge
+    assert 'setupCommandInterval' in bridge and '2000' in bridge
 
 
 def test_v61_foundry_push_errors_keep_cors_headers(tmp_path: Path, monkeypatch):
@@ -233,7 +233,7 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200
     assert 'Homebrew Forge' in workshop.text and 'foundryWorkshopForm' in workshop.text
-    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=7030' in workshop.text
+    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=7040' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})
@@ -298,7 +298,7 @@ def test_v613_structured_pf2e_import_contract_and_token_support():
     assert '/api/v61/foundry/assets/import' in js and 'ensureEditableArt' in js
     assert 'weapon_damage_dice' in workshop and 'weapon_group' in workshop and 'weapon_reload' in workshop
     assert 'system.damage' in bridge and 'system.group' in bridge and 'system.runes' in bridge
-    assert 'commandsEndpoint' in bridge and 'queuePush(200)' in bridge
+    assert 'commandsEndpoint' in bridge and 'queuePush(120)' in bridge
     assert 'npcAttackPatch' in bridge and 'system.damageRolls' in bridge
     assert 'spellcastingPatch' in bridge and 'system.spelldc.value' in bridge and 'system.spelldc.dc' in bridge
     assert 'addSpellToEntry' in bridge and 'source_uuid' in js
@@ -374,3 +374,80 @@ def test_v614_remote_art_import_is_local_optimized_webp(tmp_path: Path, monkeypa
     body=imported.json();assert body['url'].startswith('/uploads/foundry/') and body['url'].endswith('.webp')
     assert body['width']<=1600 and body['height']<=1600 and body['bytes']<len(source)
     local=gm.get(body['url']);assert local.status_code==200 and local.headers['content-type'].startswith('image/webp')
+
+
+def test_v704_foundry_delivery_lifecycle_and_retry_state(tmp_path: Path):
+    from app.v6 import queue_foundry_command, get_foundry_command, start_foundry_commands, retry_foundry_command
+    s=setup(tmp_path);cid=default_campaign_id(s);cfg=integration_config(s,cid,include_secret=True);token=cfg['foundry_bridge_token']
+    cmd=queue_foundry_command(s,cid,'adjust_resource',{'resource':'hp','delta':-1,'actor_uuid':'Actor.abc123'},actor_id='abc123',requested_by='GM')
+    assert cmd['status']=='queued' and cmd['delivery_label']=='Waiting for Foundry' and cmd['attempt_count']==0
+    claimed=claim_foundry_commands(s,cid,token);assert len(claimed)==1
+    assert claimed[0]['status']=='dispatched' and claimed[0]['attempt_count']==1 and claimed[0]['delivery_label']=='Delivered to bridge'
+    assert start_foundry_commands(s,cid,token,[cmd['id']])['started']==1
+    applying=get_foundry_command(s,cid,cmd['id']);assert applying['status']=='executing' and applying['delivery_label']=='Applying in Foundry'
+    assert complete_foundry_commands(s,cid,token,[{'id':cmd['id'],'status':'failed','result':{'message':'PF2e rejected test write'}}])['failed']==1
+    failed=get_foundry_command(s,cid,cmd['id']);assert failed['can_retry'] and failed['last_error']=='PF2e rejected test write'
+    retried=retry_foundry_command(s,cid,cmd['id']);assert retried['status']=='queued' and retried['attempt_count']==0 and not retried['last_error']
+    claim_foundry_commands(s,cid,token);start_foundry_commands(s,cid,token,[cmd['id']])
+    complete_foundry_commands(s,cid,token,[{'id':cmd['id'],'status':'done','result':{'message':'HP applied','after':71}}])
+    done=get_foundry_command(s,cid,cmd['id']);assert done['status']=='done' and done['delivery_label']=='Applied' and done['result']['after']==71 and not done['can_retry']
+
+
+def test_v704_foundry_bridge_actor_item_and_resource_contract():
+    root=Path(__file__).resolve().parents[1]
+    bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
+    table=(root/'static/v7-player.js').read_text(encoding='utf-8')
+    chars=(root/'static/characters.js').read_text(encoding='utf-8')
+    assert 'actor.createEmbeddedDocuments("Item", [source], { render: true })' in bridge
+    assert 'Item.implementation.create(source, { parent: actor })' not in bridge
+    assert 'resolveCommandActor' in bridge and 'actor_uuid' in bridge
+    assert 'Foundry did not retain the requested' in bridge and 'Foundry did not retain the item' in bridge
+    assert 'Could not mark command ${id} as executing' in bridge
+    assert 'const result = await runFoundryCommand(command, endpoint);' in bridge
+    assert '/api/v6/foundry/commands/' in table and '/api/v6/foundry/commands/' in chars
+
+
+def test_v704_discord_wait_response_verifies_real_mentions(tmp_path: Path, monkeypatch):
+    import io
+    import app.v6 as v6
+    s=setup(tmp_path);cid=default_campaign_id(s)
+    save_integration_config(s,cid,{'discord_webhook':'https://discord.invalid/api/webhooks/1/token','discord_enabled':True,'discord_mention':'@everyone'})
+    captured={}
+    class FakeResponse(io.BytesIO):
+        status=200
+        def __init__(self,obj):super().__init__(json.dumps(obj).encode())
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+    def good_open(req,timeout=0):
+        captured['url']=req.full_url;captured['body']=json.loads(req.data.decode());return FakeResponse({'mention_everyone':True,'mention_roles':[],'mentions':[]})
+    monkeypatch.setattr(v6.urllib.request,'urlopen',good_open)
+    out=v6.discord_post(s,cid,'@everyone\nSession starts now')
+    assert out['ok'] and out['ping_ok'] and out['mention_everyone'] is True and 'wait=true' in captured['url']
+    assert captured['body']['allowed_mentions']['parse']==['everyone']
+    def denied_open(req,timeout=0):return FakeResponse({'mention_everyone':False,'mention_roles':[],'mentions':[]})
+    monkeypatch.setattr(v6.urllib.request,'urlopen',denied_open)
+    out=v6.discord_post(s,cid,'@everyone\nSession starts now')
+    assert out['ok'] and not out['ping_ok'] and 'did not activate' in out['warning']
+
+
+def test_v704_aon_chrome_sanitizer_rejects_navigation_dump():
+    from app.aon import sanitize_aon_summary
+    garbage='Home Actions/Activities Afflictions Ancestries Archetypes Backgrounds Classes Conditions Creatures Companions Familiars Equipment Feats Hazards Mythic Rules Setting Skills Spells/Rituals Traits Licenses Sources Contact Us Contributors Support the Archives Maximize Menu Archives of Nethys All Creatures Abilities | Monsters | NPCs Acolyte Of Pharasma This creature did not include a description. Elite | Normal |'
+    cleaned=sanitize_aon_summary(garbage,title='Acolyte Of Pharasma')
+    assert cleaned=='This creature did not include a description.'
+    assert 'Home Actions/Activities' not in cleaned and 'Archives of Nethys' not in cleaned
+
+
+def test_v704_monster_codex_inline_edit_and_remove_preserves_source(tmp_path: Path, monkeypatch):
+    import app.main as main
+    from app.v6 import save_foundry_prepared_content, list_foundry_prepared_content
+    s=setup(tmp_path);seed_wiki(s);monkeypatch.setattr(main,'settings',s);cid=default_campaign_id(s)
+    row=save_foundry_prepared_content(s,cid,{'kind':'monster','title':'Old Name','summary':'Old summary','payload':{'hp':20,'ac':17,'codex_publish':True,'codex_visibility':'full','attacks':[],'abilities':[],'spells':[]}})
+    gm=TestClient(main.app);gm.post('/admin/login',data={'password':'admin'})
+    page=gm.get('/bestiary');assert page.status_code==200 and 'Old Name' in page.text and 'Edit here' in page.text
+    edited=gm.put(f"/api/bestiary/{row['id']}",json={'title':'New Name','summary':'Edited','payload':{'hp':33,'ac':19,'codex_visibility':'field_notes'}})
+    assert edited.status_code==200 and edited.json()['title']=='New Name' and edited.json()['payload']['hp']==33
+    removed=gm.delete(f"/api/bestiary/{row['id']}");assert removed.status_code==200 and removed.json()['source_preserved'] is True
+    source=next(x for x in list_foundry_prepared_content(s,cid) if int(x['id'])==int(row['id']))
+    assert source['title']=='New Name' and source['payload']['hp']==33 and source['payload']['codex_publish'] is False
+    assert 'New Name' not in gm.get('/bestiary').text

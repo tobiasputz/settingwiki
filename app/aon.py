@@ -17,7 +17,7 @@ AON_QUERY_KEYS = {"id", "elite", "weak", "pwl", "noredirect", "redirected"}
 AON_MAX_LINKS = 25
 AON_MAX_BYTES = 2_500_000
 AON_TIMEOUT = httpx.Timeout(12.0, connect=5.0)
-AON_USER_AGENT = "Seeker/7.0.3 (+Archives-of-Nethys creature importer; private campaign tool)"
+AON_USER_AGENT = "Seeker/7.0.4 (+Archives-of-Nethys creature importer; private campaign tool)"
 
 _ACTION_WORDS = {
     "one-action": "1",
@@ -111,6 +111,44 @@ def _clean_text(value: str) -> str:
     return text
 
 
+_AON_CHROME_MARKERS = (
+    "Home Actions/Activities Afflictions Ancestries Archetypes",
+    "Archives of Nethys Paizo & Archives of Nethys",
+    "Maximize Menu Archives of Nethys",
+    "Character Creation + Ancestries Archetypes Backgrounds Classes",
+    "All Creatures Abilities | Monsters | NPCs",
+    "Licenses Sources Contact Us Contributors Support the Archives",
+)
+
+
+def sanitize_aon_summary(value: str, *, title: str = "") -> str:
+    """Return only creature prose, never Archives of Nethys navigation chrome.
+
+    AoN has shipped several HTML layouts over time and some pages expose a meta
+    description containing the site's entire responsive navigation.  Treating
+    that as creature lore is both ugly and potentially huge.  This helper is
+    intentionally conservative: when a value looks like site chrome, retain the
+    useful no-description sentinel if present and otherwise discard it.
+    """
+    text = _clean_text(value)
+    if not text:
+        return ""
+    no_description = re.search(r"This creature did not include a description\.?", text, re.I)
+    chrome_hits = sum(marker.lower() in text.lower() for marker in _AON_CHROME_MARKERS)
+    # A single very distinctive marker is enough; long strings with several
+    # weaker markers are definitely navigation rather than authored creature text.
+    if chrome_hits >= 1 or (len(text) > 700 and "archives of nethys" in text.lower() and "support the archives" in text.lower()):
+        return _clean_text(no_description.group(0)) if no_description else ""
+    # Remove common adjustment/navigation tails that can leak into an otherwise
+    # valid short excerpt.
+    text = re.sub(r"\s+(?:Elite\s*\|\s*Normal(?:\s*\|\s*Weak)?|Weak\s*\|\s*Normal)\s*\|?\s*$", "", text, flags=re.I)
+    if title:
+        # Some metadata starts by repeating the page title; one repetition is
+        # harmless but adds no information.
+        text = re.sub(rf"^{re.escape(_clean_text(title))}\s*[-:|]?\s*", "", text, count=1, flags=re.I)
+    return _clean_text(text)[:1800]
+
+
 def _action_marker(tag) -> str:
     hay = " ".join(
         str(x or "") for x in [tag.get("alt"), tag.get("title"), " ".join(tag.get("class") or [])]
@@ -168,7 +206,7 @@ def _meta_description(soup: BeautifulSoup) -> str:
         return ""
     raw = str(tag.get("content") or "")
     # AoN sometimes stores HTML inside description metadata.
-    return _clean_text(BeautifulSoup(raw, "html.parser").get_text(" ", strip=True))[:1800]
+    return sanitize_aon_summary(BeautifulSoup(raw, "html.parser").get_text(" ", strip=True), title=_page_title(soup))
 
 
 def _split_outside_parens(text: str, delimiter: str = ",") -> list[str]:
@@ -520,11 +558,13 @@ def parse_aon_text(text: str, *, title: str = "", summary: str = "", url: str = 
         spells.extend(cast.get("spells") or [])
 
     # If AoN supplied no meta description, use a short pre-statblock excerpt while avoiding Recall Knowledge/navigation text.
+    summary = sanitize_aon_summary(summary, title=title)
     if not summary:
         prefix = text[:header.start()]
         prefix = re.sub(r".*?\b(?:Elite\s*\|\s*Normal\s*\|\s*Weak|Proficiency without Level)\b", "", prefix, flags=re.I)
-        summary = _clean_text(prefix)[-1200:]
-    summary = _clean_text(summary)[:1800]
+        summary = sanitize_aon_summary(_clean_text(prefix)[-1200:], title=title)
+    if not summary:
+        summary = "This creature did not include a description."
 
     payload: dict[str, Any] = {
         "level": level,
@@ -555,7 +595,7 @@ def parse_aon_text(text: str, *, title: str = "", summary: str = "", url: str = 
         "aon_source": source,
         "aon_source_page": source_page,
         "aon_imported_at": time.time(),
-        "aon_parser_version": 2,
+        "aon_parser_version": 3,
     }
     return {
         "title": name or title,

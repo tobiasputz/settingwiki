@@ -179,7 +179,8 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             advance_front(settings,int(payload['front_id']),int(payload.get('delta') or 1),str(payload.get('label') or change.get('summary') or 'Front advanced'),str(payload.get('body') or ''),int(change['session_id']),bool(change.get('visible_to_players')))
         return review_session_change(settings,cid,int(change['id']),'applied',actor_label=requester_label(request))
 
-    @app.get('/gm/v7',response_class=HTMLResponse)
+    @app.get('/gm/living-table',response_class=HTMLResponse)
+    @app.get('/gm/v7',response_class=HTMLResponse,include_in_schema=False)
     def v7_hub(request:Request):
         state=_workspace_state(request)
         return templates.TemplateResponse('v7_hub.html',{'request':request,'wiki':visible_wiki(request),'maps':state['maps'],'v7':state})
@@ -510,7 +511,7 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
                 if not entity and item.get('prepared_content_id'):
                     entity=next((e for e in list_entities(settings,cid) if e.get('source_type')=='foundry_prepared' and str(e.get('source_key'))==str(item['prepared_content_id'])),None)
                 if entity:
-                    p=_entity_foundry_payload(entity);p['quantity']=q;p['entity_id']=int(entity['id'])
+                    p=_entity_foundry_payload(entity);p['quantity']=q;p['entity_id']=int(entity['id']);p['actor_uuid']=str(link.get('actor_uuid') or '')
                     cmd=queue_foundry_command(settings,cid,'grant_prepared_content',p,actor_id=str(link['actor_id']),scope='actor',requested_by=requester_label(request))
                     with connect(settings) as conn:
                         conn.execute('UPDATE v7_loot_claims SET foundry_command_id=?,updated_at=? WHERE id=?',(int(cmd['id']),time.time(),int(claim['id'])))
@@ -624,7 +625,7 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             queue={r['status']:r['n'] for r in conn.execute('SELECT status,COUNT(*) AS n FROM foundry_command_queue WHERE campaign_id=? GROUP BY status',(cid,)).fetchall()}
             pages=int(conn.execute('SELECT COUNT(*) AS n FROM v7_entities WHERE campaign_id=?',(cid,)).fetchone()['n'])
         backups=settings.data_dir/'migration-backups'
-        return {'ok':True,'version':'7.0.3','campaign_id':cid,'entities':pages,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
+        return {'ok':True,'version':'7.0.4','campaign_id':cid,'entities':pages,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
 
     @app.get('/entity/{entity_id}',response_class=HTMLResponse)
     def v7_entity_page(request:Request,entity_id:int):

@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.6.0";
+const BRIDGE_VERSION = "1.7.0";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 
 function seekerSlugify(value) {
@@ -253,6 +253,11 @@ function ackEndpoint(rawEndpoint) {
 function commandsEndpoint(rawEndpoint) {
   const u = new URL(normalizedEndpoint(rawEndpoint));
   u.pathname = `${u.pathname.replace(/\/+$/, "")}/commands`;
+  return u.href;
+}
+function commandStartEndpoint(rawEndpoint) {
+  const u = new URL(normalizedEndpoint(rawEndpoint));
+  u.pathname = `${u.pathname.replace(/\/+$/, "")}/commands/start`;
   return u.href;
 }
 function clamp(value, min, max) {
@@ -1087,13 +1092,33 @@ async function importCreatureBundle(payload, endpoint = "") {
   const failed = items.filter(x => x.status === "failed").length;
   return { message: `${done} creature${done === 1 ? "" : "s"} prepared in Foundry folder “${folderName}”${failed ? `; ${failed} failed` : ""}.`, folder_id: folder?.id || "", items };
 }
+async function resolveCommandActor(command, payload = {}) {
+  const actorId = String(command?.actor_id || "").trim();
+  if (actorId) {
+    const byId = game.actors?.get(actorId);
+    if (byId) return byId;
+  }
+  const actorUuid = String(payload?.actor_uuid || "").trim();
+  if (actorUuid) {
+    try {
+      const byUuid = await fromUuid(actorUuid);
+      if (byUuid?.documentName === "Actor") return byUuid;
+    } catch (_) { /* fall through to unique-name recovery */ }
+  }
+  const wantedName = String(payload?.character_name || "").trim().toLocaleLowerCase();
+  if (wantedName) {
+    const matches = (game.actors?.contents || []).filter(a => String(a?.name || "").trim().toLocaleLowerCase() === wantedName);
+    if (matches.length === 1) return matches[0];
+  }
+  return null;
+}
+
 async function runFoundryCommand(command, endpoint = "") {
   const type = String(command?.command_type || "").toLowerCase();
   const payload = command?.payload || {};
-  const actorId = String(command?.actor_id || "");
-  const actor = actorId ? game.actors?.get(actorId) : null;
+  const actor = await resolveCommandActor(command, payload);
   if (["adjust_resource", "adjust_item_quantity", "grant_prepared_content"].includes(type) && !actor) {
-    throw new Error("Target actor is not available in this world.");
+    throw new Error("Target actor is not available in this world. Re-sync/re-link the Seeker character if this actor was recreated in Foundry.");
   }
   if (type === "adjust_resource") {
     const resource = String(payload.resource || "").toLowerCase();
@@ -1106,22 +1131,47 @@ async function runFoundryCommand(command, endpoint = "") {
     else if (resource === "focus") { path = "system.resources.focus.value"; current = numericOr(actor.system?.resources?.focus?.value, 0); max = Math.max(0, numericOr(actor.system?.resources?.focus?.max, 3)); }
     else throw new Error("Unsupported resource.");
     const next = clamp(current + delta, 0, max);
+    // Use an absolute source update for character resources. PF2e explicitly
+    // validates/clamps these fields in CreaturePF2e._preUpdate; using the token
+    // bar helper here would treat negative HP deltas as damage and can consume
+    // temporary HP, which is not what a Seeker "HP -1" editor intends.
     await actor.update({ [path]: next });
-    return { message: `${actor.name}: ${resource.replace("_", " ")} ${delta > 0 ? "increased" : "decreased"} to ${next}.` };
+    const readBack = resource === "hp" ? numericOr(actor.system?.attributes?.hp?.value, NaN)
+      : resource === "temp_hp" ? numericOr(actor.system?.attributes?.hp?.temp, NaN)
+      : resource === "hero_points" ? numericOr(actor.system?.resources?.heroPoints?.value, NaN)
+      : numericOr(actor.system?.resources?.focus?.value, NaN);
+    if (!Number.isFinite(readBack) || readBack !== next) {
+      throw new Error(`Foundry did not retain the requested ${resource.replace("_", " ")} value (wanted ${next}, read back ${Number.isFinite(readBack) ? readBack : "unknown"}).`);
+    }
+    return { message: `${actor.name}: ${resource.replace("_", " ")} ${delta > 0 ? "increased" : "decreased"} to ${next}.`, before: current, after: next, actor_uuid: actor.uuid || "" };
   }
   if (type === "adjust_item_quantity") {
     const item = actor.items?.get(String(payload.item_id || ""));
     if (!item) throw new Error("Target item was not found on the actor.");
     const delta = numericOr(payload.delta, 0);
     if (!delta) throw new Error("Delta cannot be zero.");
-    const current = Math.max(0, numericOr(item.system?.quantity, 1));
+    const current = Math.max(0, numericOr(item.quantity ?? item.system?.quantity, 1));
     const next = Math.max(0, current + delta);
     await item.update({ "system.quantity": next });
-    return { message: `${item.name}: quantity updated to ${next}.` };
+    const readBack = Math.max(0, numericOr(item.quantity ?? item.system?.quantity, NaN));
+    if (!Number.isFinite(readBack) || readBack !== next) throw new Error(`Foundry did not retain ${item.name}'s requested quantity (${next}).`);
+    return { message: `${item.name}: quantity updated to ${next}.`, before: current, after: next, uuid: item.uuid || "" };
   }
   if (type === "grant_prepared_content") {
-    const created = await actor.createEmbeddedDocuments("Item", [buildPreparedItem(payload, endpoint)]);
-    return { message: `${created?.[0]?.name || payload.title || "Prepared content"} added to ${actor.name}.`, uuid: created?.[0]?.uuid || "", document_type: "Item", entity_id: payload.entity_id ?? null };
+    const commandId = String(command?.id || "");
+    const already = (actor.items?.contents || []).find(i => String(i?.flags?.seeker?.commandId || "") === commandId);
+    if (already) return { message: `${already.name} was already added to ${actor.name}.`, uuid: already.uuid || "", document_type: "Item", entity_id: payload.entity_id ?? null, idempotent: true };
+    const source = buildPreparedItem(payload, endpoint);
+    source.flags = { ...(source.flags || {}), seeker: { ...((source.flags || {}).seeker || {}), commandId } };
+    // Actor-owned items are Embedded Documents. Use the Actor API directly: it
+    // is the stable Foundry/PF2e path used by the system itself when transferring
+    // items between actors. Item.implementation.create({ parent }) has varied
+    // across Foundry releases and could return a document without actually
+    // inserting it into the PF2e actor inventory.
+    const createdDocs = await actor.createEmbeddedDocuments("Item", [source], { render: true });
+    const created = createdDocs?.[0] || null;
+    if (!created?.id || !actor.items?.get(created.id)) throw new Error("Foundry did not retain the item after creating it on the actor.");
+    return { message: `${created.name || payload.title || "Prepared content"} added to ${actor.name}.`, uuid: created.uuid || "", document_type: "Item", entity_id: payload.entity_id ?? null };
   }
   if (type === "push_prepared_content") {
     const kind = String(payload.prepared_kind || "item").toLowerCase();
@@ -1162,33 +1212,49 @@ async function acknowledgeCommands(endpoint, results) {
   });
   if (!response.ok) throw new Error(`Seeker ack failed (${response.status}).`);
 }
+async function markCommandStarted(endpoint, id) {
+  if (!id) return;
+  const response = await fetch(commandStartEndpoint(endpoint), {
+    method: "POST", mode: "cors", credentials: "omit", cache: "no-store",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify({ ids: [id] })
+  });
+  if (!response.ok) throw new Error(`Seeker command-start acknowledgement failed (${response.status}).`);
+}
 async function processCommands(endpoint, commands = []) {
   const queue = Array.isArray(commands) ? commands : [];
   if (!queue.length) return;
   const seen = processedCommandIds();
-  const results = [];
   for (const command of queue) {
     const id = String(command?.id || "");
     if (!id) continue;
     if (seen.has(id)) {
-      results.push({ id, status: "skipped", result: { message: "Command already processed on this Foundry world." } });
+      try { await acknowledgeCommands(endpoint, [{ id, status: "skipped", result: { message: "Command already processed on this Foundry world." } }]); }
+      catch (error) { console.debug(`[${MODULE_ID}] Could not re-acknowledge command ${id}`, error); }
       continue;
     }
     try {
+      try {
+        await markCommandStarted(endpoint, id);
+      } catch (startError) {
+        // Delivery-state telemetry must never prevent the actual Foundry action.
+        console.debug(`[${MODULE_ID}] Could not mark command ${id} as executing`, startError);
+      }
       const result = await runFoundryCommand(command, endpoint);
       await rememberProcessedCommandId(id);
-      results.push({ id, status: "done", result });
+      await acknowledgeCommands(endpoint, [{ id, status: "done", result }]);
     } catch (error) {
       console.warn(`[${MODULE_ID}] Command ${id} failed`, error);
-      results.push({ id, status: "failed", result: { message: error?.message || String(error) } });
+      try { await acknowledgeCommands(endpoint, [{ id, status: "failed", result: { message: error?.message || String(error) } }]); }
+      catch (ackError) { console.warn(`[${MODULE_ID}] Could not acknowledge failed command ${id}`, ackError); }
     }
   }
-  await acknowledgeCommands(endpoint, results);
-  queuePush(200);
+  queuePush(120);
 }
 
 async function pollCommands() {
-  if (commandPollActive || !game.user?.isGM || !setting("enabled") || document.visibilityState !== "visible") return;
+  // Poll even while Foundry is in a background tab. Browsers may throttle
+  // timers, but hiding the tab must never make Seeker write-backs disappear.
+  if (commandPollActive || !game.user?.isGM || !setting("enabled")) return;
   const endpoint = normalizedEndpoint(String(setting("endpoint") || "").trim());
   if (!endpoint) return;
   commandPollActive = true;
@@ -1318,7 +1384,7 @@ function setupCommandInterval() {
   if (commandIntervalId) clearInterval(commandIntervalId);
   // Keep mechanical snapshots inexpensive, but make Seeker → Foundry actions feel
   // immediate. This endpoint carries no actor sheet payload unless work exists.
-  commandIntervalId = setInterval(pollCommands, 3000);
+  commandIntervalId = setInterval(pollCommands, 2000);
 }
 
 async function openDeepLinkedActor() {

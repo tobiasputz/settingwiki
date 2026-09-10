@@ -1,10 +1,10 @@
-# Seeker 7.0.3
+# Seeker 7.0.4 — Codex & Relay
 
-**Seeker 7 — The Living Table** turns the existing campaign wiki, session tools, Foundry Workshop, maps and world-state systems into one campaign operating layer. The primary GM workspace is `/gm/v7`; the phone-oriented player surface is `/app`. Existing Seeker data is migrated additively and a pre-V7 SQLite backup is created automatically on first schema initialization.
+**Living Table** turns the existing campaign wiki, session tools, Foundry Workshop, maps and world-state systems into one campaign operating layer. The canonical GM workspace is `/gm/living-table`; the phone-oriented player surface is `/app`. Existing Seeker data migrates additively and a pre-major-release SQLite backup is created automatically on first schema initialization.
 
-For the current Railway deployment the canonical public origin is `https://seeker.up.railway.app`. Foundry Bridge 1.6.0 is installed/updated from `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
+For the current Railway deployment the canonical public origin is `https://seeker.up.railway.app`. Foundry Bridge **1.7.0** is installed/updated from `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
 
-This build includes Foundry Bridge 1.6.0 with hardened PF2e creature strikes/spellcasting/spell imports, structured special-ability authoring, expanded Token Forge, forced post-push refresh, and Discord mention fixes.
+This release focuses on trustworthy table operations: editable/removable Monster Codex entries, clean AoN imports, Discord mention verification, and persistent/observable Foundry delivery for HP, resources, item quantities and actor item grants.
 
 
 ## Seeker 7.0.3: Layered Knowledge & Party Deductions
@@ -23,7 +23,7 @@ Encounter preparation and Creature Vault collections can now be pushed as a **si
 
 ## Seeker 7.0.1: Proficiency Without Level encounters
 
-The V7 Encounter Builder now supports both **Standard PF2e** and the official **Proficiency Without Level** encounter math. The rules mode is stored per encounter so old and new encounters remain reproducible. PWL uses the GM Core creature-XP table from party level −7 through +7 while retaining the normal encounter threat budgets and party-size scaling. Each creature row shows its calculated XP contribution, and an optional manual XP override is available for creatures outside the published PWL range instead of Seeker inventing values.
+The Living Table Encounter Builder supports both **Standard PF2e** and the official **Proficiency Without Level** encounter math. The rules mode is stored per encounter so old and new encounters remain reproducible. PWL uses the GM Core creature-XP table from party level −7 through +7 while retaining the normal encounter threat budgets and party-size scaling. Each creature row shows its calculated XP contribution, and an optional manual XP override is available for creatures outside the published PWL range instead of Seeker inventing values.
 
 # Seeker — interactive setting & session companion
 

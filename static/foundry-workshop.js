@@ -185,7 +185,7 @@
   }
   function renderLog(){
     const rows=state.commands||[];
-    log.innerHTML=rows.length?rows.slice(0,15).map(r=>`<article class="command-log-item"><span class="status ${esc(r.status||'queued')}">${esc(r.status||'queued')}</span><strong>${esc(String(r.command_type||'action').replaceAll('_',' '))}</strong><small>${esc(r.requested_by||'GM')} · ${esc(r.actor_id||'world')}</small>${r.result?.message?`<div>${esc(r.result.message)}</div>`:''}</article>`).join(''):'<p class="muted">No bridge actions yet.</p>';
+    log.innerHTML=rows.length?rows.slice(0,25).map(r=>`<article class="command-log-item" data-command-row="${esc(r.id)}"><span class="status ${esc(r.status||'queued')}">${esc(r.delivery_label||r.status||'queued')}</span><strong>${esc(String(r.command_type||'action').replaceAll('_',' '))}</strong><small>${esc(r.requested_by||'GM')} · ${esc(r.actor_id||'world')} · attempt ${esc(r.attempt_count||0)}</small>${r.last_error?`<div class="command-error">${esc(r.last_error)}</div>`:(r.result?.message?`<div>${esc(r.result.message)}</div>`:'')}${r.can_retry?`<button class="quiet-btn command-retry" type="button" data-retry-command="${esc(r.id)}">Retry delivery</button>`:''}</article>`).join(''):'<p class="muted">No bridge actions yet.</p>';
   }
 
   function traitHtml(kind,p){const rarity=String(p.rarity||'common');const raw=[rarity!=='common'?rarity:'',creatureKind(kind)?p.size:'',...slugList(p.traits)].filter(Boolean);return raw.length?`<div class="fw-preview-traits ${kind==='item'?'fw-item-traits':kind==='feat'?'fw-feat-traits':kind==='homebrew'?'fw-free-traits':''}">${raw.map((t,i)=>`<span class="${i===0&&rarity!=='common'?`rarity-${esc(rarity)}`:''}">${esc(t)}</span>`).join('')}</div>`:''}
@@ -223,6 +223,7 @@
   }
 
   async function refresh(){const data=await jsonFetch('/api/v61/foundry/workshop');state.actors=data.actors||[];state.entries=data.prepared_content||[];state.commands=data.commands||[];renderLibrary();renderLog()}
+  log?.addEventListener('click',async e=>{const b=e.target.closest('[data-retry-command]');if(!b)return;b.disabled=true;try{await send(`/api/v6/foundry/commands/${b.dataset.retryCommand}/retry`,'POST',{});toast('Foundry delivery queued again.');await refresh()}catch(err){toast(err.message||'Could not retry delivery.',true)}finally{b.disabled=false}});
   async function saveCurrent({silent=false}={}){
     const data=collectData();if(!data.title)throw Error('Give this entry a name first.');
     const saved=await send('/api/v61/foundry/content','POST',data);state.currentId=saved.id;setField('id',saved.id);state.savedSnapshot=JSON.stringify(collectData());setDirty();$('[data-fw-duplicate]').disabled=false;if(!silent)toast('Homebrew saved.');await refresh();return saved

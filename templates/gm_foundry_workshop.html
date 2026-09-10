@@ -14,7 +14,7 @@
         <strong>{{ foundry.world_name or 'Foundry offline' }}</strong>
         <small>{% if foundry.received_at %}{{ foundry_actors|length }} actors synced{% else %}queued pushes wait safely{% endif %}</small>
       </div>
-      <a class="quiet-btn" href="/gm/v7#creatures">Creature Vault</a>
+      <a class="quiet-btn" href="/gm/living-table#creatures">Creature Vault</a>
       <a class="quiet-btn" href="/gm/integrations">Bridge settings</a>
     </div>
   </header>
@@ -341,5 +341,5 @@
 </div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7030">{% endblock %}
-{% block scripts %}<script src="/static/foundry-workshop.js?v=7030"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7040">{% endblock %}
+{% block scripts %}<script src="/static/foundry-workshop.js?v=7040"></script>{% endblock %}
