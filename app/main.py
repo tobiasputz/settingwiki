@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import functools
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -3511,6 +3513,88 @@ def v61_foundry_workshop_page(request: Request):
     })
 
 
+@app.post('/api/v61/foundry/assets')
+async def v613_foundry_asset_upload(request:Request,image:UploadFile=File(...),kind:str=Form('art')):
+    require_gm(request)
+    suffix=Path(image.filename or 'image.png').suffix.lower()
+    if suffix not in {'.png','.jpg','.jpeg','.webp'}:
+        raise HTTPException(400,'Foundry artwork must be PNG, JPG, or WebP.')
+    bucket='tokens' if str(kind or '').lower()=='token' else 'art'
+    folder=settings.uploads_dir/'foundry'/str(_active_campaign_id(request))/bucket
+    folder.mkdir(parents=True,exist_ok=True)
+    stem=''.join(c for c in Path(image.filename or bucket).stem if c.isalnum() or c in '-_ ').strip().replace(' ','-')[:70] or bucket
+    filename=f"{int(time.time())}-{secrets.token_hex(4)}-{stem}{suffix}"
+    target=folder/filename
+    await _stream_upload(image,target,20_000_000,'Foundry artwork is limited to 20 MB per image.')
+    rel=target.relative_to(settings.uploads_dir).as_posix()
+    return {'ok':True,'url':'/uploads/'+quote(rel,safe='/'),'ref':'upload:'+rel,'name':image.filename or filename}
+
+
+def _published_bestiary_rows(campaign_id:int) -> list[dict]:
+    rows=[]
+    for row in list_foundry_prepared_content(settings,campaign_id):
+        if str(row.get('kind') or '') not in {'monster','npc'}:
+            continue
+        payload=row.get('payload') or {}
+        publish=payload.get('codex_publish')
+        if isinstance(publish,str):publish=publish.strip().lower() in {'1','true','yes','on'}
+        if not bool(publish):
+            continue
+        rows.append(row)
+    return rows
+
+
+def _foundry_asset_signature(campaign_id:int,rel:str) -> str:
+    message=f"foundry-asset:{int(campaign_id)}:{rel}".encode('utf-8')
+    return hmac.new(settings.session_secret.encode('utf-8'),message,hashlib.sha256).hexdigest()
+
+
+def _foundry_push_asset_url(request:Request,campaign_id:int,raw:str) -> str:
+    value=str(raw or '').strip()
+    prefix=f'/uploads/foundry/{int(campaign_id)}/'
+    if not value.startswith(prefix):return value
+    rel=unquote(value[len(prefix):]).lstrip('/')
+    if not rel:return value
+    sig=_foundry_asset_signature(campaign_id,rel)
+    return f"{_external_base_url(request)}/api/v6/foundry/asset/{int(campaign_id)}/{quote(rel,safe='/')}?sig={sig}"
+
+
+@app.get('/api/v6/foundry/asset/{campaign_id}/{asset_path:path}')
+def v613_foundry_asset(campaign_id:int,asset_path:str,sig:str=''):
+    rel=unquote(asset_path).lstrip('/')
+    expected=_foundry_asset_signature(campaign_id,rel)
+    if not sig or not secrets.compare_digest(expected,str(sig)):
+        raise HTTPException(404,'Asset not found.')
+    base=(settings.uploads_dir/'foundry'/str(int(campaign_id))).resolve()
+    path=(base/rel).resolve()
+    if base not in path.parents or not path.is_file():raise HTTPException(404,'Asset not found.')
+    return FileResponse(path,headers={'Cache-Control':'private, max-age=86400','Access-Control-Allow-Origin':'*'})
+
+
+@app.get('/bestiary', response_class=HTMLResponse)
+def v613_bestiary_page(request:Request):
+    if not player_allowed(request):return player_gate_redirect(request)
+    cid=_active_campaign_id(request);wiki=_visible_wiki(request)
+    return templates.TemplateResponse('bestiary.html',{
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=not is_gm(request)),
+        'monsters':_published_bestiary_rows(cid),'gm_view':is_gm(request),
+    })
+
+
+@app.get('/bestiary/{entry_id}', response_class=HTMLResponse)
+def v613_bestiary_entry(request:Request,entry_id:int):
+    if not player_allowed(request):return player_gate_redirect(request)
+    cid=_active_campaign_id(request);wiki=_visible_wiki(request)
+    entry=next((r for r in _published_bestiary_rows(cid) if int(r.get('id') or 0)==int(entry_id)),None)
+    if not entry:raise HTTPException(404,'Bestiary entry not found.')
+    payload=entry.get('payload') or {}
+    full=is_gm(request) or str(payload.get('codex_visibility') or 'rough').lower()=='full'
+    return templates.TemplateResponse('bestiary_entry.html',{
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=not is_gm(request)),
+        'entry':entry,'monster':payload,'show_statblock':full,'gm_view':is_gm(request),
+    })
+
+
 @app.get('/gm/media', response_class=HTMLResponse)
 def v6_media_page(request: Request, session_id: int|None=None):
     require_gm(request);cid=_active_campaign_id(request);sessions=list_sessions(settings,campaign_id=cid)
@@ -3623,7 +3707,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.2.1.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.3.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -3631,7 +3715,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.2.1.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.3.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 
@@ -3681,6 +3765,9 @@ def v61_foundry_content_push(request:Request,item_id:int,payload:dict=Body(...))
     actor_id=str(payload.get('actor_id') or '').strip()
     if target_type not in {'world','actor'}: raise HTTPException(400,'target_type must be world or actor.')
     if target_type=='actor' and not actor_id: raise HTTPException(400,'Choose a target actor.')
+    content_data=json.loads(json.dumps(item.get('payload') or {}))
+    for image_key in ('img','token_img'):
+        if content_data.get(image_key):content_data[image_key]=_foundry_push_asset_url(request,cid,str(content_data.get(image_key)))
     command=queue_foundry_command(settings,cid,'grant_prepared_content' if target_type=='actor' else 'push_prepared_content',{
         'prepared_id':int(item['id']),
         'prepared_kind':item.get('kind'),
@@ -3689,7 +3776,7 @@ def v61_foundry_content_push(request:Request,item_id:int,payload:dict=Body(...))
         'summary':item.get('summary'),
         'tags':item.get('tags'),
         'target_type':target_type,
-        'data':item.get('payload') or {},
+        'data':content_data,
     },actor_id=actor_id,scope=target_type,requested_by=requester_label(request))
     return {'ok':True,'command':command}
 

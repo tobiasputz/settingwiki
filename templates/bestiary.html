@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}Monster Codex · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="bestiary-shell">
+  <header class="bestiary-hero">
+    <div><span class="eyebrow">MONSTER CODEX</span><h1>Creatures encountered</h1><p>A field guide to beings known in this campaign. Some entries contain complete mechanics; others reveal only what the party has learned.</p></div>
+    {% if gm_view %}<a class="quiet-btn" href="/gm/foundry-workshop">Open Foundry Workshop</a>{% endif %}
+  </header>
+  {% if monsters %}<section class="bestiary-grid">
+    {% for entry in monsters %}{% set p=entry.payload or {} %}
+    <a class="bestiary-card" href="/bestiary/{{ entry.id }}">
+      <div class="bestiary-card-art" {% if p.img %}style="background-image:url('{{ p.img }}')"{% endif %}></div>
+      <div class="bestiary-card-body">
+        <div class="bestiary-card-meta"><span>{{ p.codex_category or ('NPC' if entry.kind=='npc' else 'Creature') }}</span>{% if (gm_view or p.codex_visibility=='full') and p.level is not none and p.level|string %}<span>Level {{ p.level }}</span>{% endif %}{% if p.codex_visibility=='full' %}<span>Statblock visible</span>{% else %}<span>Field notes</span>{% endif %}</div>
+        <h2>{{ entry.title }}</h2>
+        {% if entry.subtitle and (gm_view or p.codex_visibility=='full') %}<small>{{ entry.subtitle }}</small>{% endif %}
+        <p>{{ p.codex_blurb or entry.summary or 'No public field notes have been recorded yet.' }}</p>
+      </div>
+    </a>
+    {% endfor %}
+  </section>{% else %}<div class="bestiary-empty"><span class="eyebrow">NO PUBLIC ENTRIES</span><h2>The field guide is still empty.</h2><p>Creatures appear here when the GM publishes them from the Foundry Workshop.</p></div>{% endif %}
+</main>
+{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6300">{% endblock %}

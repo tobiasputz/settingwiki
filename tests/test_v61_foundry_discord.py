@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi.testclient import TestClient
 
@@ -87,7 +88,7 @@ def test_v61_public_foundry_manifest_and_install_zip(tmp_path: Path, monkeypatch
     client=TestClient(main.app)
     manifest=client.get('/foundry/seeker-bridge/module.json')
     assert manifest.status_code==200
-    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.2.1'
+    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.3.0'
     assert data['manifest'].endswith('/foundry/seeker-bridge/module.json')
     assert data['download'].endswith('/foundry/seeker-bridge/seeker-bridge.zip')
     package=client.get('/foundry/seeker-bridge/seeker-bridge.zip')
@@ -185,7 +186,7 @@ def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
 def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
     root=Path(__file__).resolve().parents[1]
     bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.2.1"' in bridge
+    assert 'const BRIDGE_VERSION = "1.3.0"' in bridge
     assert 'function normalizedEndpoint' in bridge
     assert 'u.protocol === "http:" && !local' in bridge
     assert 'processCommands(endpoint, body?.commands || [])' in bridge
@@ -223,7 +224,7 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200
     assert 'Homebrew Forge' in workshop.text and 'foundryWorkshopForm' in workshop.text
-    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=6210' in workshop.text
+    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=6300' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})
@@ -270,3 +271,54 @@ def test_v611_archive_mode_does_not_block_foundry_heartbeat():
     assert '"/api/v6/foundry/push/"' in main
     bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
     assert 'BUNDLED_SEEKER_ORIGIN' in bridge and 'canonical.host' in bridge
+
+
+def test_v613_structured_pf2e_import_contract_and_token_support():
+    root=Path(__file__).resolve().parents[1]
+    bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
+    workshop=(root/'templates/gm_foundry_workshop.html').read_text(encoding='utf-8')
+    js=(root/'static/foundry-workshop.js').read_text(encoding='utf-8')
+    assert 'type: "melee"' in bridge and 'damageRolls' in bridge and 'attackEffects' in bridge
+    assert 'type: "action"' in bridge and 'actionType' in bridge and 'buildNpcAbility' in bridge
+    assert 'type: "spellcastingEntry"' in bridge and 'buildPreparedSpell' in bridge and 'findCompendiumSpell' in bridge
+    assert 'prototypeToken' in bridge and 'data.token_img || data.img' in bridge
+    assert 'data-fw-token-maker' in workshop and 'data-fw-token-canvas' in workshop
+    assert 'data-fw-spells' in workshop and 'data-fw-add-spell' in workshop
+    assert "payload.codex_publish" in js and 'token_img' in js
+
+
+def test_v613_bestiary_visibility_and_asset_upload(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
+    cid=default_campaign_id(s);alice=create_player_invite(s,'Alice');set_campaign_members(s,cid,[alice['id']])
+    gm=TestClient(main.app);gm.post('/admin/login',data={'password':'admin'})
+    rough=gm.post('/api/v61/foundry/content',json={
+        'kind':'monster','target_type':'world','title':'Ashen Warden','subtitle':'Secret elite guardian',
+        'summary':'A burning guardian.','payload':{'level':'7','traits':'fire, humanoid','ac':'25','hp':'100','codex_publish':True,'codex_visibility':'rough','codex_category':'Cinderborn','codex_blurb':'A hulking guardian wreathed in ash.'}
+    })
+    assert rough.status_code==200
+    full=gm.post('/api/v61/foundry/content',json={
+        'kind':'monster','target_type':'world','title':'Glass Hound','summary':'A crystal predator.',
+        'payload':{'level':'3','ac':'19','hp':'45','codex_publish':True,'codex_visibility':'full','codex_blurb':'A translucent hunting beast.'}
+    })
+    assert full.status_code==200
+    upload=gm.post('/api/v61/foundry/assets',files={'image':('token.png',b'not-a-real-png-but-storage-does-not-decode','image/png')},data={'kind':'token'})
+    assert upload.status_code==200 and '/uploads/foundry/' in upload.json()['url']
+    with_art=gm.post('/api/v61/foundry/content',json={
+        'kind':'monster','target_type':'world','title':'Token Beast','payload':{'hp':'10','img':upload.json()['url'],'token_img':upload.json()['url']}
+    })
+    assert with_art.status_code==200
+    pushed=gm.post(f"/api/v61/foundry/content/{with_art.json()['id']}/push",json={'target_type':'world'})
+    assert pushed.status_code==200
+    cfg=integration_config(s,cid,include_secret=True);queued=claim_foundry_commands(s,cid,cfg['foundry_bridge_token'])
+    pushed_data=next(cmd for cmd in queued if cmd['payload'].get('title')=='Token Beast')['payload']['data']
+    assert '/api/v6/foundry/asset/' in pushed_data['img'] and '?sig=' in pushed_data['img']
+    signed=urlsplit(pushed_data['img']);public_asset=TestClient(main.app).get(signed.path+'?'+signed.query)
+    assert public_asset.status_code==200
+
+    player=TestClient(main.app);assert player.get(alice['invite_path'],follow_redirects=False).status_code==303
+    listing=player.get('/bestiary');assert listing.status_code==200 and 'Ashen Warden' in listing.text and 'Glass Hound' in listing.text
+    assert 'Secret elite guardian' not in listing.text
+    rough_page=player.get(f"/bestiary/{rough.json()['id']}");assert rough_page.status_code==200
+    assert 'Incomplete field knowledge' in rough_page.text and '<strong>AC</strong> 25' not in rough_page.text and 'Secret elite guardian' not in rough_page.text
+    full_page=player.get(f"/bestiary/{full.json()['id']}");assert full_page.status_code==200 and '<strong>AC</strong> 19' in full_page.text

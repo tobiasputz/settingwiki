@@ -103,7 +103,8 @@
               <label data-fw-show="homebrew"><span>Foundry document</span><select name="homebrew_document"><option value="equipment">Item / equipment</option><option value="feat">Feat</option><option value="action">Action</option><option value="npc">NPC / creature</option></select></label>
               <label class="span-2"><span>Traits</span><input name="traits" placeholder="human, humanoid, fire"></label>
               <label class="span-2"><span>Subtitle / source line</span><input name="subtitle" maxlength="180" placeholder="Elite guardian of the Cinder Gate"></label>
-              <label class="span-2"><span>Artwork URL <em>optional</em></span><input name="img" inputmode="url" placeholder="https://…"></label>
+              <label class="span-2"><span>Portrait artwork</span><div class="fw-art-field"><input name="img" inputmode="url" placeholder="https://… or upload below"><label class="quiet-btn fw-upload-button">Upload art<input type="file" accept="image/png,image/jpeg,image/webp" data-fw-art-upload hidden></label></div></label>
+              <label class="span-2" data-fw-show="creature"><span>Prototype token</span><div class="fw-art-field"><input name="token_img" inputmode="url" placeholder="Separate token image URL (optional)"><button class="quiet-btn" type="button" data-fw-token-maker>Make token from art</button></div><small class="fw-field-help">If left empty, Foundry uses the portrait. The token maker saves a separate PNG and assigns it to the creature's prototype token.</small></label>
             </div>
           </section>
 
@@ -194,7 +195,7 @@
           </section>
 
           <section class="fw-form-section">
-            <div class="fw-section-heading"><span data-fw-section-number>04</span><div><h2>Rules text & abilities</h2><p>Write the part you would actually read at the table.</p></div><button class="quiet-btn" type="button" data-fw-add-ability>＋ Add ability</button></div>
+            <div class="fw-section-heading"><span data-fw-section-number>04</span><div><h2>Rules text & abilities</h2><p>Write the part you would actually read at the table. Creature abilities are created as real PF2e Action items in Foundry.</p></div><button class="quiet-btn" type="button" data-fw-add-ability>＋ Add ability</button></div>
             <div class="fw-field-grid">
               <label class="span-2"><span>Short summary</span><textarea name="summary" rows="3" placeholder="One-sentence concept or GM-facing reminder."></textarea></label>
               <label class="span-2"><span>Main rules text</span><textarea name="description" rows="7" placeholder="Write the rules text in normal Pathfinder language. This appears in the live preview and is carried into Foundry."></textarea></label>
@@ -203,11 +204,33 @@
           </section>
 
           <section class="fw-form-section" data-fw-section="creature">
-            <div class="fw-section-heading"><span>05</span><div><h2>Spellcasting & notes</h2><p>Fast text fields for content that does not need a dedicated builder yet.</p></div></div>
-            <div class="fw-field-grid">
-              <label class="span-2"><span>Spellcasting</span><textarea name="spellcasting" rows="4" placeholder="Arcane Prepared Spells DC 24, attack +16; 3rd fireball, haste; 2nd invisibility…"></textarea></label>
-              <label class="span-2"><span>GM notes <em>Seeker only</em></span><textarea name="gm_notes" rows="3" placeholder="Tactics, roleplay cues, encounter notes…"></textarea></label>
+            <div class="fw-section-heading"><span>05</span><div><h2>Spellcasting</h2><p>Create an actual PF2e spellcasting entry and embedded spells, rather than flattening them into notes.</p></div><button class="quiet-btn" type="button" data-fw-add-spell>＋ Add spell</button></div>
+            <div class="fw-stat-group fw-casting-config">
+              <div class="fw-field-grid">
+                <label><span>Tradition</span><select name="spell_tradition"><option value="arcane">Arcane</option><option value="divine">Divine</option><option value="occult">Occult</option><option value="primal">Primal</option></select></label>
+                <label><span>Casting type</span><select name="spell_mode"><option value="innate">Innate</option><option value="spontaneous">Spontaneous</option><option value="prepared">Prepared</option><option value="focus">Focus</option></select></label>
+                <label><span>Spell DC</span><input name="spell_dc" type="number" min="0" step="1" placeholder="18"></label>
+                <label><span>Spell attack</span><div class="fw-number-field"><b>+</b><input name="spell_attack" type="number" step="1" placeholder="10"></div></label>
+              </div>
             </div>
+            <div class="fw-repeater fw-spell-repeater" data-fw-spells></div>
+            <details>
+              <summary>Legacy / extra spellcasting notes</summary>
+              <div class="fw-field-grid"><label class="span-2"><span>Notes</span><textarea name="spellcasting" rows="3" placeholder="Any spellcasting details that do not fit the structured spell rows."></textarea></label></div>
+            </details>
+          </section>
+
+          <section class="fw-form-section" data-fw-section="creature">
+            <div class="fw-section-heading"><span>06</span><div><h2>Monster Codex</h2><p>Optionally publish this creature to a player-facing Seeker bestiary.</p></div></div>
+            <div class="fw-codex-card">
+              <label class="fw-toggle-line"><input type="checkbox" name="codex_publish" value="1"><span><strong>Add to Monster Codex</strong><small>The entry becomes visible at /bestiary for this campaign.</small></span></label>
+              <div class="fw-field-grid" data-fw-codex-options>
+                <label><span>Player detail</span><select name="codex_visibility"><option value="rough">Rough information only</option><option value="full">Full stat block</option></select></label>
+                <label><span>Public category</span><input name="codex_category" placeholder="Fiend, Local Threat, Aberration…"></label>
+                <label class="span-2"><span>What players know</span><textarea name="codex_blurb" rows="4" placeholder="A player-safe description, rumors, appearance, habits, and rough danger level. Keep secrets out of this field."></textarea></label>
+              </div>
+            </div>
+            <div class="fw-field-grid"><label class="span-2"><span>GM notes <em>Seeker only</em></span><textarea name="gm_notes" rows="3" placeholder="Tactics, roleplay cues, encounter notes…"></textarea></label></div>
           </section>
         </div>
 
@@ -237,6 +260,32 @@
     </aside>
   </section>
 </main>
+
+<div class="fw-token-modal hidden" data-fw-token-modal aria-hidden="true">
+  <div class="fw-token-card">
+    <header><div><span class="eyebrow">TOKEN MAKER</span><h2>Build prototype token</h2><p>Compose a Foundry-ready token from the creature art. Presets change the frame; the source image is never modified.</p></div><button type="button" class="fw-token-close" data-fw-token-close>×</button></header>
+    <div class="fw-token-layout">
+      <div class="fw-token-stage"><canvas width="720" height="720" data-fw-token-canvas></canvas><div class="fw-token-empty" data-fw-token-empty>Upload or enter portrait art first.</div></div>
+      <div class="fw-token-controls">
+        <section><small>FRAME PRESET</small><div class="fw-token-presets"><button type="button" data-token-preset="classic">Classic</button><button type="button" data-token-preset="iron">Iron</button><button type="button" data-token-preset="crimson">Crimson</button><button type="button" data-token-preset="arcane">Arcane</button><button type="button" data-token-preset="nature">Nature</button><button type="button" data-token-preset="shadow">Shadow</button><button type="button" data-token-preset="minimal">Minimal</button><button type="button" data-token-preset="borderless">Borderless</button></div></section>
+        <section class="fw-token-control-grid">
+          <label><span>Shape</span><select data-token-shape><option value="circle">Circle</option><option value="square">Rounded square</option><option value="hex">Hex</option></select></label>
+          <label><span>Ring color</span><input type="color" value="#b79661" data-token-ring></label>
+          <label><span>Background</span><input type="color" value="#171513" data-token-bg></label>
+          <label><span>Inner accent</span><input type="color" value="#e3c68f" data-token-accent></label>
+        </section>
+        <section class="fw-token-sliders">
+          <label><span>Artwork scale</span><input type="range" min="0.55" max="2.4" step="0.01" value="1" data-token-scale><output data-token-scale-out>100%</output></label>
+          <label><span>Horizontal</span><input type="range" min="-240" max="240" step="1" value="0" data-token-x><output data-token-x-out>0</output></label>
+          <label><span>Vertical</span><input type="range" min="-240" max="240" step="1" value="0" data-token-y><output data-token-y-out>0</output></label>
+          <label><span>Ring width</span><input type="range" min="0" max="70" step="1" value="30" data-token-width><output data-token-width-out>30</output></label>
+        </section>
+        <div class="fw-token-options"><label><input type="checkbox" data-token-shadow checked> Drop shadow</label><label><input type="checkbox" data-token-double checked> Double ring</label></div>
+        <div class="fw-token-modal-actions"><label class="quiet-btn fw-upload-button">Use another image<input type="file" accept="image/png,image/jpeg,image/webp" data-token-source-file hidden></label><button type="button" class="quiet-btn" data-token-reset>Reset</button><button type="button" class="primary-button" data-token-save>Save token to Seeker</button></div>
+      </div>
+    </div>
+  </div>
+</div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6210"><script src="/static/foundry-workshop.js?v=6210"></script>{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6300"><script src="/static/foundry-workshop.js?v=6300"></script>{% endblock %}

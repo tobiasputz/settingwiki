@@ -1,3 +1,12 @@
+# Seeker 6.1.3 — PF2e creature import, token forge & Monster Codex
+
+- Upgraded **Seeker Bridge to 1.3.0** so prepared creatures create real PF2e Strike (`melee`) items, Action/Passive items and spellcasting entries instead of flattening those sections into actor notes. Named spells are resolved against installed PF2e compendia when possible, with a structured homebrew-spell fallback.
+- Added separate portrait and **prototype token** support, including size-aware token dimensions. Seeker-hosted Foundry artwork is served through scoped signed read-only asset URLs so Foundry can load it without exposing the campaign bridge token.
+- Added a built-in **Token Forge** to the Foundry Workshop: crop/position artwork, circle/square/hex shapes, multiple ring presets, editable ring/background/accent colors, scale/offset/ring-width controls, shadow/double-ring options and PNG export straight back into the prepared creature.
+- Expanded creature prep with structured spellcasting, repeatable attacks and special abilities, PF2e defenses/senses/skills/IWR fields, GM notes and a richer live statblock preview.
+- Added the campaign-scoped **Monster Codex**. GMs can publish prepared NPCs/monsters with either *Field Notes* visibility (rough public information only) or *Full Statblock* visibility. Rough entries deliberately hide exact mechanical values and private GM material.
+- Added regression coverage for structured PF2e import contracts, token/art upload and signed delivery, and Monster Codex rough/full privacy.
+
 # Seeker 6.1.1 — Foundry Railway origin hotfix
 
 - Fixed Foundry URLs when Railway exposes a secondary/default public domain: Seeker now prefers the actual browser-facing `Host` / `X-Forwarded-Host` over `RAILWAY_PUBLIC_DOMAIN`, while still honoring an explicit `SEEKER_PUBLIC_URL`.

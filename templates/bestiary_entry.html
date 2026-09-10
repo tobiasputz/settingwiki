@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}{{ entry.title }} · Monster Codex · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="bestiary-shell">
+  <header class="bestiary-hero"><div><span class="eyebrow">MONSTER CODEX · {{ monster.codex_category or ('NPC' if entry.kind=='npc' else 'CREATURE') }}</span><h1>{{ entry.title }}</h1><p>{% if show_statblock or gm_view %}{{ entry.subtitle or monster.codex_blurb or entry.summary }}{% else %}{{ monster.codex_blurb or entry.summary }}{% endif %}</p></div><a class="quiet-btn" href="/bestiary">← Monster Codex</a></header>
+  <section class="bestiary-detail">
+    <article class="bestiary-lore-card">
+      {% if monster.img %}<img class="bestiary-detail-art" src="{{ monster.img }}" alt="{{ entry.title }}">{% endif %}
+      <span class="eyebrow">WHAT THE PARTY KNOWS</span><h2>{{ entry.title }}</h2>
+      <p>{{ monster.codex_blurb or entry.summary or 'No public field notes have been recorded for this creature.' }}</p>
+      {% if monster.traits %}<div class="bestiary-card-meta">{% for trait in monster.traits.split(',') if trait.strip() %}<span>{{ trait.strip() }}</span>{% endfor %}</div>{% endif %}
+      {% if not show_statblock %}<div class="bestiary-rough-warning"><strong>Incomplete field knowledge.</strong><br>The GM has chosen to keep this creature's exact statistics hidden. This entry only contains information the party is allowed to know.</div>{% endif %}
+      {% if gm_view and monster.gm_notes %}<hr><span class="eyebrow">GM NOTES</span><p>{{ monster.gm_notes }}</p>{% endif %}
+    </article>
+
+    {% if show_statblock %}<article class="bestiary-stat-card">
+      <div class="fw-statblock">
+        <header class="fw-stat-top"><h3>{{ entry.title }}</h3><span class="fw-stat-level">{{ 'NPC' if entry.kind=='npc' else 'CREATURE' }} {{ monster.level or 1 }}</span></header>
+        {% if entry.subtitle %}<div class="fw-stat-subtitle">{{ entry.subtitle }}</div>{% endif %}
+        <div class="fw-preview-traits">{% if monster.rarity and monster.rarity!='common' %}<span class="rarity-{{ monster.rarity }}">{{ monster.rarity }}</span>{% endif %}{% if monster.size %}<span>{{ monster.size }}</span>{% endif %}{% for trait in (monster.traits or '').split(',') if trait.strip() %}<span>{{ trait.strip() }}</span>{% endfor %}</div>
+        <div class="fw-stat-body">
+          <p><strong>Perception</strong> {% if monster.perception|string and monster.perception != '' %}{{ '+' if monster.perception|int >= 0 else '' }}{{ monster.perception }}{% else %}—{% endif %}{% if monster.senses %}; {{ monster.senses }}{% endif %}</p>
+          {% if monster.languages %}<p><strong>Languages</strong> {{ monster.languages }}</p>{% endif %}
+          {% if monster.skills %}<p><strong>Skills</strong> {{ monster.skills }}</p>{% endif %}
+          <div class="fw-stat-abilities">{% for abbr,key in [('STR','str_mod'),('DEX','dex_mod'),('CON','con_mod'),('INT','int_mod'),('WIS','wis_mod'),('CHA','cha_mod')] %}{% set v=monster.get(key,'') %}<span><strong>{{ abbr }}</strong> {% if v|string != '' %}{{ '+' if v|int >= 0 else '' }}{{ v }}{% else %}—{% endif %}</span>{% endfor %}</div>
+          <hr class="fw-stat-divider">
+          <p><strong>AC</strong> {{ monster.get('ac') or '—' }}; <strong>Fort</strong> {% set fort=monster.get('fortitude','') %}{{ ('+' if fort|int >= 0 else '') ~ fort if fort|string != '' else '—' }}; <strong>Ref</strong> {% set ref=monster.get('reflex','') %}{{ ('+' if ref|int >= 0 else '') ~ ref if ref|string != '' else '—' }}; <strong>Will</strong> {% set will=monster.get('will','') %}{{ ('+' if will|int >= 0 else '') ~ will if will|string != '' else '—' }}</p>
+          <p><strong>HP</strong> {{ monster.get('hp') or '—' }}{% if monster.get('immunities') %}; <strong>Immunities</strong> {{ monster.get('immunities') }}{% endif %}{% if monster.get('weaknesses') %}; <strong>Weaknesses</strong> {{ monster.get('weaknesses') }}{% endif %}{% if monster.get('resistances') %}; <strong>Resistances</strong> {{ monster.get('resistances') }}{% endif %}</p>
+          <hr class="fw-stat-divider"><p><strong>Speed</strong> {{ monster.get('speed') or 25 }} feet</p>
+          {% for a in monster.attacks or [] %}<p class="fw-stat-strike"><strong>{{ 'Ranged' if a.type=='ranged' else 'Melee' }}</strong> {{ a.name or 'Strike' }} {% if a.bonus|string != '' %}{{ '+' if a.bonus|int >= 0 else '' }}{{ a.bonus }}{% endif %}{% if a.traits %} ({{ a.traits }}){% endif %}, <strong>Damage</strong> {{ a.damage or '—' }} {{ a.damage_type or '' }}</p>{% endfor %}
+          {% if monster.description %}<div class="fw-stat-action"><p class="fw-stat-desc">{{ monster.description }}</p></div>{% endif %}
+          {% for a in monster.abilities or [] %}<div class="fw-stat-action"><h4>{{ a.name or 'Ability' }} {% if a.actions %}<span class="fw-action-glyphs">{{ '↺' if a.actions=='reaction' else ('◇' if a.actions=='free' else ('◆' * (a.actions|int))) }}</span>{% endif %}</h4>{% if a.traits %}<small>{{ a.traits }}</small>{% endif %}{% if a.description %}<p>{{ a.description }}</p>{% endif %}</div>{% endfor %}
+          {% if monster.spells %}<div class="fw-stat-action"><h4>{{ (monster.spell_tradition or 'arcane')|title }} {{ (monster.spell_mode or 'innate')|title }} Spells{% if monster.spell_dc %} DC {{ monster.spell_dc }}{% endif %}{% if monster.spell_attack %}, attack {{ '+' if monster.spell_attack|int >=0 else '' }}{{ monster.spell_attack }}{% endif %}</h4>{% for rank in range(10,-1,-1) %}{% set rows=monster.spells|selectattr('rank','equalto',rank|string)|list %}{% if rows %}<p><strong>{{ 'Cantrips' if rank==0 else 'Rank '+rank|string }}</strong> {% for s in rows %}{{ s.name }}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}{% endfor %}</div>{% endif %}
+        </div>
+      </div>
+    </article>{% endif %}
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6300">{% endblock %}

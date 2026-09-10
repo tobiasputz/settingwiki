@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.2.1";
+const BRIDGE_VERSION = "1.3.0";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 let pushTimer = null;
 let intervalId = null;
@@ -286,7 +286,13 @@ function preparedDetailsHtml(payload) {
   if (data.spellcasting) rows.push(`<p><strong>Spellcasting</strong><br>${foundry.utils.escapeHTML(String(data.spellcasting)).replace(/\n/g,"<br>")}</p>`);
   return rows.join("") + preparedAttackHtml(data) + preparedAbilityHtml(data);
 }
-function buildPreparedItem(payload) {
+function absoluteSeekerAsset(raw, endpoint = "") {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  if (/^(?:https?:|data:|icons\/|systems\/|modules\/)/i.test(value)) return value;
+  try { return new URL(value, normalizedEndpoint(endpoint)).href; } catch { return value; }
+}
+function buildPreparedItem(payload, endpoint = "") {
   const data = payload?.data || {};
   const kind = String(payload?.prepared_kind || "item").toLowerCase();
   const type = kind === "feat" ? "feat" : kind === "homebrew" ? (String(data.homebrew_document || data.item_type || "equipment") || "equipment") : (String(data.item_type || "equipment") || "equipment");
@@ -309,39 +315,126 @@ function buildPreparedItem(payload) {
   return {
     name: String(payload?.title || "Prepared item"),
     type,
-    img: String(data.img || "icons/svg/item-bag.svg"),
+    img: absoluteSeekerAsset(data.img, endpoint) || "icons/svg/item-bag.svg",
     system,
   };
 }
-function buildPreparedActor(payload) {
+function tokenGridSize(size) {
+  const slug = String(size || "med").toLowerCase();
+  return ({ tiny: 1, sm: 1, med: 1, lg: 2, huge: 3, grg: 4 })[slug] || 1;
+}
+function choiceSlug(raw, choices) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  const direct = foundry.utils.slugify(value);
+  if (!choices || typeof choices !== "object") return direct;
+  if (Object.prototype.hasOwnProperty.call(choices, direct)) return direct;
+  const lowered = value.toLowerCase();
+  for (const [key, label] of Object.entries(choices)) {
+    const localized = i18n(String(label || ""), String(label || ""));
+    if (String(key).toLowerCase() === lowered || localized.toLowerCase() === lowered) return key;
+  }
+  return "";
+}
+function parsedLanguages(raw) {
+  const known = [];
+  const unknown = [];
+  for (const label of slugList(raw)) {
+    const slug = choiceSlug(label, globalThis.CONFIG?.PF2E?.languages);
+    if (slug) known.push(slug); else unknown.push(label);
+  }
+  return { value: [...new Set(known)], details: unknown.join(", ") };
+}
+function parsedNpcSkills(raw) {
+  const result = {};
+  const rows = String(raw || "").split(/[;,\n]+/).map(x => x.trim()).filter(Boolean);
+  for (const row of rows) {
+    const match = row.match(/^(.+?)\s*([+-]\s*\d+)(?:\s*\((.+)\))?$/);
+    if (!match) continue;
+    const slug = foundry.utils.slugify(match[1]);
+    const base = Number(match[2].replace(/\s+/g, ""));
+    if (!slug || !Number.isFinite(base)) continue;
+    result[slug] = { base, note: String(match[3] || "") };
+  }
+  return result;
+}
+function parsedSenses(raw) {
+  const senses = [];
+  for (const chunk of String(raw || "").split(/[,;]+/).map(x => x.trim()).filter(Boolean)) {
+    const normalized = chunk.toLowerCase();
+    if (normalized === "darkvision") { senses.push({ type: "darkvision" }); continue; }
+    if (["low-light vision", "low light vision", "low-light-vision"].includes(normalized)) { senses.push({ type: "low-light-vision" }); continue; }
+    const range = Number(normalized.match(/(\d+)\s*(?:feet|foot|ft)?/)?.[1] || 0);
+    const acuity = normalized.includes("vague") ? "vague" : normalized.includes("precise") && !normalized.includes("imprecise") ? "precise" : "imprecise";
+    const typeRaw = normalized.replace(/\([^)]*\)/g, "").replace(/\d+\s*(?:feet|foot|ft)?/g, "").replace(/\b(?:precise|imprecise|vague)\b/g, "").trim();
+    const type = choiceSlug(typeRaw, globalThis.CONFIG?.PF2E?.senseTypes);
+    if (type && range >= 5) senses.push({ type, acuity, range });
+  }
+  return senses;
+}
+function parsedIWR(raw, kind) {
+  const choices = kind === "immunity" ? globalThis.CONFIG?.PF2E?.immunityTypes : kind === "weakness" ? globalThis.CONFIG?.PF2E?.weaknessTypes : globalThis.CONFIG?.PF2E?.resistanceTypes;
+  const result = [];
+  for (const chunk of String(raw || "").split(/[,;]+/).map(x => x.trim()).filter(Boolean)) {
+    const match = chunk.match(/^(.+?)(?:\s+(\d+))?(?:\s*\(.+\))?$/);
+    if (!match) continue;
+    const type = choiceSlug(match[1], choices);
+    if (!type) continue;
+    if (kind === "immunity") result.push({ type });
+    else {
+      const value = Number(match[2] || 0);
+      if (value > 0) result.push({ type, value });
+    }
+  }
+  return result;
+}
+function buildPreparedActor(payload, endpoint = "") {
   const data = payload?.data || {};
   const hp = Math.max(1, numericOr(data.hp, 1));
   const speed = numericOr(data.speed, 25);
   const level = numericOr(data.level, 0);
   const publicNotes = htmlDescription(payload?.summary, data.description) + preparedDetailsHtml(payload);
+  const portrait = absoluteSeekerAsset(data.img, endpoint) || "icons/svg/mystery-man.svg";
+  const token = absoluteSeekerAsset(data.token_img || data.img, endpoint) || portrait;
+  const gridSize = tokenGridSize(data.size);
   return {
     name: String(payload?.title || "Prepared creature"),
     type: "npc",
-    img: String(data.img || "icons/svg/mystery-man.svg"),
+    img: portrait,
+    prototypeToken: {
+      name: String(payload?.title || "Prepared creature"),
+      width: gridSize,
+      height: gridSize,
+      disposition: String(data.actor_role || "npc") === "ally" ? 1 : -1,
+      texture: { src: token, scaleX: 1, scaleY: 1 },
+    },
     system: {
       details: {
         level: { value: level },
         alliance: String(data.actor_role || "npc") === "ally" ? "party" : "opposition",
+        blurb: String(payload?.summary || ""),
         publicNotes,
-        languages: { value: slugList(data.languages) },
+        privateNotes: String(data.gm_notes || ""),
+        languages: parsedLanguages(data.languages),
       },
-      traits: { value: slugList(data.traits), rarity: String(data.rarity || "common").toLowerCase() || "common", size: { value: String(data.size || "med") } },
+      traits: { value: validTraitList(data.traits, globalThis.CONFIG?.PF2E?.creatureTraits), rarity: String(data.rarity || "common").toLowerCase() || "common", size: { value: String(data.size || "med") } },
       attributes: {
-        ac: { value: Math.max(0, numericOr(data.ac, 10)) },
-        hp: { value: hp, max: hp },
-        speed: { value: speed },
-        perception: { value: numericOr(data.perception, 0) },
+        ac: { value: Math.max(0, numericOr(data.ac, 10)), details: "" },
+        hp: { value: hp, max: hp, temp: 0, details: "" },
+        speed: { value: speed, otherSpeeds: [], details: "" },
+        immunities: parsedIWR(data.immunities, "immunity"),
+        weaknesses: parsedIWR(data.weaknesses, "weakness"),
+        resistances: parsedIWR(data.resistances, "resistance"),
+        adjustment: null,
+        allSaves: { value: "" },
       },
-      perception: { mod: numericOr(data.perception, 0), details: String(data.senses || "") },
+      perception: { mod: numericOr(data.perception, 0), details: String(data.senses || ""), senses: parsedSenses(data.senses), vision: true },
+      skills: parsedNpcSkills(data.skills),
+      initiative: { statistic: "perception" },
       saves: {
-        fortitude: { value: numericOr(data.fortitude, 0) },
-        reflex: { value: numericOr(data.reflex, 0) },
-        will: { value: numericOr(data.will, 0) },
+        fortitude: { value: numericOr(data.fortitude, 0), saveDetail: "" },
+        reflex: { value: numericOr(data.reflex, 0), saveDetail: "" },
+        will: { value: numericOr(data.will, 0), saveDetail: "" },
       },
       abilities: {
         str: { mod: numericOr(data.str_mod, 0) }, dex: { mod: numericOr(data.dex_mod, 0) },
@@ -351,7 +444,257 @@ function buildPreparedActor(payload) {
     },
   };
 }
-async function runFoundryCommand(command) {
+function validChoice(value, choices, fallback = "") {
+  const v = String(value || "").trim().toLowerCase();
+  if (!v) return fallback;
+  if (!choices || typeof choices !== "object") return v;
+  return Object.prototype.hasOwnProperty.call(choices, v) ? v : fallback;
+}
+function validTraitList(input, choices) {
+  return slugList(input)
+    .map(t => foundry.utils.slugify(String(t || "")))
+    .filter(Boolean)
+    .filter(t => !choices || typeof choices !== "object" || Object.prototype.hasOwnProperty.call(choices, t));
+}
+function parseDamage(attack) {
+  let formula = String(attack?.damage || "").trim();
+  let type = String(attack?.damage_type || "").trim().toLowerCase();
+  const known = globalThis.CONFIG?.PF2E?.damageTypes || {};
+  if (!type && formula) {
+    const last = formula.match(/\s+([a-z-]+)$/i)?.[1]?.toLowerCase();
+    if (last && Object.prototype.hasOwnProperty.call(known, last)) {
+      type = last;
+      formula = formula.replace(new RegExp(`\\s+${last}$`, "i"), "").trim();
+    }
+  }
+  if (!type || !Object.prototype.hasOwnProperty.call(known, type)) type = "bludgeoning";
+  return { formula: formula || "1d4", type };
+}
+function buildNpcAttack(attack = {}) {
+  const { formula, type } = parseDamage(attack);
+  const ranged = String(attack.type || "melee").toLowerCase() === "ranged";
+  const range = ranged ? Math.max(5, Math.round(numericOr(attack.range, 30) / 5) * 5) : 0;
+  return {
+    name: String(attack.name || "Strike"),
+    type: "melee",
+    img: ranged ? "icons/svg/target.svg" : "icons/svg/sword.svg",
+    system: {
+      description: { value: "" },
+      traits: {
+        value: validTraitList(attack.traits, globalThis.CONFIG?.PF2E?.npcAttackTraits),
+        otherTags: [],
+      },
+      rules: [],
+      slug: foundry.utils.slugify(String(attack.name || "strike")),
+      action: "strike",
+      area: null,
+      bonus: { value: Math.trunc(numericOr(attack.bonus, 0)) },
+      damageRolls: { "0": { damage: formula, damageType: type, category: type === "bleed" ? "persistent" : null } },
+      attackEffects: { value: slugList(attack.effects).map(String) },
+      range: ranged ? { increment: range, max: null } : null,
+      subjectToMAP: true,
+    },
+  };
+}
+function abilityActionData(ability = {}) {
+  const raw = String(ability.actions || "").toLowerCase();
+  if (raw === "reaction") return { type: "reaction", actions: null };
+  if (raw === "free") return { type: "free", actions: null };
+  if (/^[123]$/.test(raw)) return { type: "action", actions: Number(raw) };
+  return { type: "passive", actions: null };
+}
+function buildNpcAbility(ability = {}) {
+  const action = abilityActionData(ability);
+  const category = ["offensive", "defensive", "interaction"].includes(String(ability.category || "").toLowerCase())
+    ? String(ability.category).toLowerCase() : null;
+  return {
+    name: String(ability.name || "Special Ability"),
+    type: "action",
+    img: "icons/svg/aura.svg",
+    system: {
+      description: { value: htmlDescription("", ability.description) },
+      traits: {
+        value: validTraitList(ability.traits, globalThis.CONFIG?.PF2E?.actionTraits),
+        otherTags: [],
+      },
+      rules: [],
+      slug: foundry.utils.slugify(String(ability.name || "special-ability")),
+      actionType: { value: action.type },
+      actions: { value: action.actions },
+      category,
+    },
+  };
+}
+function emptySpellSlots(spells = [], mode = "innate") {
+  const slots = {};
+  for (let rank = 0; rank <= 10; rank += 1) {
+    const rows = spells.filter(s => Math.max(0, Math.min(10, Math.trunc(numericOr(s?.rank, 1)))) === rank);
+    const count = mode === "innate" || mode === "focus" ? 0 : rows.length;
+    slots[`slot${rank}`] = { prepared: [], value: count, max: count };
+  }
+  return slots;
+}
+function buildSpellcastingEntry(data = {}) {
+  const tradition = ["arcane", "divine", "occult", "primal"].includes(String(data.spell_tradition || "").toLowerCase())
+    ? String(data.spell_tradition).toLowerCase() : "arcane";
+  const mode = ["innate", "spontaneous", "prepared", "focus"].includes(String(data.spell_mode || "").toLowerCase())
+    ? String(data.spell_mode).toLowerCase() : "innate";
+  return {
+    name: `${tradition.charAt(0).toUpperCase()}${tradition.slice(1)} ${mode.charAt(0).toUpperCase()}${mode.slice(1)} Spells`,
+    type: "spellcastingEntry",
+    img: "icons/svg/book.svg",
+    system: {
+      description: { value: htmlDescription("", data.spellcasting) },
+      traits: { otherTags: [] },
+      rules: [],
+      slug: foundry.utils.slugify(`${tradition}-${mode}-spells`),
+      ability: { value: "cha" },
+      spelldc: { value: Math.trunc(numericOr(data.spell_attack, 0)), dc: Math.max(0, Math.trunc(numericOr(data.spell_dc, 10))) },
+      tradition: { value: tradition },
+      prepared: { value: mode, flexible: false, validItems: null },
+      showSlotlessLevels: { value: true },
+      proficiency: { slug: "", value: 1 },
+      slots: emptySpellSlots(Array.isArray(data.spells) ? data.spells : [], mode),
+      autoHeightenLevel: { value: null },
+    },
+  };
+}
+function spellTime(raw) {
+  const value = String(raw || "2").trim().toLowerCase();
+  if (value === "reaction") return "reaction";
+  if (value === "free") return "free action";
+  if (/^[123]$/.test(value)) return `${value} action${value === "1" ? "" : "s"}`;
+  return value || "2 actions";
+}
+function spellDefense(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "ac") return { passive: { statistic: "ac" }, save: null };
+  if (["fortitude", "reflex", "will"].includes(value)) return { passive: null, save: { statistic: value, basic: false } };
+  return null;
+}
+function buildHomebrewSpell(spell = {}, entryId = "", data = {}) {
+  const rankRaw = Math.max(0, Math.min(10, Math.trunc(numericOr(spell.rank, 1))));
+  const cantrip = rankRaw === 0;
+  const rank = Math.max(1, rankRaw);
+  const tradition = ["arcane", "divine", "occult", "primal"].includes(String(data.spell_tradition || "").toLowerCase())
+    ? String(data.spell_tradition).toLowerCase() : "arcane";
+  const traits = validTraitList(spell.traits, globalThis.CONFIG?.PF2E?.spellTraits);
+  if (cantrip && !traits.includes("cantrip")) traits.push("cantrip");
+  const damageFormula = String(spell.damage || "").trim();
+  const damageType = validChoice(spell.damage_type, globalThis.CONFIG?.PF2E?.damageTypes, "force");
+  const mode = String(data.spell_mode || "innate").toLowerCase();
+  const uses = mode === "innate" ? { value: 1, max: 1 } : undefined;
+  return {
+    name: String(spell.name || "Homebrew Spell"),
+    type: "spell",
+    img: "icons/svg/book.svg",
+    system: {
+      description: { value: htmlDescription("", spell.description) },
+      traits: { value: traits, rarity: "common", traditions: [tradition] },
+      rules: [],
+      slug: foundry.utils.slugify(String(spell.name || "homebrew-spell")),
+      level: { value: rank },
+      requirements: "",
+      target: { value: String(spell.target || "") },
+      range: { value: String(spell.range || "") },
+      area: null,
+      time: { value: spellTime(spell.actions) },
+      duration: { value: String(spell.duration || ""), sustained: false },
+      damage: damageFormula ? { "0": { formula: damageFormula, kinds: ["damage"], type: damageType, category: null, materials: [] } } : {},
+      defense: spellDefense(spell.save),
+      cost: { value: "" },
+      counteraction: false,
+      ritual: null,
+      location: { value: entryId || null, signature: false, heightenedLevel: cantrip ? rank : undefined, uses },
+    },
+  };
+}
+async function findCompendiumSpell(name) {
+  const needle = String(name || "").trim().toLowerCase();
+  if (!needle) return null;
+  const packs = (game.packs?.contents || []).filter(p => p.documentName === "Item" && /spell/i.test(String(p.metadata?.label || p.metadata?.name || p.collection || "")));
+  for (const pack of packs) {
+    try {
+      const index = await pack.getIndex({ fields: ["type", "system.slug"] });
+      const hit = index.find(e => String(e.type || "").toLowerCase() === "spell" && String(e.name || "").trim().toLowerCase() === needle);
+      if (!hit) continue;
+      const doc = await pack.getDocument(hit._id);
+      if (doc?.type === "spell") return doc;
+    } catch (error) {
+      console.debug(`[${MODULE_ID}] Could not search spell pack ${pack.collection}`, error);
+    }
+  }
+  return null;
+}
+async function buildPreparedSpell(spell, entryId, data) {
+  const official = await findCompendiumSpell(spell?.name);
+  if (!official) return buildHomebrewSpell(spell, entryId, data);
+  const source = official.toObject();
+  delete source._id;
+  source.system ||= {};
+  source.system.location = {
+    ...(source.system.location || {}),
+    value: entryId,
+    signature: false,
+    uses: String(data?.spell_mode || "").toLowerCase() === "innate" ? { value: 1, max: 1 } : source.system.location?.uses,
+  };
+  const enteredRank = Math.max(0, Math.min(10, Math.trunc(numericOr(spell?.rank, 0))));
+  if (enteredRank > 0 && source.system.level) source.system.location.heightenedLevel = Math.max(Number(source.system.level.value || 1), enteredRank);
+  return source;
+}
+async function populatePreparedActor(actor, payload) {
+  const data = payload?.data || {};
+  const report = { attacks: 0, abilities: 0, spells: 0, spellcasting: 0, warnings: [] };
+  const attacks = (Array.isArray(data.attacks) ? data.attacks : []).filter(a => String(a?.name || a?.damage || "").trim());
+  if (attacks.length) {
+    try {
+      const created = await actor.createEmbeddedDocuments("Item", attacks.map(buildNpcAttack));
+      report.attacks = created.length;
+    } catch (error) {
+      console.warn(`[${MODULE_ID}] Could not create prepared NPC attacks`, error);
+      report.warnings.push(`attacks: ${error?.message || error}`);
+    }
+  }
+  const abilities = (Array.isArray(data.abilities) ? data.abilities : []).filter(a => String(a?.name || a?.description || "").trim());
+  if (abilities.length) {
+    try {
+      const created = await actor.createEmbeddedDocuments("Item", abilities.map(buildNpcAbility));
+      report.abilities = created.length;
+    } catch (error) {
+      console.warn(`[${MODULE_ID}] Could not create prepared NPC abilities`, error);
+      report.warnings.push(`abilities: ${error?.message || error}`);
+    }
+  }
+  const spells = (Array.isArray(data.spells) ? data.spells : []).filter(s => String(s?.name || "").trim());
+  if (spells.length) {
+    try {
+      const entries = await actor.createEmbeddedDocuments("Item", [buildSpellcastingEntry(data)]);
+      const entry = entries?.[0];
+      if (!entry) throw new Error("Spellcasting entry was not created.");
+      report.spellcasting = 1;
+      const sources = [];
+      for (const spell of spells) sources.push(await buildPreparedSpell(spell, entry.id, data));
+      const created = await actor.createEmbeddedDocuments("Item", sources);
+      report.spells = created.length;
+      if (String(data.spell_mode || "").toLowerCase() === "prepared") {
+        const slotPatch = {};
+        for (let rank = 1; rank <= 10; rank += 1) {
+          const rankSpells = created.filter((doc, i) => Math.max(0, Math.trunc(numericOr(spells[i]?.rank, 1))) === rank);
+          if (!rankSpells.length) continue;
+          slotPatch[`system.slots.slot${rank}.max`] = rankSpells.length;
+          slotPatch[`system.slots.slot${rank}.value`] = rankSpells.length;
+          slotPatch[`system.slots.slot${rank}.prepared`] = rankSpells.map(s => ({ id: s.id, expended: false }));
+        }
+        if (Object.keys(slotPatch).length) await entry.update(slotPatch);
+      }
+    } catch (error) {
+      console.warn(`[${MODULE_ID}] Could not create prepared NPC spellcasting`, error);
+      report.warnings.push(`spells: ${error?.message || error}`);
+    }
+  }
+  return report;
+}
+async function runFoundryCommand(command, endpoint = "") {
   const type = String(command?.command_type || "").toLowerCase();
   const payload = command?.payload || {};
   const actorId = String(command?.actor_id || "");
@@ -384,16 +727,23 @@ async function runFoundryCommand(command) {
     return { message: `${item.name}: quantity updated to ${next}.` };
   }
   if (type === "grant_prepared_content") {
-    const created = await actor.createEmbeddedDocuments("Item", [buildPreparedItem(payload)]);
+    const created = await actor.createEmbeddedDocuments("Item", [buildPreparedItem(payload, endpoint)]);
     return { message: `${created?.[0]?.name || payload.title || "Prepared content"} added to ${actor.name}.` };
   }
   if (type === "push_prepared_content") {
     const kind = String(payload.prepared_kind || "item").toLowerCase();
     if (["npc", "monster"].includes(kind) || (kind === "homebrew" && (payload?.data?.hp || payload?.data?.ac))) {
-      const created = await Actor.create(buildPreparedActor(payload));
-      return { message: `${created?.name || payload.title || "Prepared creature"} created in the Actors directory.` };
+      const created = await Actor.create(buildPreparedActor(payload, endpoint));
+      const report = await populatePreparedActor(created, payload);
+      const extras = [
+        report.attacks ? `${report.attacks} strike${report.attacks === 1 ? "" : "s"}` : "",
+        report.abilities ? `${report.abilities} abilit${report.abilities === 1 ? "y" : "ies"}` : "",
+        report.spells ? `${report.spells} spell${report.spells === 1 ? "" : "s"}` : "",
+      ].filter(Boolean).join(", ");
+      const warning = report.warnings.length ? ` Some embedded data could not be created: ${report.warnings.join("; ")}` : "";
+      return { message: `${created?.name || payload.title || "Prepared creature"} created in the Actors directory${extras ? ` with ${extras}` : ""}.${warning}`, report };
     }
-    const created = await Item.create(buildPreparedItem(payload));
+    const created = await Item.create(buildPreparedItem(payload, endpoint));
     return { message: `${created?.name || payload.title || "Prepared content"} created in the Items directory.` };
   }
   throw new Error(`Unsupported command type: ${type}`);
@@ -423,7 +773,7 @@ async function processCommands(endpoint, commands = []) {
       continue;
     }
     try {
-      const result = await runFoundryCommand(command);
+      const result = await runFoundryCommand(command, endpoint);
       await rememberProcessedCommandId(id);
       results.push({ id, status: "done", result });
     } catch (error) {
