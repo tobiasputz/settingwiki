@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en" data-theme="night">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0d0d0c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Table App · {{ wiki.title }}</title>
+  <link rel="stylesheet" href="/static/wiki.css?v=7000">
+  <link rel="stylesheet" href="/static/v7.css?v=7000">
+</head>
+{% set fs = foundry_actor.sheet if foundry_actor else {} %}{% set vitals = fs.vitals or {} %}{% set ident = fs.identity or {} %}
+<body class="v7-player-body" data-v7-player-app data-character-id="{{ character.id if character else '' }}">
+  <div class="ambient-grain"></div>
+  <header class="v7-player-top">
+    <a href="/" class="v7-player-brand"><span>✦</span><div><strong>{{ wiki.title }}</strong><small>TABLE APP</small></div></a>
+    {% if characters|length > 1 %}<label class="v7-character-switch"><span>PLAYING</span><select data-character-switch>{% for c in characters %}<option value="{{ c.id }}" {% if character and c.id==character.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></label>{% elif character %}<div class="v7-character-switch static"><span>PLAYING</span><strong>{{ character.name }}</strong></div>{% endif %}
+  </header>
+
+  <main class="v7-player-stage">
+    <section class="v7-player-pane active" data-player-pane="character">
+      {% if character %}
+      <article class="v7-mobile-character-hero">
+        <div class="v7-mobile-character-art" {% if foundry_actor and foundry_actor.img %}style="background-image:url('{{ foundry_actor.img }}')"{% elif character.portrait_path %}style="background-image:url('{{ character.portrait_path }}')"{% endif %}></div>
+        <div class="v7-mobile-character-copy"><span class="eyebrow">{{ ident.ancestry or character.ancestry or 'CHARACTER' }}</span><h1>{{ foundry_actor.name if foundry_actor else character.name }}</h1><p>{% if ident.class_name %}{{ ident.class_name }}{% elif character.class_name %}{{ character.class_name }}{% endif %}{% if ident.level is not none %} · Level {{ ident.level }}{% endif %}</p>{% if foundry_actor %}<small>Foundry synced <time data-epoch="{{ foundry_actor.received_at }}"></time></small>{% else %}<small>Not linked to a Foundry actor</small>{% endif %}</div>
+      </article>
+      {% if foundry_actor %}
+      <div class="v7-mobile-vitals">
+        <article class="hp"><small>HP</small><strong>{{ vitals.hp.value or 0 }}<span>/{{ vitals.hp.max or 0 }}</span></strong>{% if vitals.hp.temp %}<em>+{{ vitals.hp.temp }} temp</em>{% endif %}</article>
+        <article><small>AC</small><strong>{{ vitals.ac or '—' }}</strong></article>
+        <article><small>Hero</small><strong>{{ vitals.hero_points.value if vitals.hero_points else '—' }}<span>/{{ vitals.hero_points.max if vitals.hero_points else '—' }}</span></strong></article>
+        <article><small>Focus</small><strong>{{ vitals.focus.value if vitals.focus and vitals.focus.value is not none else '—' }}<span>/{{ vitals.focus.max if vitals.focus and vitals.focus.max is not none else '—' }}</span></strong></article>
+      </div>
+      {% if v7_permissions.push_foundry_character %}<section class="v7-phone-controls"><header><div><span class="eyebrow">QUICK ADJUST</span><h2>Table controls</h2></div><small>Safe queued writes</small></header><div class="v7-phone-control-grid"><article><span>HP</span><div><button data-player-resource="hp" data-delta="-5">−5</button><button data-player-resource="hp" data-delta="-1">−1</button><button data-player-resource="hp" data-delta="1">+1</button><button data-player-resource="hp" data-delta="5">+5</button></div></article><article><span>Hero Points</span><div><button data-player-resource="hero_points" data-delta="-1">−1</button><button data-player-resource="hero_points" data-delta="1">+1</button></div></article><article><span>Focus</span><div><button data-player-resource="focus" data-delta="-1">−1</button><button data-player-resource="focus" data-delta="1">+1</button></div></article></div></section>{% endif %}
+
+      <section class="v7-phone-sheet-section"><header><span class="eyebrow">OFFENSE</span><h2>Strikes</h2></header><div class="v7-phone-action-list">{% for a in fs.strikes or [] %}<article>{% if a.img %}<img src="{{ a.img }}" alt="">{% endif %}<div><strong>{{ a.name }}</strong><small>{% if a.mod is not none %}{% if a.mod >= 0 %}+{% endif %}{{ a.mod }} to hit{% endif %}{% if a.damage %} · {{ a.damage }}{% endif %}</small>{% if a.traits %}<p>{{ a.traits|join(' · ') }}</p>{% endif %}</div></article>{% else %}<p class="v7-muted">No strikes synced.</p>{% endfor %}</div></section>
+      <section class="v7-phone-sheet-section"><header><span class="eyebrow">ACTIONS</span><h2>Actions & feats</h2></header><div class="v7-phone-action-list">{% for a in (fs.actions or []) + (fs.feats or []) %}<details><summary>{% if a.img %}<img src="{{ a.img }}" alt="">{% endif %}<div><strong>{{ a.name }}</strong><small>{{ a.type|title }}{% if a.action_type %} · {{ a.action_type }}{% endif %}</small></div></summary>{% if a.description %}<p>{{ a.description }}</p>{% endif %}</details>{% else %}<p class="v7-muted">No actions or feats synced.</p>{% endfor %}</div></section>
+      <section class="v7-phone-sheet-section"><header><span class="eyebrow">MAGIC</span><h2>Spells</h2></header>{% for rank, spells in (fs.spells or {}).items() %}<div class="v7-spell-rank"><small>RANK {{ rank }}</small><div class="v7-phone-action-list">{% for s in spells %}<details><summary>{% if s.img %}<img src="{{ s.img }}" alt="">{% endif %}<div><strong>{{ s.name }}</strong><small>{{ s.traits|join(' · ') if s.traits else 'Spell' }}</small></div></summary>{% if s.description %}<p>{{ s.description }}</p>{% endif %}</details>{% endfor %}</div></div>{% else %}<p class="v7-muted">No spells synced.</p>{% endfor %}</section>
+      {% endif %}
+      {% else %}<div class="v7-player-empty"><span>♟</span><h1>No character selected</h1><p>This invitation does not have a player character yet.</p></div>{% endif %}
+    </section>
+
+    <section class="v7-player-pane" data-player-pane="inventory">
+      <header class="v7-phone-page-head"><span class="eyebrow">INVENTORY</span><h1>What you're carrying</h1><p>Use consumables from here or claim new loot from the table.</p></header>
+      {% if foundry_actor %}<div class="v7-phone-inventory">{% for item in fs.inventory or [] %}<article><div class="v7-phone-item-art">{% if item.img %}<img src="{{ item.img }}" alt="">{% else %}◇{% endif %}</div><div><strong>{{ item.name }}</strong><small>{{ item.type|title }} · ×{{ item.quantity or 1 }}{% if item.equipped %} · equipped{% endif %}</small>{% if item.traits %}<p>{{ item.traits|join(' · ') }}</p>{% endif %}</div>{% if v7_permissions.push_foundry_character and item.id %}<button data-player-item="{{ item.id }}" data-delta="-1">Use</button>{% endif %}</article>{% else %}<p class="v7-muted">No inventory synced.</p>{% endfor %}</div>{% endif %}
+      <section class="v7-phone-loot"><header><span class="eyebrow">ON THE TABLE</span><h2>Available loot</h2></header>{% for pool in loot_pools if pool.status == 'open' %}<article class="v7-player-loot-pool"><h3>{{ pool.title }}</h3><p>{{ pool.note }}</p>{% for item in pool['items'] if item.remaining > 0 and item.visibility != 'gm' %}<div class="v7-player-loot-row"><div><strong>{{ item.name }}</strong><small>{{ item.remaining }} available · {{ item.description }}</small></div>{% if v7_permissions.manage_own_inventory and character %}<button data-claim-loot="{{ item.id }}">Claim</button>{% endif %}</div>{% endfor %}</article>{% else %}<div class="v7-player-empty compact"><span>◆</span><p>No open loot drops.</p></div>{% endfor %}</section>
+    </section>
+
+    <section class="v7-player-pane" data-player-pane="journal">
+      <header class="v7-phone-page-head"><span class="eyebrow">JOURNAL</span><h1>What your table knows</h1><p>Browse people, places, creatures and discoveries currently visible to you.</p></header>
+      <div class="v7-player-search"><span>⌕</span><input data-player-entity-search placeholder="Search known entities"></div>
+      <div class="v7-player-entity-list" id="v7PlayerEntityList">{% for e in entities %}<a href="/entity/{{ e.id }}" data-player-entity data-search="{{ (e.name ~ ' ' ~ e.summary ~ ' ' ~ (e.tags|join(' ')))|lower }}"><span>{{ '♜' if e.kind in ['monster','creature'] else '♟' if e.kind in ['npc','character'] else '⌖' if e.kind=='place' else '◇' }}</span><div><strong>{{ e.name }}</strong><small>{{ e.kind }}{% if e.subtitle %} · {{ e.subtitle }}{% endif %}</small><p>{{ e.summary }}</p></div><i>›</i></a>{% else %}<p class="v7-muted">Nothing has been revealed yet.</p>{% endfor %}</div>
+    </section>
+
+    <section class="v7-player-pane" data-player-pane="map">
+      <header class="v7-phone-page-head"><span class="eyebrow">ATLAS</span><h1>Known maps</h1><p>Open the campaign maps without leaving the table app flow.</p></header>
+      <div class="v7-player-map-grid">{% for map in maps %}<a href="/map/{{ map.id }}"><div {% if map.image %}style="background-image:url('{{ map.image }}')"{% elif map.image_path %}style="background-image:url('{{ map.image_path }}')"{% endif %}></div><strong>{{ map.title or map.name }}</strong><small>Open interactive map →</small></a>{% else %}<p class="v7-muted">No player-visible maps.</p>{% endfor %}</div>
+    </section>
+
+    <section class="v7-player-pane" data-player-pane="party">
+      <header class="v7-phone-page-head"><span class="eyebrow">PARTY</span><h1>The fellowship</h1><p>Your current table and the latest session context.</p></header>
+      {% if live_session %}<article class="v7-player-session-card"><span>✦ {{ live_session.status|upper }}</span><h2>{{ live_session.title }}</h2><p>{{ live_session.summary or 'The next chapter is ready.' }}</p><a href="/session">Open session page →</a></article>{% endif %}
+      <div class="v7-player-party-grid">{% for e in entities if e.kind=='character' %}<a href="/entity/{{ e.id }}"><div {% if e.image_ref %}style="background-image:url('{{ e.image_ref }}')"{% endif %}></div><strong>{{ e.name }}</strong><small>{{ e.subtitle or 'Player character' }}</small></a>{% else %}<p class="v7-muted">No party entities synced yet.</p>{% endfor %}</div>
+    </section>
+  </main>
+
+  <nav class="v7-player-nav" aria-label="Table app navigation">
+    <button class="active" data-player-tab="character"><span>♟</span><small>Character</small></button>
+    <button data-player-tab="inventory"><span>◇</span><small>Inventory</small></button>
+    <button data-player-tab="journal"><span>✦</span><small>Journal</small></button>
+    <button data-player-tab="map"><span>⌖</span><small>Map</small></button>
+    <button data-player-tab="party"><span>⌘</span><small>Party</small></button>
+  </nav>
+  <script src="/static/wiki.js?v=7000"></script>
+  <script src="/static/v7-player.js?v=7000"></script>
+</body></html>

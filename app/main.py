@@ -90,6 +90,17 @@ from .v6 import (
     record_travel_leg, travel_legs, delete_travel_leg, list_media_items, save_media_item, delete_media_item, display_state, set_display_state,
     campaign_keepsake, create_backup, list_backups, delete_backup, maybe_auto_backup, restore_backup,
 )
+from .v7 import (
+    init_v7_db, sync_existing_entities, list_entities, get_entity, save_entity, delete_entity, save_relation, restore_entity_version,
+    save_relationship_state, relationship_timeline, save_knowledge_fact, reveal_fact, visible_entity_facts, record_recall,
+    list_encounters, get_encounter, save_encounter, save_encounter_creature, delete_encounter_creature,
+    save_loot_pool, save_loot_item, list_loot_pools, get_loot_pool, claim_loot,
+    create_session_change, session_changes, review_session_change, effective_permissions, save_role_permissions, save_invite_permissions,
+    save_dependency, dependency_warnings, list_token_recipes, save_token_recipe, register_asset_ref, asset_usage, asset_catalog,
+    ingest_foundry_managed_state, ingest_foundry_command_results, set_sync_link, sync_link, mark_sync_resolved, memory_search, v7_dashboard,
+    recent_audit, integration_registry, ALL_PERMISSIONS,
+)
+from .v7_api import register_v7_routes
 
 settings = load_settings()
 BUILD_LOCK = threading.Lock()
@@ -99,6 +110,7 @@ init_schedule_db(settings)
 init_v5_db(settings)
 init_v51_db(settings)
 init_v6_db(settings)
+init_v7_db(settings)
 seed_project(settings)
 
 app = FastAPI(title="Seeker", docs_url=None, redoc_url=None)
@@ -200,6 +212,21 @@ def requester_label(request: Request) -> str:
         return 'GM'
     invite=current_player_invite(request)
     return str((invite or {}).get('label') or (invite or {}).get('name') or 'Player')[:160]
+
+
+def v7_has_permission(request: Request, permission: str) -> bool:
+    if is_admin(request):
+        role='owner';invite_id=None
+    elif is_co_gm(request):
+        role='co-gm';invite=current_player_invite(request);invite_id=int(invite['id']) if invite else None
+    else:
+        invite=current_player_invite(request);role=str((invite or {}).get('role') or 'player').lower();invite_id=int(invite['id']) if invite else None
+    return bool(effective_permissions(settings,role,invite_id,_active_campaign_id(request)).get(permission,False))
+
+
+def require_v7_permission(request: Request, permission: str) -> None:
+    if not v7_has_permission(request,permission):
+        raise HTTPException(403,f'Missing Seeker permission: {permission}')
 
 
 def archive_mode() -> bool:
@@ -3624,7 +3651,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/6.1.5 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.0.0 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -3825,7 +3852,13 @@ def v614_foundry_commands_options(campaign_id:int):
 @app.post('/api/v6/foundry/push/{campaign_id}')
 def v6_foundry_push(campaign_id:int,token:str='',payload:dict=Body(...)):
     try:
-        return JSONResponse(foundry_accept(settings,campaign_id,token,payload),headers=_FOUNDRY_CORS)
+        result=foundry_accept(settings,campaign_id,token,payload)
+        # V7-managed Foundry documents piggy-back on the existing authenticated
+        # heartbeat. Ingestion is additive and never blocks the table bridge if
+        # a stale V7 link happens to be malformed.
+        try: ingest_foundry_managed_state(settings,campaign_id,payload)
+        except Exception: pass
+        return JSONResponse(result,headers=_FOUNDRY_CORS)
     except PermissionError as exc:
         return JSONResponse({'detail':str(exc)},status_code=403,headers=_FOUNDRY_CORS)
     except Exception:
@@ -3838,7 +3871,10 @@ def v6_foundry_push(campaign_id:int,token:str='',payload:dict=Body(...)):
 def v61_foundry_push_ack(campaign_id:int,token:str='',payload:dict=Body(...)):
     try:
         rows=payload.get('results') if isinstance(payload.get('results'),list) else []
-        return JSONResponse(complete_foundry_commands(settings,campaign_id,token,rows),headers=_FOUNDRY_CORS)
+        result=complete_foundry_commands(settings,campaign_id,token,rows)
+        try: result['v7_links']=ingest_foundry_command_results(settings,campaign_id,rows)
+        except Exception: result['v7_links']=0
+        return JSONResponse(result,headers=_FOUNDRY_CORS)
     except PermissionError as exc:
         return JSONResponse({'detail':str(exc)},status_code=403,headers=_FOUNDRY_CORS)
     except Exception:
@@ -3875,7 +3911,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.4.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.5.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -3883,7 +3919,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.4.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.5.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 
@@ -4223,3 +4259,20 @@ def v6_backup_restore(request:Request,backup_id:int):
 @app.delete('/api/v6/backups/{backup_id}')
 def v6_backup_delete(request:Request,backup_id:int):
     require_admin(request);delete_backup(settings,backup_id);return {'ok':True}
+
+
+# V7 routes live in their own module to keep the legacy main router readable.
+register_v7_routes(app,settings,templates,{
+    'settings_provider':lambda: settings,
+    'active_campaign_id':_active_campaign_id,
+    'visible_wiki':_visible_wiki,
+    'require_gm':require_gm,
+    'require_admin':require_admin,
+    'player_allowed':player_allowed,
+    'invite_id':_invite_id,
+    'requester_label':requester_label,
+    'player_role':player_role,
+    'has_permission':v7_has_permission,
+    'require_permission':require_v7_permission,
+    'is_admin':is_admin,
+})

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ entity.name }} · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="v7-entity-dossier">
+  <header class="v7-entity-hero {% if entity.image_ref %}has-art{% endif %}" {% if entity.image_ref %}style="--entity-art:url('{{ entity.image_ref }}')"{% endif %}>
+    <div class="v7-entity-hero-shade"></div>
+    <div class="v7-entity-hero-copy"><a href="{{ '/gm/v7#entities' if gm_view else '/app#journal' }}" class="v7-back-link">← {{ 'Living Table' if gm_view else 'Table App' }}</a><span class="eyebrow">{{ entity.kind|upper }} · {{ entity.status|upper }}</span><h1>{{ entity.name }}</h1>{% if entity.subtitle %}<p>{{ entity.subtitle }}</p>{% endif %}<div class="v7-entity-tags">{% for tag in entity.tags %}<span>{{ tag }}</span>{% endfor %}</div></div>
+  </header>
+  <section class="v7-entity-dossier-grid">
+    <article class="v7-entity-prose"><span class="eyebrow">DOSSIER</span><h2>{{ entity.summary or 'Known information' }}</h2>{% if entity.body %}<div>{{ entity.body|e|replace('\n','<br>')|safe }}</div>{% else %}<p class="v7-muted">No longer-form notes are visible here yet.</p>{% endif %}</article>
+    <aside class="v7-entity-facts-panel"><span class="eyebrow">WHAT YOU KNOW</span><h2>Revealed facts</h2><div class="v7-public-facts">{% for fact in facts %}<article class="{{ fact.tier }}"><small>{{ fact.tier|upper }}</small><strong>{{ fact.title }}</strong><p>{{ fact.body }}</p></article>{% else %}<p class="v7-muted">No structured facts have been revealed yet.</p>{% endfor %}</div></aside>
+  </section>
+  {% if can_view_statblock and entity.kind in ['monster','creature','npc'] %}
+  {% set d=entity.data or {} %}<section class="v7-public-statblock"><header><div><span class="eyebrow">MECHANICS</span><h2>Statblock</h2></div><span>LEVEL {{ d.level or '—' }}</span></header><div class="v7-stat-ribbon"><div><small>AC</small><strong>{{ d.ac or '—' }}</strong></div><div><small>HP</small><strong>{{ d.hp or '—' }}</strong></div><div><small>PERCEPTION</small><strong>{% if d.perception is not none and d.perception != '' %}+{{ d.perception }}{% else %}—{% endif %}</strong></div><div><small>SPEED</small><strong>{{ d.speed or '—' }}</strong></div></div>{% if d.description %}<div class="v7-stat-body">{{ d.description }}</div>{% endif %}</section>
+  {% elif entity.kind in ['monster','creature','npc'] %}<section class="v7-field-notes-lock"><span>◉</span><div><strong>Field Notes view</strong><p>Exact combat statistics remain GM-only. Discoveries can reveal individual weaknesses, abilities or facts without exposing the whole statblock.</p></div></section>{% endif %}
+  {% if gm_view and entity.sync %}<section class="v7-entity-sync-footer"><span class="eyebrow">FOUNDRY</span><strong>{{ entity.sync.status }}</strong><small>{{ entity.sync.foundry_uuid or 'Not linked yet' }}</small><a href="/gm/v7#sync">Open managed sync →</a></section>{% endif %}
+</main>
+{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7000">{% endblock %}
+{% block scripts %}<script src="/static/v7-entity.js?v=7000"></script>{% endblock %}

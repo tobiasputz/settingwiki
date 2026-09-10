@@ -453,8 +453,18 @@
     if(!src)throw Error('Add portrait artwork first.');
     const img=await loadImage(src);state.tokenImage=img;drawToken();
   }
+  let tokenRecipes=[];
+  function tokenRecipeSettings(){
+    const out={};for(const key of Object.keys(tokenFrameDefaults))out[key]=tokenSettings[key];return out;
+  }
+  function renderTokenRecipes(){
+    const sel=$('[data-token-recipe-select]');if(!sel)return;const chosen=sel.value;
+    sel.innerHTML='<option value="">Choose saved recipe…</option>'+tokenRecipes.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('');
+    if(tokenRecipes.some(r=>String(r.id)===String(chosen)))sel.value=chosen;
+  }
+  async function loadTokenRecipes(){try{tokenRecipes=await jsonFetch('/api/v7/token-recipes',{cache:'no-store'});renderTokenRecipes()}catch{tokenRecipes=[];renderTokenRecipes()}}
   async function openTokenMaker(){
-    tokenModal?.classList.remove('hidden');tokenModal?.setAttribute('aria-hidden','false');syncTokenControls();
+    tokenModal?.classList.remove('hidden');tokenModal?.setAttribute('aria-hidden','false');syncTokenControls();loadTokenRecipes();
     try{const src=await ensureEditableArt();await loadTokenSource(src)}catch(err){state.tokenImage=null;drawToken();toast(err.message,true)}
   }
   $('[data-fw-token-maker]')?.addEventListener('click',openTokenMaker);$('[data-fw-token-close]')?.addEventListener('click',()=>{tokenModal?.classList.add('hidden');tokenModal?.setAttribute('aria-hidden','true')});tokenModal?.addEventListener('click',e=>{if(e.target===tokenModal){tokenModal.classList.add('hidden');tokenModal.setAttribute('aria-hidden','true')}});
@@ -463,6 +473,9 @@
   Object.entries(tokenControlMap).forEach(([selector,key])=>$(selector)?.addEventListener('input',e=>{tokenSettings[key]=['scale','x','y','width','vignette','brightness','saturation'].includes(key)?Number(e.currentTarget.value):e.currentTarget.value;syncTokenControls();drawToken()}));
   $('[data-token-shadow]')?.addEventListener('change',e=>{tokenSettings.shadow=e.currentTarget.checked;drawToken()});$('[data-token-double]')?.addEventListener('change',e=>{tokenSettings.double=e.currentTarget.checked;drawToken()});$('[data-token-glow]')?.addEventListener('change',e=>{tokenSettings.glow=e.currentTarget.checked;drawToken()});$('[data-token-inner-ring]')?.addEventListener('change',e=>{tokenSettings.innerRing=e.currentTarget.checked;drawToken()});
   $('[data-token-reset]')?.addEventListener('click',()=>{Object.assign(tokenSettings,tokenFrameDefaults,tokenPresets.classic,{scale:1,x:0,y:0});syncTokenControls();drawToken()});
+  $('[data-token-recipe-apply]')?.addEventListener('click',()=>{const id=$('[data-token-recipe-select]')?.value,r=tokenRecipes.find(x=>String(x.id)===String(id));if(!r)return toast('Choose a saved recipe first.',true);const position={scale:tokenSettings.scale,x:tokenSettings.x,y:tokenSettings.y};Object.assign(tokenSettings,tokenFrameDefaults,r.settings||{},position);syncTokenControls();drawToken();toast(`Applied ${r.name}.`)});
+  $('[data-token-recipe-save]')?.addEventListener('click',async()=>{const name=$('[data-token-recipe-name]')?.value.trim();if(!name)return toast('Give this recipe a name.',true);try{const r=await send('/api/v7/token-recipes','POST',{name,description:`Saved from Token Forge for ${fieldValue('title')||'campaign art'}`,settings:tokenRecipeSettings()});tokenRecipes=[...tokenRecipes.filter(x=>x.name!==r.name),r].sort((a,b)=>a.name.localeCompare(b.name));renderTokenRecipes();$('[data-token-recipe-select]').value=String(r.id);$('[data-token-recipe-name]').value='';toast('Token recipe saved for this campaign.')}catch(err){toast(err.message,true)}});
+  $('[data-token-recipe-delete]')?.addEventListener('click',async()=>{const id=$('[data-token-recipe-select]')?.value,r=tokenRecipes.find(x=>String(x.id)===String(id));if(!r)return toast('Choose a saved recipe first.',true);try{await jsonFetch(`/api/v7/token-recipes/${id}`,{method:'DELETE'});tokenRecipes=tokenRecipes.filter(x=>String(x.id)!==String(id));renderTokenRecipes();toast('Token recipe deleted.')}catch(err){toast(err.message,true)}});
   $('[data-token-source-file]')?.addEventListener('change',async e=>{const file=e.currentTarget.files?.[0];if(!file)return;try{const out=await uploadFoundryAsset(file,'art');setField('img',out.url);updateArtStatus(out);await loadTokenSource(out.url);renderPreview();setDirty();toast('New token source optimized and loaded.')}catch(err){toast(err.message,true)}finally{e.currentTarget.value=''}});
   $('[data-token-save]')?.addEventListener('click',async()=>{
     if(!state.tokenImage)return toast('Load artwork first.',true);

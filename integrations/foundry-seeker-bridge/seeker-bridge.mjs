@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.4.0";
+const BRIDGE_VERSION = "1.5.0";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 
 function seekerSlugify(value) {
@@ -404,6 +404,7 @@ function buildPreparedItem(payload, endpoint = "") {
     name: String(payload?.title || "Prepared item"),
     type,
     img: absoluteSeekerAsset(data.img, endpoint) || "icons/svg/item-bag.svg",
+    flags: { seeker: { managed: true, entityId: payload?.entity_id ?? null, preparedId: payload?.prepared_id ?? payload?.prepared_content_id ?? null } },
     system,
   };
 }
@@ -489,6 +490,7 @@ function buildPreparedActor(payload, endpoint = "") {
     name: String(payload?.title || "Prepared creature"),
     type: "npc",
     img: portrait,
+    flags: { seeker: { managed: true, entityId: payload?.entity_id ?? null, preparedId: payload?.prepared_id ?? payload?.prepared_content_id ?? null } },
     prototypeToken: {
       name: String(payload?.title || "Prepared creature"),
       width: gridSize,
@@ -566,6 +568,7 @@ function buildNpcAttack(attack = {}) {
     name: String(attack.name || "Strike"),
     type: "melee",
     img: ranged ? "icons/svg/target.svg" : "icons/svg/sword.svg",
+    flags: { seeker: { managedEmbedded: true, role: "strike" } },
     system: {
       description: { value: "" },
       traits: {
@@ -649,6 +652,7 @@ function buildNpcAbility(ability = {}) {
     name: String(ability.name || "Special Ability"),
     type: "action",
     img: "icons/svg/aura.svg",
+    flags: { seeker: { managedEmbedded: true, role: "ability" } },
     system: {
       description: { value: buildAbilityDescription(ability) },
       traits: {
@@ -686,6 +690,7 @@ function buildSpellcastingEntry(data = {}) {
     name: `${tradition.charAt(0).toUpperCase()}${tradition.slice(1)} ${mode.charAt(0).toUpperCase()}${mode.slice(1)} Spells`,
     type: "spellcastingEntry",
     img: "icons/svg/book.svg",
+    flags: { seeker: { managedEmbedded: true, role: "spellcasting" } },
     system: {
       description: { value: htmlDescription("", data.spellcasting), gm: "" },
       traits: { otherTags: [] },
@@ -745,6 +750,7 @@ function buildHomebrewSpell(spell = {}, entryId = "", data = {}) {
     name: String(spell.name || "Homebrew Spell"),
     type: "spell",
     img: "icons/svg/book.svg",
+    flags: { seeker: { managedEmbedded: true, role: "spell" } },
     system: {
       description: { value: htmlDescription("", spell.description) },
       traits: { value: traits, rarity: "common", traditions: [tradition] },
@@ -802,6 +808,7 @@ async function buildPreparedSpell(spell, entryId, data) {
   if (!official) return buildHomebrewSpell(spell, entryId, data);
   const source = official.toObject();
   delete source._id;
+  source.flags = { ...(source.flags || {}), seeker: { managedEmbedded: true, role: "spell" } };
   source.system ||= {};
   source.system.location = {
     ...(source.system.location || {}),
@@ -826,7 +833,9 @@ async function addSpellToEntry(actor, entry, spell, data) {
         const updates = {};
         if (mode === "innate") updates["system.location.uses"] = { value: uses, max: uses };
         if (enteredRank > 0 && created.baseRank && enteredRank >= Number(created.baseRank)) updates["system.location.heightenedLevel"] = enteredRank;
-        if (Object.keys(updates).length) await created.update(updates);
+        updates["flags.seeker.managedEmbedded"] = true;
+        updates["flags.seeker.role"] = "spell";
+        await created.update(updates);
         return created;
       }
     } catch (error) {
@@ -836,6 +845,7 @@ async function addSpellToEntry(actor, entry, spell, data) {
   const source = official ? official.toObject() : buildHomebrewSpell(spell, entry.id, data);
   if (official) {
     delete source._id;
+    source.flags = { ...(source.flags || {}), seeker: { managedEmbedded: true, role: "spell" } };
     source.system ||= {};
     source.system.location = { ...(source.system.location || {}), value: entry.id, signature: false };
     if (enteredRank > 0) source.system.location.heightenedLevel = enteredRank;
@@ -931,6 +941,87 @@ async function populatePreparedActor(actor, payload) {
   }
   return report;
 }
+
+function compactManagedItem(item) {
+  const source = item?.toObject?.(false) || {};
+  const sys = source.system || {};
+  return {
+    id: item?.id || source._id || "",
+    uuid: item?.uuid || "",
+    name: item?.name || source.name || "",
+    type: item?.type || source.type || "",
+    img: item?.img || source.img || "",
+    role: item?.flags?.seeker?.role || "",
+    system: {
+      description: sys.description || {}, level: sys.level || {}, traits: sys.traits || {},
+      actionType: sys.actionType || {}, actions: sys.actions || {}, frequency: sys.frequency ?? null,
+      bonus: sys.bonus || {}, damageRolls: sys.damageRolls || {}, range: sys.range ?? null,
+      spelldc: sys.spelldc || {}, tradition: sys.tradition || {}, prepared: sys.prepared || {},
+      location: sys.location || {}, damage: sys.damage || {}, defense: sys.defense || {}, time: sys.time || {},
+    },
+  };
+}
+
+function managedDocumentSummary(doc) {
+  const seeker = doc?.flags?.seeker || {};
+  if (!seeker.managed || !seeker.entityId) return null;
+  const source = doc?.toObject?.(false) || {};
+  const sys = source.system || {};
+  const snapshot = {
+    name: doc.name || source.name || "",
+    type: doc.type || source.type || "",
+    img: doc.img || source.img || "",
+  };
+  if (doc.documentName === "Actor") {
+    snapshot.prototypeToken = source.prototypeToken ? {
+      width: source.prototypeToken.width, height: source.prototypeToken.height,
+      disposition: source.prototypeToken.disposition, texture: source.prototypeToken.texture || {},
+    } : null;
+    snapshot.system = {
+      details: sys.details || {}, traits: sys.traits || {}, attributes: sys.attributes || {}, perception: sys.perception || {},
+      skills: sys.skills || {}, initiative: sys.initiative || {}, saves: sys.saves || {}, abilities: sys.abilities || {},
+    };
+    snapshot.items = (doc.items?.contents || []).filter(i => i?.flags?.seeker?.managedEmbedded).map(compactManagedItem).slice(0, 120);
+  } else {
+    snapshot.system = sys;
+  }
+  return {
+    uuid: doc.uuid || "",
+    document_type: doc.documentName || "",
+    seeker: { entity_id: seeker.entityId, prepared_id: seeker.preparedId ?? null },
+    snapshot,
+  };
+}
+
+function managedDocuments() {
+  const docs = [ ...(game.actors?.contents || []), ...(game.items?.contents || []) ];
+  return docs.map(managedDocumentSummary).filter(Boolean).slice(0, 250);
+}
+
+async function syncManagedDocument(doc, payload, endpoint = "") {
+  if (!doc) throw new Error("The linked Foundry document no longer exists.");
+  const flag = doc?.flags?.seeker || {};
+  const expected = String(payload?.entity_id ?? "");
+  if (!flag.managed || !expected || String(flag.entityId ?? "") !== expected) {
+    throw new Error("Seeker refused to update a Foundry document it does not own.");
+  }
+  const kind = String(payload?.prepared_kind || "item").toLowerCase();
+  if (doc.documentName === "Actor" || ["npc","monster"].includes(kind)) {
+    if (doc.documentName !== "Actor") throw new Error("The linked document is not an Actor.");
+    const source = buildPreparedActor(payload, endpoint);
+    await doc.update({ name: source.name, img: source.img, prototypeToken: source.prototypeToken, system: source.system });
+    const managedIds = (doc.items?.contents || []).filter(i => i?.flags?.seeker?.managedEmbedded).map(i => i.id).filter(Boolean);
+    if (managedIds.length) await doc.deleteEmbeddedDocuments("Item", managedIds);
+    const report = await populatePreparedActor(doc, payload);
+    return { message: `${doc.name} synchronized from Seeker.`, report, uuid: doc.uuid, document_type: "Actor", entity_id: payload.entity_id };
+  }
+  if (doc.documentName !== "Item") throw new Error("The linked document is not an Item.");
+  const source = buildPreparedItem(payload, endpoint);
+  if (String(doc.type) !== String(source.type)) throw new Error("Changing a linked Foundry item's document type is intentionally blocked; create a new item instead.");
+  await doc.update({ name: source.name, img: source.img, system: source.system });
+  return { message: `${doc.name} synchronized from Seeker.`, uuid: doc.uuid, document_type: "Item", entity_id: payload.entity_id };
+}
+
 async function runFoundryCommand(command, endpoint = "") {
   const type = String(command?.command_type || "").toLowerCase();
   const payload = command?.payload || {};
@@ -965,7 +1056,7 @@ async function runFoundryCommand(command, endpoint = "") {
   }
   if (type === "grant_prepared_content") {
     const created = await actor.createEmbeddedDocuments("Item", [buildPreparedItem(payload, endpoint)]);
-    return { message: `${created?.[0]?.name || payload.title || "Prepared content"} added to ${actor.name}.` };
+    return { message: `${created?.[0]?.name || payload.title || "Prepared content"} added to ${actor.name}.`, uuid: created?.[0]?.uuid || "", document_type: "Item", entity_id: payload.entity_id ?? null };
   }
   if (type === "push_prepared_content") {
     const kind = String(payload.prepared_kind || "item").toLowerCase();
@@ -978,10 +1069,16 @@ async function runFoundryCommand(command, endpoint = "") {
         report.spells ? `${report.spells} spell${report.spells === 1 ? "" : "s"}` : "",
       ].filter(Boolean).join(", ");
       const warning = report.warnings.length ? ` Some embedded data could not be created: ${report.warnings.join("; ")}` : "";
-      return { message: `${created?.name || payload.title || "Prepared creature"} created in the Actors directory${extras ? ` with ${extras}` : ""}.${warning}`, report };
+      return { message: `${created?.name || payload.title || "Prepared creature"} created in the Actors directory${extras ? ` with ${extras}` : ""}.${warning}`, report, uuid: created?.uuid || "", document_type: "Actor", entity_id: payload.entity_id ?? null };
     }
     const created = await Item.create(buildPreparedItem(payload, endpoint));
-    return { message: `${created?.name || payload.title || "Prepared content"} created in the Items directory.` };
+    return { message: `${created?.name || payload.title || "Prepared content"} created in the Items directory.`, uuid: created?.uuid || "", document_type: "Item", entity_id: payload.entity_id ?? null };
+  }
+  if (type === "sync_entity_document") {
+    const uuid = String(payload.foundry_uuid || "").trim();
+    if (!uuid) throw new Error("No Foundry UUID is linked to this entity.");
+    const doc = await fromUuid(uuid);
+    return syncManagedDocument(doc, payload, endpoint);
   }
   throw new Error(`Unsupported command type: ${type}`);
 }
@@ -1073,6 +1170,7 @@ async function sendState() {
       world: { id: game.world?.id || "", title: game.world?.title || "" },
       scene: sceneSummary(globalThis.canvas?.scene || game.scenes?.active),
       actors,
+      managed_documents: managedDocuments(),
       combat: combat ? {
         active: !!combat.started,
         round: combat.round ?? null,

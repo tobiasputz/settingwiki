@@ -1,0 +1,140 @@
+{% extends 'base.html' %}
+{% block title %}Living Table · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="v7-shell" data-v7-root>
+  <section class="v7-hero">
+    <div class="v7-hero-copy">
+      <span class="eyebrow">SEEKER 7 · THE LIVING TABLE</span>
+      <h1>Prepare. Run. Resolve. Remember.</h1>
+      <p>One operating surface for the campaign itself. Seeker keeps the context, Foundry executes mechanics, and permanent canon changes only when you approve them.</p>
+    </div>
+    <div class="v7-hero-status">
+      <div><span>TABLE</span><strong>{{ v7.campaign.name or 'Campaign' }}</strong></div>
+      <div><span>SESSION</span><strong>{% if v7.session %}{{ v7.session.title }}{% else %}No session prepared{% endif %}</strong></div>
+      <div><span>FOUNDRY</span><strong class="{{ 'ok' if v7.foundry.received_at else 'muted' }}">{{ 'Connected' if v7.foundry.received_at else 'Offline' }}</strong></div>
+    </div>
+  </section>
+
+  <nav class="v7-modebar" aria-label="Living Table workspaces">
+    <button class="active" data-v7-tab="cockpit"><span>✦</span><b>Table</b><small>Run now</small></button>
+    <button data-v7-tab="entities"><span>◇</span><b>Entities</b><small>Everything connected</small></button>
+    <button data-v7-tab="encounters"><span>⚔</span><b>Encounters</b><small>Budget & prepare</small></button>
+    <button data-v7-tab="loot"><span>◆</span><b>Loot</b><small>Claim & distribute</small></button>
+    <button data-v7-tab="knowledge"><span>◉</span><b>Knowledge</b><small>Reveal by fact</small></button>
+    <button data-v7-tab="memory"><span>⌕</span><b>Memory</b><small>Ask the campaign</small></button>
+    <button data-v7-tab="sync"><span>∞</span><b>Foundry Sync</b><small>Compare safely</small></button>
+    <button data-v7-tab="logic"><span>⌘</span><b>World Logic</b><small>Dependencies</small></button>
+    <button data-v7-tab="assets"><span>▣</span><b>Assets</b><small>Usage & recipes</small></button>
+    <button data-v7-tab="access"><span>⚿</span><b>Access</b><small>Permissions</small></button>
+  </nav>
+
+  <section class="v7-workspace active" data-v7-pane="cockpit">
+    <div class="v7-flowstrip">
+      <article class="active"><span>01</span><div><strong>Prepare</strong><small>Scenes, encounters, clues, media</small></div></article>
+      <article class="active"><span>02</span><div><strong>Run</strong><small>One control surface at the table</small></div></article>
+      <article><span>03</span><div><strong>Resolve</strong><small>Review what changed</small></div></article>
+      <article><span>04</span><div><strong>Remember</strong><small>Advance campaign state</small></div></article>
+    </div>
+
+    <div class="v7-dashboard-grid">
+      <section class="v7-panel v7-panel-large">
+        <header class="v7-panel-head"><div><span class="eyebrow">NOW</span><h2>{{ v7.session.title if v7.session else 'No live session' }}</h2></div><div class="v7-head-actions"><a class="v7-button ghost" href="/gm/prep">Prep</a><a class="v7-button" href="/gm/session">Classic console</a></div></header>
+        <div id="v7SceneRail" class="v7-scene-rail"></div>
+        <div class="v7-quick-grid">
+          <button data-v7-jump="encounters"><span>⚔</span><strong>Start encounter</strong><small>Budget, sync actors, run</small></button>
+          <a href="/gm/media"><span>▣</span><strong>Reveal media</strong><small>Send it to the table display</small></a>
+          <button data-v7-jump="loot"><span>◆</span><strong>Drop loot</strong><small>Players can claim on phone</small></button>
+          <button data-v7-quick-change><span>✦</span><strong>Record change</strong><small>Review it after the session</small></button>
+          <a href="/gm/foundry-workshop"><span>⬡</span><strong>Create PF2e content</strong><small>Push mechanics to Foundry</small></a>
+          <button data-v7-jump="knowledge"><span>◉</span><strong>Recall Knowledge</strong><small>Reveal one fact, not the whole monster</small></button>
+        </div>
+      </section>
+
+      <aside class="v7-panel">
+        <header class="v7-panel-head"><div><span class="eyebrow">ATTENTION</span><h2>Continuity watch</h2></div><span id="v7WarningCount" class="v7-count"></span></header>
+        <div id="v7Warnings" class="v7-stack"></div>
+      </aside>
+
+      <section class="v7-panel">
+        <header class="v7-panel-head"><div><span class="eyebrow">RESOLVE</span><h2>Session changes</h2></div><button class="v7-button ghost small" data-v7-review>Review</button></header>
+        <div id="v7ChangePeek" class="v7-stack"></div>
+      </section>
+
+      <section class="v7-panel">
+        <header class="v7-panel-head"><div><span class="eyebrow">WORLD MOTION</span><h2>Fronts</h2></div><a class="v7-button ghost small" href="/admin/living">Manage</a></header>
+        <div id="v7FrontPeek" class="v7-stack"></div>
+      </section>
+
+      <section class="v7-panel">
+        <header class="v7-panel-head"><div><span class="eyebrow">FOUNDRY</span><h2>Managed sync</h2></div><button class="v7-button ghost small" data-v7-jump="sync">Open</button></header>
+        <div id="v7SyncPeek" class="v7-sync-summary"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="v7-workspace" data-v7-pane="entities">
+    <header class="v7-section-head"><div><span class="eyebrow">UNIVERSAL ENTITY GRAPH</span><h2>Everything that matters, connected.</h2><p>Lore, characters, NPCs, monsters, items and factions share one relationship/history layer without replacing their original Seeker source.</p></div><button class="v7-button" data-v7-new-entity>＋ New entity</button></header>
+    <div class="v7-browser-layout">
+      <aside class="v7-browser-sidebar">
+        <div class="v7-searchbox"><span>⌕</span><input data-v7-entity-search placeholder="Search entities"></div>
+        <div id="v7EntityKinds" class="v7-filter-chips"></div>
+        <div class="v7-mini-card"><span class="eyebrow">GRAPH</span><strong id="v7RelationCount">—</strong><small>live entity connections</small></div>
+      </aside>
+      <section><div id="v7EntityGrid" class="v7-entity-grid"></div></section>
+    </div>
+  </section>
+
+  <section class="v7-workspace" data-v7-pane="encounters">
+    <header class="v7-section-head"><div><span class="eyebrow">ENCOUNTER BUILDER</span><h2>Balance the threat. Keep the fiction attached.</h2><p>PF2e XP budgets are calculated from party level and size. Preparing an encounter updates existing Seeker-managed Foundry actors where possible instead of duplicating them.</p></div><button class="v7-button" data-v7-new-encounter>＋ Build encounter</button></header>
+    <div id="v7EncounterGrid" class="v7-encounter-grid"></div>
+  </section>
+
+  <section class="v7-workspace" data-v7-pane="loot">
+    <header class="v7-section-head"><div><span class="eyebrow">LIVE LOOT</span><h2>Put treasure on the table.</h2><p>Create a loot drop once. Players can claim it from their phones and Seeker queues the inventory handoff to their linked Foundry actor.</p></div><button class="v7-button" data-v7-new-loot>＋ New loot drop</button></header>
+    <div id="v7LootGrid" class="v7-loot-grid"></div>
+  </section>
+
+  <section class="v7-workspace" data-v7-pane="knowledge">
+    <header class="v7-section-head"><div><span class="eyebrow">KNOWLEDGE LAYERS</span><h2>Reveal facts, not files.</h2><p>Give players rumors, discoveries and mechanical facts independently. Recall Knowledge can reveal only the information earned by that character.</p></div></header>
+    <div class="v7-split-workspace">
+      <aside><div class="v7-searchbox"><span>⌕</span><input data-v7-knowledge-search placeholder="Find an entity"></div><div id="v7KnowledgeEntityList" class="v7-select-list"></div></aside>
+      <section id="v7KnowledgeEditor" class="v7-panel v7-knowledge-editor"><div class="v7-empty"><span>◉</span><h3>Select an entity</h3><p>Facts and Recall Knowledge controls will appear here.</p></div></section>
+    </div>
+  </section>
+
+  <section class="v7-workspace" data-v7-pane="memory">
+    <header class="v7-section-head"><div><span class="eyebrow">CAMPAIGN MEMORY</span><h2>Ask what actually happened.</h2><p>Search canon, entity records, session summaries and table events together. Results always link back to their source instead of inventing an answer.</p></div></header>
+    <div class="v7-memory-search"><span>⌕</span><input id="v7MemoryQuery" placeholder="Where has the party encountered the Black Sun symbol?"><button class="v7-button" id="v7MemorySearch">Search campaign</button></div>
+    <div id="v7MemoryResults" class="v7-memory-results"><div class="v7-empty"><span>⌕</span><h3>Your campaign, indexed.</h3><p>Try a name, symbol, faction, place or question.</p></div></div>
+  </section>
+
+  <section class="v7-workspace" data-v7-pane="sync">
+    <header class="v7-section-head"><div><span class="eyebrow">MANAGED FOUNDRY SYNC</span><h2>Know which version is different before overwriting anything.</h2><p>Only documents created and flagged by Seeker participate. Conflicts are surfaced; Seeker never guesses which unrelated Foundry actor it may edit.</p></div><a class="v7-button ghost" href="/gm/integrations">Bridge settings</a></header>
+    <div id="v7SyncGrid" class="v7-sync-grid"></div>
+  </section>
+
+  <section class="v7-workspace" data-v7-pane="logic">
+    <header class="v7-section-head"><div><span class="eyebrow">WORLD STATE DEPENDENCIES</span><h2>Catch contradictions before the players do.</h2><p>Rules can watch an entity state and warn when session prep or another dependency conflicts with it. Seeker also automatically checks inactive/dead entities referenced by upcoming prep.</p></div><button class="v7-button" data-v7-new-dependency>＋ New rule</button></header>
+    <div class="v7-dashboard-grid"><section class="v7-panel v7-panel-large"><header class="v7-panel-head"><h2>Current warnings</h2></header><div id="v7LogicWarnings" class="v7-stack"></div></section><section class="v7-panel"><header class="v7-panel-head"><h2>Relationship evolution</h2></header><p class="v7-muted">Open any entity to record relationship states over time. V7 preserves each transition by session instead of replacing the previous state.</p></section></div>
+  </section>
+
+  <section class="v7-workspace" data-v7-pane="assets">
+    <header class="v7-section-head"><div><span class="eyebrow">ASSET LIBRARY</span><h2>One visual library, with reference awareness.</h2><p>See what consumes storage and whether an asset is referenced before cleaning anything up. Token styling can be saved as reusable campaign recipes.</p></div><button class="v7-button ghost" data-v7-refresh-assets>↻ Refresh usage</button></header>
+    <div id="v7AssetSummary" class="v7-metric-row"></div>
+    <div class="v7-dashboard-grid"><section class="v7-panel v7-panel-large"><header class="v7-panel-head"><h2>Stored media</h2></header><div id="v7AssetGrid" class="v7-asset-grid"></div></section><section class="v7-panel"><header class="v7-panel-head"><h2>Token recipes</h2></header><div id="v7TokenRecipes" class="v7-stack"></div><button class="v7-button ghost full" data-v7-new-recipe>＋ Save recipe</button></section></div>
+  </section>
+
+  <section class="v7-workspace" data-v7-pane="access">
+    <header class="v7-section-head"><div><span class="eyebrow">ACCESS MATRIX</span><h2>Roles stay simple. Capabilities stay precise.</h2><p>Owner, co-GM, player and spectator are useful defaults. V7 lets you tune what each role can actually do without sharing administrative access.</p></div></header>
+    <div id="v7PermissionMatrix" class="v7-permission-matrix"></div>
+    <section class="v7-panel"><header class="v7-panel-head"><div><span class="eyebrow">PER-PERSON OVERRIDES</span><h2>Exceptions without new roles</h2></div></header><p class="v7-muted">Leave a capability inherited for normal role behavior, or explicitly allow/deny it for one invitation.</p><div id="v7MemberPermissions" class="v7-member-permissions"></div></section>
+    <section class="v7-panel"><header class="v7-panel-head"><h2>Integration capabilities</h2></header><div id="v7IntegrationGrid" class="v7-integration-grid"></div></section>
+    <section class="v7-panel"><header class="v7-panel-head"><h2>Reliability & health</h2><button class="v7-button ghost small" data-v7-health>Run check</button></header><div id="v7Health" class="v7-health"></div></section>
+  </section>
+
+  <div class="v7-drawer" id="v7Drawer" aria-hidden="true"><div class="v7-drawer-backdrop" data-v7-drawer-close></div><aside><header><div><span class="eyebrow" id="v7DrawerEyebrow">EDITOR</span><h2 id="v7DrawerTitle">Edit</h2></div><button data-v7-drawer-close>×</button></header><div id="v7DrawerBody" class="v7-drawer-body"></div></aside></div>
+</main>
+<script id="v7State" type="application/json">{{ v7|tojson }}</script>
+{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7000">{% endblock %}
+{% block scripts %}<script src="/static/v7.js?v=7000"></script>{% endblock %}

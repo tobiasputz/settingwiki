@@ -1,9 +1,9 @@
-const STATIC='seeker-static-v6500';
-const PRIVATE='seeker-private-v6500';
-const META='seeker-offline-meta-v6500';
+const STATIC='seeker-static-v7000';
+const PRIVATE='seeker-private-v7000';
+const META='seeker-offline-meta-v7000';
 const ENABLE_KEY='/__seeker_offline_enabled__';
-const SHELL=['/static/wiki.css?v=6500','/static/wiki.js?v=6500','/static/tour.css?v=6500','/static/tour.js?v=6500','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png'];
-const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/structures','/archive','/schedule','/tables','/investigation','/recap'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
+const SHELL=['/static/wiki.css?v=7000','/static/wiki.js?v=7000','/static/tour.css?v=7000','/static/tour.js?v=7000','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png','/static/v7.css?v=7000','/static/v7-player.js?v=7000'];
+const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/structures','/archive','/schedule','/tables','/investigation','/recap','/app'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
 const privateAsset=u=>u.pathname.startsWith('/project-asset/')||u.pathname.startsWith('/uploads/');
 async function offlineEnabled(){const c=await caches.open(META);return !!(await c.match(ENABLE_KEY))}
 async function enableOffline(){const c=await caches.open(META);await c.put(ENABLE_KEY,new Response('1'));return true}

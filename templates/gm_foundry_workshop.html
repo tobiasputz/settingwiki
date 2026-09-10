@@ -314,6 +314,7 @@
           <button type="button" data-token-preset="parchment">Parchment</button><button type="button" data-token-preset="etched">Etched Steel</button><button type="button" data-token-preset="rune">Runic</button><button type="button" data-token-preset="boss">Boss</button>
           <button type="button" data-token-preset="minimal">Minimal</button><button type="button" data-token-preset="portrait">Portrait</button><button type="button" data-token-preset="badge">Badge</button><button type="button" data-token-preset="borderless">Borderless</button>
         </div></section>
+        <section class="fw-token-recipe-bar"><small>CAMPAIGN RECIPES</small><div><select data-token-recipe-select><option value="">Choose saved recipe…</option></select><button type="button" class="quiet-btn" data-token-recipe-apply>Apply</button><input data-token-recipe-name maxlength="160" placeholder="New recipe name"><button type="button" class="quiet-btn" data-token-recipe-save>Save current</button><button type="button" class="quiet-btn" data-token-recipe-delete>Delete</button></div></section>
         <section class="fw-token-control-grid">
           <label><span>Shape</span><select data-token-shape><option value="circle">Circle</option><option value="roundsquare">Rounded square</option><option value="square">Square</option><option value="hex">Hex</option><option value="octagon">Octagon</option><option value="diamond">Diamond</option><option value="shield">Shield</option></select></label>
           <label><span>Frame pattern</span><select data-token-pattern><option value="clean">Clean</option><option value="ticks">Ticks</option><option value="runes">Runes</option><option value="rivets">Rivets</option><option value="cardinal">Cardinal marks</option><option value="segmented">Segmented ring</option></select></label>
@@ -339,4 +340,5 @@
 </div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6500"><script src="/static/foundry-workshop.js?v=6500"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7000">{% endblock %}
+{% block scripts %}<script src="/static/foundry-workshop.js?v=7000"></script>{% endblock %}

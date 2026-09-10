@@ -1,6 +1,10 @@
-# Seeker 6.1.5
+# Seeker 7.0.0
 
-This build includes Foundry Bridge 1.4.0 with hardened PF2e creature strikes/spellcasting/spell imports, structured special-ability authoring, expanded Token Forge, forced post-push refresh, and Discord mention fixes.
+**Seeker 7 — The Living Table** turns the existing campaign wiki, session tools, Foundry Workshop, maps and world-state systems into one campaign operating layer. The primary GM workspace is `/gm/v7`; the phone-oriented player surface is `/app`. Existing Seeker data is migrated additively and a pre-V7 SQLite backup is created automatically on first schema initialization.
+
+For the current Railway deployment the canonical public origin is `https://seeker.up.railway.app`. Foundry Bridge 1.5.0 is installed/updated from `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
+
+This build includes Foundry Bridge 1.5.0 with hardened PF2e creature strikes/spellcasting/spell imports, structured special-ability authoring, expanded Token Forge, forced post-push refresh, and Discord mention fixes.
 
 # Seeker — interactive setting & session companion
 
@@ -15,7 +19,7 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 
 V6.1 turns the optional Foundry connection into a normal installable Foundry module. On the active campaign's **GM → Integrations** page, copy the manifest URL and paste it into Foundry's **Install Module → Manifest URL** field. Enable the module in the world, then paste Seeker's private bridge endpoint into the module settings. Only a GM Foundry client pushes data, and the bridge is read-only: Seeker never changes Foundry actors or scenes. The bridge now repairs reverse-proxy HTTP/HTTPS mismatches automatically and shows an in-Foundry success/failure notification after its first heartbeat, so a failed connection no longer leaves the GM with only an unexplained “Waiting for Foundry” state.
 
-For the current Railway deployment, the canonical public origin is `https://seeker.up.railway.app`. Seeker normally derives this from the public request host (rather than blindly trusting a secondary Railway domain). You can still pin it explicitly with `SEEKER_PUBLIC_URL=https://seeker.up.railway.app`. Foundry Bridge 1.1.2 also repairs an old saved Seeker hostname after the module is updated from the current manifest.
+For the current Railway deployment, the canonical public origin is `https://seeker.up.railway.app`. Seeker normally derives this from the public request host (rather than blindly trusting a secondary Railway domain). You can still pin it explicitly with `SEEKER_PUBLIC_URL=https://seeker.up.railway.app`. Foundry Bridge 1.5.0 also repairs an old saved Seeker hostname after the module is updated from the current manifest.
 
 Player characters can be linked to synced Foundry actors from the Seeker character editor. The owning player then gets a polished read-only PF2e sheet on Seeker with identity, vitals, defenses, skills, attacks, feats, actions, inventory, spells, conditions and a deep link back to the real Foundry actor. Foundry remains the source of truth; Seeker stores a bounded snapshot for display. Other players do not receive that private mechanical snapshot.
 

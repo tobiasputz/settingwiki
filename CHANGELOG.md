@@ -1,3 +1,21 @@
+# Seeker 7.0.0 — The Living Table
+
+- Adds the **Living Table** campaign operating surface built around Prepare → Run → Resolve → Remember.
+- Adds a universal, campaign-scoped entity registry linking lore, characters, monsters, NPCs, factions, places, items, sessions, maps, relationships, knowledge and Foundry documents.
+- Adds versioned entity history with restore, an audit trail, additive V7 schema migration, and automatic pre-V7 SQLite backup.
+- Adds managed Foundry synchronization with Seeker-owned document flags, UUID tracking, field-level comparison, conflict states and safe directional resolution.
+- Adds PF2e encounter budgeting, reusable encounters, Foundry preparation, live loot pools and player claims.
+- Adds layered per-player knowledge facts, Recall Knowledge records and selective reveals without exposing full statblocks.
+- Adds session change review/approval/application so campaign state advances explicitly at closeout.
+- Adds campaign-memory search with player-safe filtering across lore, entities and sessions.
+- Adds world-state dependency warnings, relationship-state history, asset usage accounting and reusable Token Forge recipes.
+- Adds a granular role/individual permission matrix and a dedicated mobile Table App for Character, Inventory, Journal, Map and Party.
+- Fixes player JSON/privacy paths so GM-only entity data, unrevealed facts and session notes cannot be recovered through V7 APIs.
+- Fixes loot claim ordering so a failed/competing claim cannot queue an invalid Foundry grant.
+- Fixes V7 asset accounting on SQLite and makes permission overrides campaign-scoped.
+- Foundry Bridge **1.5.0** adds managed-document snapshots and safe `sync_entity_document` support while preserving Seeker 6.x queue/import behavior.
+- Static cache generation moves to **7000** so browsers/PWAs cannot remain pinned to pre-V7 UI assets.
+
 # Seeker 6.1.5 — PF2e creature importer hardening
 
 - Foundry Bridge **1.4.0** now writes and verifies PF2e NPC strike `damageRolls`, so authored strike formulas survive document creation/migration and power the native Foundry Damage button.
