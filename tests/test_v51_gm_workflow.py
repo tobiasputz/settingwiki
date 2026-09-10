@@ -125,4 +125,4 @@ def test_v51_frontend_repairs_and_gm_tools_are_shipped():
     assert "image.complete&&image.naturalWidth" in map_js and "stage.addEventListener('click'" in map_js and 'aria-hidden="true" role="dialog"' in map_tpl
     assert 'character-hero-v5' in char_tpl and '.character-page.story-only' in wiki_css and 'Pathbuilder / sheet URL' in char_tpl
     assert 'data-notification-delete' in wiki_js and "method:'DELETE'" in wiki_js
-    assert 'seeker-static-v6000' in sw
+    assert 'seeker-static-v6100' in sw

@@ -7,6 +7,14 @@ Seeker turns a normal multi-file LaTeX campaign project into **two synchronized 
 
 It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX project is already the canonical setting document, while Seeker becomes the shared companion players and GMs actually use between and during sessions.
 
+## Seeker 6.1: Foundry bridge & table reliability
+
+V6.1 turns the optional Foundry connection into a normal installable Foundry module. On the active campaign's **GM → Integrations** page, copy the manifest URL and paste it into Foundry's **Install Module → Manifest URL** field. Enable the module in the world, then paste Seeker's private bridge endpoint into the module settings. Only a GM Foundry client pushes data, and the bridge is read-only: Seeker never changes Foundry actors or scenes.
+
+Player characters can be linked to synced Foundry actors from the Seeker character editor. The owning player then gets a polished read-only PF2e sheet on Seeker with identity, vitals, defenses, skills, attacks, feats, actions, inventory, spells, conditions and a deep link back to the real Foundry actor. Foundry remains the source of truth; Seeker stores a bounded snapshot for display. Other players do not receive that private mechanical snapshot.
+
+Discord integration can now store a campaign-specific mention (plain text or a real Discord role/user mention) and optionally post an automatic session-confirmation announcement when the GM first sets or changes a planned session date. V6.1 also fixes intermittent scroll trapping across normal pages, drawers and modal-heavy screens while keeping intentional fixed canvases such as Studio, Atlas and Table Display unchanged.
+
 ## Seeker 6.0: campaign continuity & integrations
 
 V6 connects the systems Seeker already has rather than replacing them. It adds optional **Discord webhooks**, a small **read-only Foundry bridge**, private subscribable **calendar feeds / `.ics` exports**, rolling portable backups, campaign checkpoints/undo, Codex revision history, cross-campaign knowledge comparison and controlled campaign convergence. No external integration is required for normal use.

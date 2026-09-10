@@ -13,8 +13,8 @@
   <link rel="icon" href="/static/seeker-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Seeker' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=6000">
-  <link rel="stylesheet" href="/static/tour.css?v=6000">
+  <link rel="stylesheet" href="/static/wiki.css?v=6100">
+  <link rel="stylesheet" href="/static/tour.css?v=6100">
   {% block head %}{% endblock %}
 </head>
 {% set campaign_ctx = campaign_context(request) %}
@@ -80,7 +80,7 @@
 
   {% if request.session.get('admin') or request.session.get('co_gm') %}<nav class="gm-view-switcher" aria-label="GM mode switcher"><span>{{ 'OWNER' if request.session.get('admin') else 'CO-GM' }}</span><a href="/">Player</a><a href="/gm/session">Session</a><a href="/gm/prep">Prep</a><a href="/gm/continuity">Continuity</a>{% if request.session.get('admin') %}<a href="/admin">Studio</a>{% endif %}<a href="/admin/campaign">Worldcraft</a><a href="/admin/living">State</a></nav>{% endif %}
 
-  <aside class="notification-drawer" id="notificationDrawer" aria-hidden="true"><header><div><small>SEEKER FEED</small><strong>Notifications</strong></div><div class="notification-head-actions"><button type="button" data-notification-read-all title="Mark all read">✓ All read</button><button data-close-notifications>×</button></div></header>{% if wiki and wiki.player_label and not request.session.get('admin') and not request.session.get('co_gm') %}<details class="notification-prefs"><summary>What should Seeker notify me about?</summary><div><label><input type="checkbox" data-notification-pref="follow"> Followed lore</label><label><input type="checkbox" data-notification-pref="session"> Sessions</label><label><input type="checkbox" data-notification-pref="handout"> Handouts</label><label><input type="checkbox" data-notification-pref="reveal"> Reveals</label><label><input type="checkbox" data-notification-pref="comment"> Comments</label><label><input type="checkbox" data-notification-pref="spotlight"> GM spotlights</label><label><input type="checkbox" data-notification-pref="notice"> General notices</label></div></details>{% endif %}<div id="notificationFeed"><div class="search-hint">No new revelations or table notices.</div></div></aside>
+  <aside class="notification-drawer" id="notificationDrawer" aria-hidden="true"><header><div><small>SEEKER FEED</small><strong>Notifications</strong></div><div class="notification-head-actions"><button type="button" data-notification-read-all title="Mark all read">✓ All read</button><button data-close-notifications>×</button></div></header>{% if wiki and wiki.player_label and not request.session.get('admin') and not request.session.get('co_gm') %}<details class="notification-prefs"><summary>What should Seeker notify me about?</summary><div><label><input type="checkbox" data-notification-pref="follow"> Followed lore</label><label><input type="checkbox" data-notification-pref="session"> Sessions</label><label><input type="checkbox" data-notification-pref="handout"> Handouts</label><label><input type="checkbox" data-notification-pref="reveal"> Reveals</label><label><input type="checkbox" data-notification-pref="comment"> Comments</label><label><input type="checkbox" data-notification-pref="notice"> General notices</label></div></details>{% endif %}<div id="notificationFeed"><div class="search-hint">No new revelations or table notices.</div></div></aside>
 
   <div class="search-overlay" id="searchOverlay" aria-hidden="true">
     <div class="search-panel command-palette">
@@ -96,8 +96,8 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=6000"></script>
-  <script src="/static/tour.js?v=6000"></script>
+  <script src="/static/wiki.js?v=6100"></script>
+  <script src="/static/tour.js?v=6100"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -16,7 +16,7 @@
   qsa('[data-v6-backup-delete]').forEach(b=>b.onclick=async()=>{if(!confirm('Delete this stored backup file?'))return;try{await fetch(`/api/v6/backups/${b.dataset.v6BackupDelete}`,{method:'DELETE'}).then(json);b.closest('[data-backup-id]')?.remove();flash('Backup deleted.')}catch(e){flash(e.message,true)}});
 
   const integ=qs('[data-v6-integration-form]');
-  integ?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(integ);try{await post('/api/v6/integrations',{discord_webhook:f.get('discord_webhook')||undefined,discord_enabled:f.has('discord_enabled')},'PUT');flash('Integration settings saved.')}catch(err){flash(err.message,true)}});
+  integ?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(integ);try{await post('/api/v6/integrations',{discord_webhook:f.get('discord_webhook')||undefined,discord_enabled:f.has('discord_enabled'),discord_mention:String(f.get('discord_mention')||''),discord_auto_session_confirmed:f.has('discord_auto_session_confirmed')},'PUT');flash('Integration settings saved.')}catch(err){flash(err.message,true)}});
   qs('[data-v6-discord-test]')?.addEventListener('click',async()=>{try{await post('/api/v6/discord/test');flash('Test message sent to Discord.')}catch(e){flash(e.message,true)}});
   qs('[data-v6-discord-send]')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),content=String(f.get('content')||'').trim();if(!content){flash('Write an announcement first.',true);return}try{await post('/api/v6/discord/send',{content});e.currentTarget.reset();flash('Announcement posted to Discord.')}catch(err){flash(err.message,true)}});
   qs('[data-v6-rotate-foundry]')?.addEventListener('click',async()=>{if(!confirm('Rotate the Foundry bridge token? The old endpoint will stop working.'))return;try{await post('/api/v6/integrations',{rotate_foundry_token:true},'PUT');location.reload()}catch(e){flash(e.message,true)}});
@@ -24,6 +24,7 @@
   qs('[data-v6-rotate-display]')?.addEventListener('click',async()=>{if(!confirm('Rotate the table display URL? Existing display links will stop working.'))return;try{await post('/api/v6/integrations',{rotate_display_token:true},'PUT');location.reload()}catch(e){flash(e.message,true)}});
   qs('[data-copy-display]')?.addEventListener('click',async()=>{const v=qs('[data-display-feed]')?.value||'';try{await navigator.clipboard.writeText(v);flash('Display URL copied.')}catch{prompt('Copy this URL',v)}});
   qs('[data-copy-calendar]')?.addEventListener('click',async()=>{const v=qs('[data-calendar-feed]')?.value||'';try{await navigator.clipboard.writeText(v);flash('Calendar URL copied.')}catch{prompt('Copy this URL',v)}});
+  qs('[data-copy-foundry-manifest]')?.addEventListener('click',async()=>{const v=qs('[data-foundry-manifest]')?.value||'';try{await navigator.clipboard.writeText(v);flash('Foundry manifest URL copied.')}catch{prompt('Copy this Manifest URL',v)}});
   qsa('[data-copy-target="previous"]').forEach(b=>b.onclick=async()=>{const v=b.closest('.v6-card')?.querySelector('[data-copy-value]')?.value||'';try{await navigator.clipboard.writeText(v);flash('Copied.')}catch{prompt('Copy',v)}});
 
   const mediaRoot=qs('[data-v6-media]'),sid=Number(mediaRoot?.dataset.sessionId||0);

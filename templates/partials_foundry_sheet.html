@@ -1,0 +1,62 @@
+{% set fs = foundry_actor.sheet or {} %}
+{% set ident = fs.identity or {} %}
+{% set vitals = fs.vitals or {} %}
+<section class="foundry-character-sheet" data-foundry-character>
+  <header class="foundry-sheet-hero">
+    <div class="foundry-sheet-portrait">{% if foundry_actor.img %}<img src="{{ foundry_actor.img }}" alt="{{ foundry_actor.name }} in Foundry">{% else %}<span>⬡</span>{% endif %}</div>
+    <div class="foundry-sheet-title"><span class="eyebrow">LIVE FROM FOUNDRY</span><h2>{{ foundry_actor.name or character.name }}</h2><p>{% if ident.ancestry %}{{ ident.ancestry }}{% endif %}{% if ident.heritage %} · {{ ident.heritage }}{% endif %}{% if ident.class_name %} · {{ ident.class_name }}{% endif %}{% if ident.level is not none %} · Level {{ ident.level }}{% endif %}</p><small>Read-only snapshot · Foundry remains the source of truth{% if foundry_actor.received_at %} · synced <time data-epoch="{{ foundry_actor.received_at }}"></time>{% endif %}</small></div>
+    <div class="foundry-sheet-actions">{% if foundry_actor.actor_url %}<a class="character-primary" href="{{ foundry_actor.actor_url }}" target="_blank" rel="noopener">⬡ Open actor in Foundry</a>{% endif %}<button class="quiet-btn" type="button" data-foundry-refresh>Refresh view</button></div>
+  </header>
+
+  {% if fs.warning %}<div class="foundry-warning">{{ fs.warning }}</div>{% endif %}
+  <div class="foundry-vital-grid">
+    <article><small>HP</small><strong>{{ vitals.hp.value|default('—') }} <span>/ {{ vitals.hp.max|default('—') }}</span></strong>{% if vitals.hp.temp %}<em>+{{ vitals.hp.temp }} temp</em>{% endif %}</article>
+    <article><small>AC</small><strong>{{ vitals.ac if vitals.ac is not none else '—' }}</strong></article>
+    <article><small>Perception</small><strong>{% if vitals.perception and vitals.perception.mod is not none %}{{ '%+d'|format(vitals.perception.mod) }}{% else %}—{% endif %}</strong></article>
+    <article><small>Speed</small><strong>{{ vitals.speed.value if vitals.speed and vitals.speed.value is not none else '—' }}{% if vitals.speed and vitals.speed.value is not none %}<span> ft</span>{% endif %}</strong></article>
+    <article><small>Hero Points</small><strong>{{ vitals.hero_points.value if vitals.hero_points else '—' }}{% if vitals.hero_points %}<span>/{{ vitals.hero_points.max }}</span>{% endif %}</strong></article>
+    <article><small>Focus</small><strong>{% if vitals.focus and vitals.focus.value is not none %}{{ vitals.focus.value }}<span>/{{ vitals.focus.max }}</span>{% else %}—{% endif %}</strong></article>
+  </div>
+
+  <nav class="foundry-sheet-tabs" aria-label="Foundry character sections">
+    <button type="button" class="active" data-foundry-tab="overview">Overview</button>
+    <button type="button" data-foundry-tab="skills">Skills</button>
+    <button type="button" data-foundry-tab="combat">Combat</button>
+    <button type="button" data-foundry-tab="magic">Magic</button>
+    <button type="button" data-foundry-tab="feats">Feats & actions</button>
+    <button type="button" data-foundry-tab="gear">Gear</button>
+  </nav>
+
+  <div class="foundry-sheet-pane active" data-foundry-pane="overview">
+    <div class="foundry-overview-grid">
+      <article class="foundry-block"><span class="eyebrow">ABILITIES</span><div class="foundry-ability-grid">{% for a in fs.abilities or [] %}<div><small>{{ a.label }}</small><strong>{{ '%+d'|format(a.mod) }}</strong></div>{% else %}<p class="muted">No ability data synced.</p>{% endfor %}</div></article>
+      <article class="foundry-block"><span class="eyebrow">SAVING THROWS</span><div class="foundry-stat-list">{% for s in fs.saves or [] %}<div><strong>{{ s.label|title }}</strong><span>{{ '%+d'|format(s.mod) if s.mod is not none else '—' }}</span><small>{{ s.rank_label or '' }}</small></div>{% else %}<p class="muted">No save data synced.</p>{% endfor %}</div></article>
+      <article class="foundry-block"><span class="eyebrow">IDENTITY</span><dl class="foundry-facts">{% if ident.background %}<div><dt>Background</dt><dd>{{ ident.background }}</dd></div>{% endif %}{% if ident.deity %}<div><dt>Deity</dt><dd>{{ ident.deity }}</dd></div>{% endif %}{% if ident.alignment %}<div><dt>Alignment</dt><dd>{{ ident.alignment }}</dd></div>{% endif %}{% if ident.languages %}<div><dt>Languages</dt><dd>{{ ident.languages|join(', ') }}</dd></div>{% endif %}{% if ident.traits %}<div><dt>Traits</dt><dd>{{ ident.traits|join(', ') }}</dd></div>{% endif %}</dl></article>
+      <article class="foundry-block"><span class="eyebrow">STATUS</span><div class="foundry-condition-grid">{% if vitals.dying %}<span>Dying {{ vitals.dying }}</span>{% endif %}{% if vitals.wounded %}<span>Wounded {{ vitals.wounded }}</span>{% endif %}{% if vitals.doomed %}<span>Doomed {{ vitals.doomed }}</span>{% endif %}{% for c in fs.conditions or [] %}<span>{{ c.name }}</span>{% else %}{% if not vitals.dying and not vitals.wounded and not vitals.doomed %}<p class="muted">No active conditions.</p>{% endif %}{% endfor %}</div></article>
+    </div>
+  </div>
+
+  <div class="foundry-sheet-pane" data-foundry-pane="skills">
+    <article class="foundry-block"><span class="eyebrow">SKILLS</span><div class="foundry-skill-grid">{% for s in fs.skills or [] %}<div><strong>{{ s.label|title }}</strong><span>{{ '%+d'|format(s.mod) if s.mod is not none else '—' }}</span><small>{{ s.rank_label or '' }}</small></div>{% else %}<p class="muted">No skills synced.</p>{% endfor %}</div></article>
+    {% if fs.lore %}<article class="foundry-block"><span class="eyebrow">LORE</span><div class="foundry-item-grid">{% for item in fs.lore %}<details><summary><strong>{{ item.name }}</strong>{% if item.level is not none %}<small>Level {{ item.level }}</small>{% endif %}</summary>{% if item.description %}<p>{{ item.description }}</p>{% endif %}</details>{% endfor %}</div></article>{% endif %}
+  </div>
+
+  <div class="foundry-sheet-pane" data-foundry-pane="combat">
+    <div class="foundry-overview-grid">
+      <article class="foundry-block"><span class="eyebrow">STRIKES</span><div class="foundry-stat-list combat">{% for s in fs.strikes or [] %}<div><strong>{{ s.name }}</strong><span>{{ '%+d'|format(s.mod) if s.mod is not none else '—' }}</span><small>{{ s.damage or (s.traits|join(', ')) }}</small></div>{% else %}<p class="muted">No strike data synced.</p>{% endfor %}</div></article>
+      <article class="foundry-block"><span class="eyebrow">DEFENSE</span><dl class="foundry-facts"><div><dt>Armor Class</dt><dd>{{ vitals.ac if vitals.ac is not none else '—' }}</dd></div>{% if vitals.class_dc is not none %}<div><dt>Class DC</dt><dd>{{ vitals.class_dc }}</dd></div>{% endif %}{% if vitals.speed and vitals.speed.other %}{% for sp in vitals.speed.other %}<div><dt>{{ sp.type|title }}</dt><dd>{{ sp.value }} ft</dd></div>{% endfor %}{% endif %}</dl></article>
+    </div>
+  </div>
+
+  <div class="foundry-sheet-pane" data-foundry-pane="magic">
+    {% if fs.spells %}{% for rank, spells in fs.spells.items()|sort %}<article class="foundry-block"><span class="eyebrow">{% if rank == '0' %}CANTRIPS{% else %}RANK {{ rank }}{% endif %}</span><div class="foundry-item-grid">{% for item in spells %}<details><summary>{% if item.img %}<img src="{{ item.img }}" alt="">{% endif %}<strong>{{ item.name }}</strong></summary>{% if item.description %}<p>{{ item.description }}</p>{% endif %}{% if item.traits %}<small>{{ item.traits|join(' · ') }}</small>{% endif %}</details>{% endfor %}</div></article>{% endfor %}{% else %}<div class="foundry-empty">No spells were synced for this actor.</div>{% endif %}
+  </div>
+
+  <div class="foundry-sheet-pane" data-foundry-pane="feats">
+    {% for label, rows in [('Feats', fs.feats or []), ('Actions', fs.actions or [])] %}<article class="foundry-block"><span class="eyebrow">{{ label|upper }}</span><div class="foundry-item-grid">{% for item in rows %}<details><summary>{% if item.img %}<img src="{{ item.img }}" alt="">{% endif %}<strong>{{ item.name }}</strong>{% if item.level is not none %}<small>Lv {{ item.level }}</small>{% endif %}</summary>{% if item.description %}<p>{{ item.description }}</p>{% endif %}{% if item.traits %}<small>{{ item.traits|join(' · ') }}</small>{% endif %}</details>{% else %}<p class="muted">No {{ label|lower }} synced.</p>{% endfor %}</div></article>{% endfor %}
+  </div>
+
+  <div class="foundry-sheet-pane" data-foundry-pane="gear">
+    <article class="foundry-block"><span class="eyebrow">INVENTORY</span><div class="foundry-item-grid gear">{% for item in fs.inventory or [] %}<details><summary>{% if item.img %}<img src="{{ item.img }}" alt="">{% endif %}<strong>{{ item.name }}</strong><small>{% if item.quantity and item.quantity != 1 %}×{{ item.quantity }} · {% endif %}{{ item.type|title }}{% if item.equipped %} · equipped{% endif %}</small></summary>{% if item.description %}<p>{{ item.description }}</p>{% endif %}{% if item.traits %}<small>{{ item.traits|join(' · ') }}</small>{% endif %}</details>{% else %}<p class="muted">No inventory synced.</p>{% endfor %}</div></article>
+  </div>
+</section>

@@ -1,8 +1,8 @@
 {
   "id": "seeker-bridge",
   "title": "Seeker Bridge",
-  "description": "Read-only context bridge from Foundry VTT to Seeker. Sends active scene, world, player-owned actor and combat context; never modifies Foundry documents.",
-  "version": "1.0.0",
+  "description": "Read-only bridge from Foundry VTT to Seeker. Syncs table context and player-owned character sheets for display in Seeker; it never modifies Foundry documents.",
+  "version": "1.1.0",
   "authors": [{"name": "Seeker"}],
   "compatibility": {"minimum": "12", "verified": "13"},
   "esmodules": ["seeker-bridge.mjs"],

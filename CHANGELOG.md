@@ -1,3 +1,14 @@
+# Seeker 6.1.0 — Foundry bridge & table reliability
+
+- Added a **public Foundry install manifest** at `/foundry/seeker-bridge/module.json` plus a matching public module ZIP, so the bridge can be installed directly through Foundry's **Install Module → Manifest URL** flow.
+- Upgraded the Foundry bridge to sync read-only PF2e actor snapshots (identity, HP/AC, saves, skills, strikes, feats, actions, inventory, spells, conditions and effects) while keeping Foundry as the mechanical source of truth.
+- Added explicit **Seeker character ↔ Foundry actor linking**. A player's own Seeker character page can render a polished read-only Foundry sheet and deep-link back to the actor in Foundry; other players do not receive the private mechanical snapshot.
+- Added campaign-specific **Discord mention text / role mentions** and optional automatic Discord announcements when a session date is first confirmed or changed.
+- Fixed intermittent **page scroll lock** across normal Seeker pages, modals, mobile drawers, Session Prep and tablet layouts by restricting viewport locking to Studio / Atlas / Table Display where it is intentional.
+- Removed the leftover player-facing spotlight preference; spotlight balancing remains strictly GM-only.
+- Bumped static/PWA assets to **v6100**.
+- V6.1 schema changes are additive; V6.0 campaigns migrate in place.
+
 # Seeker 6.0.0 — Campaign continuity & integrations
 
 - Added the **Continuity Center** with last-session change summaries, continuity warnings, cross-campaign knowledge comparison and campaign convergence controls.

@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS campaign_integrations (
     campaign_id INTEGER PRIMARY KEY,
     discord_webhook TEXT NOT NULL DEFAULT '',
     discord_enabled INTEGER NOT NULL DEFAULT 0,
+    discord_mention TEXT NOT NULL DEFAULT '',
+    discord_auto_session_confirmed INTEGER NOT NULL DEFAULT 0,
     foundry_bridge_token TEXT NOT NULL DEFAULT '',
     calendar_token TEXT NOT NULL DEFAULT '',
     display_token TEXT NOT NULL DEFAULT '',
@@ -42,6 +44,30 @@ CREATE TABLE IF NOT EXISTS foundry_bridge_state (
     received_at REAL NOT NULL,
     FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS foundry_actor_snapshots (
+    campaign_id INTEGER NOT NULL,
+    actor_id TEXT NOT NULL,
+    actor_uuid TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    img TEXT NOT NULL DEFAULT '',
+    actor_url TEXT NOT NULL DEFAULT '',
+    actor_type TEXT NOT NULL DEFAULT '',
+    owners_json TEXT NOT NULL DEFAULT '[]',
+    sheet_json TEXT NOT NULL DEFAULT '{}',
+    received_at REAL NOT NULL,
+    PRIMARY KEY(campaign_id,actor_id),
+    FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_foundry_actor_campaign_name ON foundry_actor_snapshots(campaign_id,name,actor_id);
+CREATE TABLE IF NOT EXISTS foundry_character_links (
+    character_id INTEGER PRIMARY KEY,
+    campaign_id INTEGER NOT NULL,
+    actor_id TEXT NOT NULL,
+    linked_at REAL NOT NULL,
+    FOREIGN KEY(character_id) REFERENCES player_characters(id) ON DELETE CASCADE,
+    FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_foundry_links_campaign_actor ON foundry_character_links(campaign_id,actor_id);
 CREATE TABLE IF NOT EXISTS lore_page_revisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     page_slug TEXT NOT NULL,
@@ -153,6 +179,10 @@ def init_v6_db(settings: Settings) -> None:
         cols={str(r[1]) for r in conn.execute("PRAGMA table_info(campaign_integrations)").fetchall()}
         if cols and 'display_token' not in cols:
             conn.execute("ALTER TABLE campaign_integrations ADD COLUMN display_token TEXT NOT NULL DEFAULT ''")
+        if cols and 'discord_mention' not in cols:
+            conn.execute("ALTER TABLE campaign_integrations ADD COLUMN discord_mention TEXT NOT NULL DEFAULT ''")
+        if cols and 'discord_auto_session_confirmed' not in cols:
+            conn.execute("ALTER TABLE campaign_integrations ADD COLUMN discord_auto_session_confirmed INTEGER NOT NULL DEFAULT 0")
 
 
 def _json(raw: Any, default: Any):
@@ -199,10 +229,11 @@ def integration_config(settings: Settings, campaign_id: int, *, include_secret: 
         if not row:
             foundry = secrets.token_urlsafe(24)
             calendar = secrets.token_urlsafe(24)
-            conn.execute('INSERT INTO campaign_integrations(campaign_id,foundry_bridge_token,calendar_token,display_token,updated_at) VALUES(?,?,?,?,?)', (cid, foundry, calendar, secrets.token_urlsafe(24), now))
+            conn.execute('''INSERT INTO campaign_integrations(
+                campaign_id,foundry_bridge_token,calendar_token,display_token,updated_at
+            ) VALUES(?,?,?,?,?)''', (cid, foundry, calendar, secrets.token_urlsafe(24), now))
             row = conn.execute('SELECT * FROM campaign_integrations WHERE campaign_id=?', (cid,)).fetchone()
     data = dict(row)
-    # Rows created during an earlier V6 development build are upgraded in place.
     dirty=False
     if not data.get('foundry_bridge_token'):
         data['foundry_bridge_token']=secrets.token_urlsafe(24);dirty=True
@@ -214,6 +245,7 @@ def integration_config(settings: Settings, campaign_id: int, *, include_secret: 
         with connect(settings) as conn:
             conn.execute('UPDATE campaign_integrations SET foundry_bridge_token=?,calendar_token=?,display_token=?,updated_at=? WHERE campaign_id=?',(data['foundry_bridge_token'],data['calendar_token'],data['display_token'],time.time(),cid))
     data['discord_configured'] = bool(data.get('discord_webhook'))
+    data['discord_auto_session_confirmed'] = bool(data.get('discord_auto_session_confirmed'))
     if not include_secret:
         data['discord_webhook'] = ''
         data['foundry_bridge_token'] = ''
@@ -227,6 +259,8 @@ def save_integration_config(settings: Settings, campaign_id: int, payload: dict)
     current = integration_config(settings, cid, include_secret=True)
     webhook = str(payload.get('discord_webhook', current.get('discord_webhook') or '')).strip()[:3000]
     enabled = 1 if payload.get('discord_enabled', current.get('discord_enabled')) else 0
+    mention = str(payload.get('discord_mention', current.get('discord_mention') or '')).strip()[:250]
+    auto_session = 1 if payload.get('discord_auto_session_confirmed', current.get('discord_auto_session_confirmed')) else 0
     foundry = str(current.get('foundry_bridge_token') or secrets.token_urlsafe(24))
     calendar = str(current.get('calendar_token') or secrets.token_urlsafe(24))
     display = str(current.get('display_token') or secrets.token_urlsafe(24))
@@ -237,9 +271,15 @@ def save_integration_config(settings: Settings, campaign_id: int, payload: dict)
     if payload.get('rotate_display_token'):
         display = secrets.token_urlsafe(24)
     with connect(settings) as conn:
-        conn.execute('''INSERT INTO campaign_integrations(campaign_id,discord_webhook,discord_enabled,foundry_bridge_token,calendar_token,display_token,updated_at)
-                        VALUES(?,?,?,?,?,?,?) ON CONFLICT(campaign_id) DO UPDATE SET discord_webhook=excluded.discord_webhook,discord_enabled=excluded.discord_enabled,foundry_bridge_token=excluded.foundry_bridge_token,calendar_token=excluded.calendar_token,display_token=excluded.display_token,updated_at=excluded.updated_at''',
-                     (cid, webhook, enabled, foundry, calendar, display, time.time()))
+        conn.execute('''INSERT INTO campaign_integrations(
+            campaign_id,discord_webhook,discord_enabled,discord_mention,discord_auto_session_confirmed,
+            foundry_bridge_token,calendar_token,display_token,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(campaign_id) DO UPDATE SET
+            discord_webhook=excluded.discord_webhook,discord_enabled=excluded.discord_enabled,
+            discord_mention=excluded.discord_mention,discord_auto_session_confirmed=excluded.discord_auto_session_confirmed,
+            foundry_bridge_token=excluded.foundry_bridge_token,calendar_token=excluded.calendar_token,
+            display_token=excluded.display_token,updated_at=excluded.updated_at''',
+            (cid, webhook, enabled, mention, auto_session, foundry, calendar, display, time.time()))
     return integration_config(settings, cid, include_secret=True)
 
 
@@ -247,8 +287,12 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     cfg = integration_config(settings, campaign_id, include_secret=True)
     if not cfg.get('discord_enabled') or not cfg.get('discord_webhook'):
         raise ValueError('Discord webhook is not enabled for this campaign.')
-    body = json.dumps({'content': str(content or '')[:1900], 'username': username[:80]}).encode('utf-8')
-    req = urllib.request.Request(str(cfg['discord_webhook']), data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/6.0'}, method='POST')
+    body = json.dumps({
+        'content': str(content or '')[:1900],
+        'username': username[:80],
+        'allowed_mentions': {'parse': ['roles', 'users', 'everyone']},
+    }).encode('utf-8')
+    req = urllib.request.Request(str(cfg['discord_webhook']), data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/6.1'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             return {'ok': 200 <= int(resp.status) < 300, 'status': int(resp.status)}
@@ -258,32 +302,182 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
         raise ValueError(f'Could not reach Discord: {exc}') from exc
 
 
+def discord_session_confirmation(settings: Settings, campaign_id: int, session: dict, *, base_url: str = '') -> dict:
+    cfg = integration_config(settings, campaign_id, include_secret=True)
+    if not cfg.get('discord_auto_session_confirmed'):
+        return {'ok': False, 'skipped': 'disabled'}
+    if not cfg.get('discord_enabled') or not cfg.get('discord_webhook'):
+        return {'ok': False, 'skipped': 'discord-not-configured'}
+    raw = str(session.get('session_date') or '').strip()
+    if not raw:
+        return {'ok': False, 'skipped': 'no-date'}
+    try:
+        day = dt.date.fromisoformat(raw[:10])
+        pretty = day.strftime('%A, %d %B %Y').replace(' 0', ' ')
+    except Exception:
+        pretty = raw
+    camp = _row(settings, 'SELECT name FROM campaigns WHERE id=?', (int(campaign_id),)) or {'name': 'Campaign'}
+    mention = str(cfg.get('discord_mention') or '').strip()
+    title = str(session.get('title') or 'Next session').strip()
+    lines = []
+    if mention:
+        lines.append(mention)
+    lines += [
+        f'📅 **Session confirmed · {camp.get("name") or "Campaign"}**',
+        f'**{title}**',
+        f'🗓️ {pretty}',
+    ]
+    if base_url:
+        lines.append(f'🔗 {base_url.rstrip("/")}/session')
+    return discord_post(settings, campaign_id, '\n'.join(lines))
+
+
+def _bounded_sheet(raw: Any) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    try:
+        encoded = json.dumps(raw, ensure_ascii=False, separators=(',', ':'))
+    except Exception:
+        return {}
+    if len(encoded.encode('utf-8')) > 750_000:
+        return {'warning': 'Actor snapshot exceeded Seeker’s 750 kB safety limit.'}
+    return raw
+
+
 def foundry_accept(settings: Settings, campaign_id: int, token: str, payload: dict) -> dict:
     cfg = integration_config(settings, campaign_id, include_secret=True)
     if not secrets.compare_digest(str(cfg.get('foundry_bridge_token') or ''), str(token or '')):
         raise PermissionError('Invalid Foundry bridge token.')
     scene = payload.get('scene') or {}
     world = payload.get('world') or {}
+    actors=[]
+    for a in (payload.get('actors') or [])[:60]:
+        if not isinstance(a, dict):
+            continue
+        actor={
+            'id': str(a.get('id') or '')[:300],
+            'uuid': str(a.get('uuid') or '')[:500],
+            'name': str(a.get('name') or '')[:300],
+            'img': str(a.get('img') or '')[:2000],
+            'url': str(a.get('url') or '')[:2500],
+            'type': str(a.get('type') or '')[:100],
+            'active': bool(a.get('active', True)),
+            'owners': [str(x)[:160] for x in (a.get('owners') or [])[:20]],
+            'sheet': _bounded_sheet(a.get('sheet') or {}),
+        }
+        if actor['id']:
+            actors.append(actor)
     clean = {
-        'scene': {'id': str(scene.get('id') or '')[:300], 'name': str(scene.get('name') or '')[:300], 'img': str(scene.get('img') or '')[:1500]},
+        'bridge_version': str(payload.get('bridge_version') or '')[:80],
+        'system': str(payload.get('system') or '')[:120],
+        'system_version': str(payload.get('system_version') or '')[:80],
+        'foundry_version': str(payload.get('foundry_version') or '')[:80],
+        'scene': {'id': str(scene.get('id') or '')[:300], 'name': str(scene.get('name') or '')[:300], 'img': str(scene.get('img') or '')[:2000]},
         'world': {'id': str(world.get('id') or '')[:300], 'title': str(world.get('title') or '')[:300]},
-        'actors': [
-            {'id': str(a.get('id') or '')[:300], 'name': str(a.get('name') or '')[:300], 'img': str(a.get('img') or '')[:1500], 'active': bool(a.get('active', True))}
-            for a in (payload.get('actors') or [])[:100]
-        ],
+        'actors': [{k:v for k,v in a.items() if k != 'sheet'} for a in actors],
         'combat': payload.get('combat') if isinstance(payload.get('combat'), dict) else {},
     }
+    now=time.time(); cid=int(campaign_id)
     with connect(settings) as conn:
         conn.execute('''INSERT INTO foundry_bridge_state(campaign_id,scene_name,scene_id,world_name,payload_json,received_at)
                         VALUES(?,?,?,?,?,?) ON CONFLICT(campaign_id) DO UPDATE SET scene_name=excluded.scene_name,scene_id=excluded.scene_id,world_name=excluded.world_name,payload_json=excluded.payload_json,received_at=excluded.received_at''',
-                     (int(campaign_id), clean['scene']['name'], clean['scene']['id'], clean['world']['title'], json.dumps(clean), time.time()))
-    return {'ok': True}
+                     (cid, clean['scene']['name'], clean['scene']['id'], clean['world']['title'], json.dumps(clean,ensure_ascii=False), now))
+        seen=[]
+        for a in actors:
+            seen.append(a['id'])
+            conn.execute('''INSERT INTO foundry_actor_snapshots(
+                campaign_id,actor_id,actor_uuid,name,img,actor_url,actor_type,owners_json,sheet_json,received_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(campaign_id,actor_id) DO UPDATE SET
+                actor_uuid=excluded.actor_uuid,name=excluded.name,img=excluded.img,actor_url=excluded.actor_url,
+                actor_type=excluded.actor_type,owners_json=excluded.owners_json,sheet_json=excluded.sheet_json,received_at=excluded.received_at''',
+                (cid,a['id'],a['uuid'],a['name'],a['img'],a['url'],a['type'],json.dumps(a['owners'],ensure_ascii=False),json.dumps(a['sheet'],ensure_ascii=False),now))
+        if seen:
+            marks=','.join('?' for _ in seen)
+            conn.execute(f'DELETE FROM foundry_actor_snapshots WHERE campaign_id=? AND actor_id NOT IN ({marks})',(cid,*seen))
+        else:
+            conn.execute('DELETE FROM foundry_actor_snapshots WHERE campaign_id=?',(cid,))
+    return {'ok': True, 'actors': len(actors)}
 
 
 def foundry_state(settings: Settings, campaign_id: int) -> dict:
     row = _row(settings, 'SELECT * FROM foundry_bridge_state WHERE campaign_id=?', (int(campaign_id),)) or {}
     row['payload'] = _json(row.get('payload_json'), {})
     return row
+
+
+def foundry_actors(settings: Settings, campaign_id: int) -> list[dict]:
+    rows=_rows(settings, 'SELECT actor_id,actor_uuid,name,img,actor_url,actor_type,owners_json,sheet_json,received_at FROM foundry_actor_snapshots WHERE campaign_id=? ORDER BY lower(name),actor_id', (int(campaign_id),))
+    for row in rows:
+        row['owners']=_json(row.pop('owners_json', '[]'), [])
+        row['sheet']=_json(row.pop('sheet_json', '{}'), {})
+    return rows
+
+
+def foundry_actor(settings: Settings, campaign_id: int, actor_id: str) -> dict | None:
+    row=_row(settings, 'SELECT actor_id,actor_uuid,name,img,actor_url,actor_type,owners_json,sheet_json,received_at FROM foundry_actor_snapshots WHERE campaign_id=? AND actor_id=?', (int(campaign_id),str(actor_id)))
+    if not row:
+        return None
+    row['owners']=_json(row.pop('owners_json', '[]'), [])
+    row['sheet']=_json(row.pop('sheet_json', '{}'), {})
+    return row
+
+
+def foundry_link(settings: Settings, character_id: int, campaign_id: int, actor_id: str | None = None) -> dict | None:
+    char=_row(settings,'SELECT id,campaign_id FROM player_characters WHERE id=?',(int(character_id),))
+    if not char:
+        raise ValueError('Character not found.')
+    cid=int(char.get('campaign_id') or campaign_id)
+    if cid != int(campaign_id):
+        raise ValueError('Character belongs to a different campaign.')
+    aid=str(actor_id or '').strip()
+    with connect(settings) as conn:
+        if not aid:
+            conn.execute('DELETE FROM foundry_character_links WHERE character_id=?',(int(character_id),))
+            return None
+        exists=conn.execute('SELECT 1 FROM foundry_actor_snapshots WHERE campaign_id=? AND actor_id=?',(cid,aid)).fetchone()
+        if not exists:
+            raise ValueError('That Foundry actor has not been synced for this campaign.')
+        conn.execute('''INSERT INTO foundry_character_links(character_id,campaign_id,actor_id,linked_at) VALUES(?,?,?,?)
+                        ON CONFLICT(character_id) DO UPDATE SET campaign_id=excluded.campaign_id,actor_id=excluded.actor_id,linked_at=excluded.linked_at''',(int(character_id),cid,aid,time.time()))
+    return foundry_actor(settings,cid,aid)
+
+
+def foundry_link_for_character(settings: Settings, character_id: int) -> dict | None:
+    row=_row(settings,'''SELECT l.campaign_id,l.actor_id,a.actor_uuid,a.name,a.img,a.actor_url,a.actor_type,a.owners_json,a.sheet_json,a.received_at
+                         FROM foundry_character_links l LEFT JOIN foundry_actor_snapshots a ON a.campaign_id=l.campaign_id AND a.actor_id=l.actor_id
+                         WHERE l.character_id=?''',(int(character_id),))
+    if not row:
+        return None
+    row['owners']=_json(row.pop('owners_json','[]'),[])
+    row['sheet']=_json(row.pop('sheet_json','{}'),{})
+    row['stale']=not bool(row.get('name'))
+    return row
+
+
+def foundry_manifest(settings: Settings, base_url: str) -> dict:
+    source=settings.root_dir/'integrations'/'foundry-seeker-bridge'/'module.json'
+    try:
+        data=json.loads(source.read_text(encoding='utf-8'))
+    except Exception:
+        data={'id':'seeker-bridge','title':'Seeker Bridge','version':'1.1.0','esmodules':['seeker-bridge.mjs']}
+    base=base_url.rstrip('/')
+    data['version']='1.1.0'
+    data['manifest']=f'{base}/foundry/seeker-bridge/module.json'
+    data['download']=f'{base}/foundry/seeker-bridge/seeker-bridge.zip'
+    data['url']=base
+    return data
+
+
+def build_foundry_module_zip(settings: Settings, base_url: str, target: Path) -> Path:
+    source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
+    target.parent.mkdir(parents=True,exist_ok=True)
+    manifest=foundry_manifest(settings,base_url)
+    with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('module.json',json.dumps(manifest,indent=2,ensure_ascii=False))
+        for path in source.rglob('*'):
+            if path.is_file() and path.name!='module.json':
+                zf.write(path,path.relative_to(source).as_posix())
+    return target
 
 
 def calendar_feed(settings: Settings, campaign_id: int, token: str, base_url: str = '') -> str:

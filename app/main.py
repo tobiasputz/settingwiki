@@ -75,7 +75,9 @@ from .v51 import (
     list_random_tables, save_random_table, delete_random_table, roll_random_table, forgotten_items, save_closeout, BUILTIN_TEMPLATES,
 )
 from .v6 import (
-    init_v6_db, integration_config, save_integration_config, discord_post, foundry_accept, foundry_state, calendar_feed, session_ics,
+    init_v6_db, integration_config, save_integration_config, discord_post, discord_session_confirmation,
+    foundry_accept, foundry_state, foundry_actors, foundry_link, foundry_link_for_character, foundry_manifest, build_foundry_module_zip,
+    calendar_feed, session_ics,
     sync_lore_revisions, lore_revisions, lore_revision_diff, restore_lore_source_revision, page_update_status, knowledge_matrix, converge_campaigns,
     changes_since_last_session, continuity_v6, player_dashboard, command_rows, save_map_annotation, list_map_annotations, delete_map_annotation,
     record_travel_leg, travel_legs, delete_travel_leg, list_media_items, save_media_item, delete_media_item, display_state, set_display_state,
@@ -265,7 +267,7 @@ def ensure_built() -> dict:
             pass
         return wiki
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 6000}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 6100}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -589,7 +591,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 6000
+                    needs_build=int(existing.get("renderer_version") or 0) < 6100
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -1453,7 +1455,11 @@ def characters_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
     wiki=_visible_wiki(request); maps=list_maps(settings,public=True); iid=_invite_id(request); admin_view=is_gm(request)
     cid=_active_campaign_id(request); chars=list_player_characters(settings,invite_id=iid,admin=admin_view,campaign_id=cid)
-    return templates.TemplateResponse("characters.html",{"request":request,"wiki":wiki,"maps":maps,"characters":chars,"player":current_player_invite(request),"admin_view":admin_view,"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view)})
+    for c in chars:
+        link=foundry_link_for_character(settings,int(c['id']))
+        c['foundry_actor_id']=str((link or {}).get('actor_id') or '')
+        c['foundry_linked']=bool(link and not link.get('stale'))
+    return templates.TemplateResponse("characters.html",{"request":request,"wiki":wiki,"maps":maps,"characters":chars,"player":current_player_invite(request),"admin_view":admin_view,"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view),"foundry_actors":foundry_actors(settings,cid)})
 
 @app.get("/characters/{character_id}", response_class=HTMLResponse)
 def character_page(request: Request, character_id:int):
@@ -1465,8 +1471,13 @@ def character_page(request: Request, character_id:int):
     char["arcs"]=character_arcs(settings,character_id,owner=owner)
     char["relationships"]=character_relationships(settings,character_id,owner=owner)
     char["milestones"]=character_milestones(settings,character_id)
+    foundry_linked=foundry_link_for_character(settings,character_id)
+    char['foundry_actor_id']=str((foundry_linked or {}).get('actor_id') or '')
     can_edit=admin_view or (owner and player_role(request)=="player" and not archive_mode())
-    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[]),"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view),"character_sessions":list_sessions(settings,public=False,campaign_id=cid)})
+    # Detailed Foundry mechanics are private to the character owner and GMs.
+    # Party-facing story dossiers stay lightweight even when the actor is linked.
+    foundry_view=foundry_linked if (owner or admin_view) else None
+    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[]),"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view),"character_sessions":list_sessions(settings,public=False,campaign_id=cid),"foundry_actor":foundry_view,"foundry_actors":foundry_actors(settings,cid) if can_edit else []})
 
 @app.get("/api/player/characters")
 def player_characters_api(request:Request):
@@ -2136,6 +2147,16 @@ def admin_save_session(request: Request,payload:dict=Body(...)):
         capture_session_state(settings,int(row["id"]),"after")
     if row.get("status")=="planned" and (not before or before.get("status")!="planned" or before.get("session_date")!=row.get("session_date") or before.get("title")!=row.get("title")):
         create_notification(settings,{"campaign_id":int(row["campaign_id"]),"title":"Session planned · "+str(row.get("title") or "Next session"),"body":str(row.get("session_date") or "A date has been proposed."),"target_type":"session","target_key":str(row["id"]),"kind":"session","audience":[]})
+    # V6.1: a confirmed/changed date can announce itself in the campaign's
+    # Discord channel. The webhook is deliberately best-effort: a Discord
+    # outage must never prevent Seeker from saving the session.
+    date_now=str(row.get("session_date") or "").strip()
+    date_before=str((before or {}).get("session_date") or "").strip()
+    if date_now and date_now != date_before and row.get("status") in {"planned","live"}:
+        try:
+            row["discord_announcement"]=discord_session_confirmation(settings,int(row["campaign_id"]),row,base_url=str(request.base_url).rstrip('/'))
+        except Exception as exc:
+            row["discord_announcement"]={"ok":False,"error":str(exc)[:300]}
     return row
 
 
@@ -3427,8 +3448,9 @@ def v6_integrations_page(request: Request):
     base=str(request.base_url).rstrip('/')
     cfg['calendar_feed_url']=f"{base}/calendar-feed/{cid}/{cfg.get('calendar_token')}.ics"
     cfg['foundry_push_url']=f"{base}/api/v6/foundry/push/{cid}?token={quote(str(cfg.get('foundry_bridge_token') or ''))}"
+    cfg['foundry_manifest_url']=f"{base}/foundry/seeker-bridge/module.json"
     cfg['display_url']=f"{base}/display?campaign_id={cid}&token={quote(str(cfg.get('display_token') or ''))}"
-    return templates.TemplateResponse('gm_integrations.html', {'request':request,'wiki':_visible_wiki(request),'maps':list_maps(settings,public=True),'integration':cfg,'campaign':camp,'foundry':foundry_state(settings,cid)})
+    return templates.TemplateResponse('gm_integrations.html', {'request':request,'wiki':_visible_wiki(request),'maps':list_maps(settings,public=True),'integration':cfg,'campaign':camp,'foundry':foundry_state(settings,cid),'foundry_actors':foundry_actors(settings,cid)})
 
 
 @app.get('/gm/media', response_class=HTMLResponse)
@@ -3492,10 +3514,20 @@ def v6_discord_send(request: Request,payload:dict=Body(...)):
     except ValueError as exc:raise HTTPException(400,str(exc))
 
 
+_FOUNDRY_CORS={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type','Access-Control-Max-Age':'86400'}
+
+
+@app.options('/api/v6/foundry/push/{campaign_id}')
+def v6_foundry_push_options(campaign_id:int):
+    return Response(status_code=204,headers=_FOUNDRY_CORS)
+
+
 @app.post('/api/v6/foundry/push/{campaign_id}')
 def v6_foundry_push(campaign_id:int,token:str='',payload:dict=Body(...)):
-    try:return foundry_accept(settings,campaign_id,token,payload)
-    except PermissionError as exc:raise HTTPException(403,str(exc))
+    try:
+        return JSONResponse(foundry_accept(settings,campaign_id,token,payload),headers=_FOUNDRY_CORS)
+    except PermissionError as exc:
+        raise HTTPException(403,str(exc))
 
 
 @app.get('/api/v6/foundry/state')
@@ -3503,16 +3535,50 @@ def v6_foundry_state(request:Request):
     require_gm(request);return foundry_state(settings,_active_campaign_id(request))
 
 
+@app.get('/foundry/seeker-bridge/module.json')
+def v61_foundry_manifest(request:Request):
+    data=foundry_manifest(settings,str(request.base_url).rstrip('/'))
+    return JSONResponse(data,headers={'Cache-Control':'no-cache','Access-Control-Allow-Origin':'*'})
+
+
+@app.get('/foundry/seeker-bridge/seeker-bridge.zip')
+def v61_foundry_public_module(request:Request):
+    source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
+    if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
+    out=settings.build_dir/'seeker-foundry-bridge-1.1.0.zip'
+    build_foundry_module_zip(settings,str(request.base_url).rstrip('/'),out)
+    return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
+
+
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
-    if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge.zip';out.parent.mkdir(parents=True,exist_ok=True)
-    with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
-        for item in source.rglob('*'):
-            if item.is_file():z.write(item,'seeker-bridge/'+item.relative_to(source).as_posix())
+    out=settings.build_dir/'seeker-foundry-bridge-1.1.0.zip'
+    build_foundry_module_zip(settings,str(request.base_url).rstrip('/'),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
+
+
+@app.get('/api/v61/foundry/actors')
+def v61_foundry_actors(request:Request,campaign_id:int|None=None):
+    if not player_allowed(request):raise HTTPException(401)
+    cid=resolve_campaign_id(settings,campaign_id if campaign_id is not None else _active_campaign_id(request))
+    if not is_gm(request):
+        iid=_invite_id(request)
+        if iid is None or not invite_has_campaign(settings,iid,cid):raise HTTPException(403,'You are not a member of that campaign.')
+    rows=foundry_actors(settings,cid)
+    return [{k:v for k,v in r.items() if k!='sheet'} for r in rows]
+
+
+@app.put('/api/v61/characters/{character_id}/foundry-link')
+def v61_character_foundry_link(request:Request,character_id:int,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    require_player_author(request)
+    iid=_invite_id(request);admin=is_gm(request)
+    char=get_player_character(settings,character_id,invite_id=iid,admin=admin,campaign_id=None)
+    if not char:raise HTTPException(404,'Character not found.')
+    if not admin and int(char.get('invite_id') or 0)!=int(iid or -1):raise HTTPException(403,'You can only link your own character.')
+    try:return foundry_link(settings,character_id,int(char['campaign_id']),payload.get('actor_id')) or {'ok':True,'actor_id':''}
+    except ValueError as exc:raise HTTPException(400,str(exc))
 
 
 @app.get('/calendar-feed/{campaign_id}/{token}.ics')
