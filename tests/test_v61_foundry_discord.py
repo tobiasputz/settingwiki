@@ -85,7 +85,7 @@ def test_v61_public_foundry_manifest_and_install_zip(tmp_path: Path, monkeypatch
     client=TestClient(main.app)
     manifest=client.get('/foundry/seeker-bridge/module.json')
     assert manifest.status_code==200
-    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.1.0'
+    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.1.1'
     assert data['manifest'].endswith('/foundry/seeker-bridge/module.json')
     assert data['download'].endswith('/foundry/seeker-bridge/seeker-bridge.zip')
     package=client.get('/foundry/seeker-bridge/seeker-bridge.zip')
@@ -160,3 +160,43 @@ def test_v61_scroll_contract_and_foundry_frontend_assets():
     assert '/api/v61/characters/' in chars and 'data-foundry-tab' in chars
     assert 'data-notification-pref="spotlight"' not in base
     assert 'seeker-static-v6100' in sw
+
+
+def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
+    import app.main as main
+    import shutil
+    s=setup(tmp_path);seed_wiki(s);monkeypatch.setattr(main,'settings',s)
+    src=Path(__file__).resolve().parents[1]/'integrations'/'foundry-seeker-bridge'
+    dst=s.root_dir/'integrations'/'foundry-seeker-bridge';dst.parent.mkdir(parents=True,exist_ok=True);shutil.copytree(src,dst)
+    monkeypatch.setenv('RAILWAY_PUBLIC_DOMAIN','seeker.example')
+    client=TestClient(main.app)
+    manifest=client.get('/foundry/seeker-bridge/module.json').json()
+    assert manifest['manifest']=='https://seeker.example/foundry/seeker-bridge/module.json'
+    assert manifest['download']=='https://seeker.example/foundry/seeker-bridge/seeker-bridge.zip'
+    gm=TestClient(main.app);gm.post('/admin/login',data={'password':'admin'})
+    page=gm.get('/gm/integrations')
+    assert page.status_code==200
+    assert 'https://seeker.example/api/v6/foundry/push/' in page.text
+    assert 'https://seeker.example/calendar-feed/' in page.text
+
+
+def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
+    root=Path(__file__).resolve().parents[1]
+    bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
+    assert 'const BRIDGE_VERSION = "1.1.1"' in bridge
+    assert 'function normalizedEndpoint' in bridge
+    assert 'u.protocol === "http:" && !local' in bridge
+    assert 'Seeker Bridge connected' in bridge
+    assert 'Seeker Bridge cannot reach Seeker' in bridge
+    assert 'Could not serialize actor' in bridge
+
+
+def test_v61_foundry_push_errors_keep_cors_headers(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed_wiki(s);monkeypatch.setattr(main,'settings',s)
+    cid=default_campaign_id(s)
+    client=TestClient(main.app)
+    bad=client.post(f'/api/v6/foundry/push/{cid}?token=wrong',json={'world':{},'scene':{},'actors':[]})
+    assert bad.status_code==403
+    assert bad.headers.get('access-control-allow-origin')=='*'
+    assert 'Invalid Foundry bridge token' in bad.text

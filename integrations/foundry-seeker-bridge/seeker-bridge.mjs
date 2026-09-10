@@ -1,7 +1,31 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.1.0";
+const BRIDGE_VERSION = "1.1.1";
 let pushTimer = null;
 let intervalId = null;
+let bridgeStatus = "";
+let lastBridgeNotice = 0;
+
+function bridgeNotice(kind, message, {force = false} = {}) {
+  const now = Date.now();
+  const key = `${kind}:${message}`;
+  if (!force && key === bridgeStatus && now - lastBridgeNotice < 120000) return;
+  bridgeStatus = key;
+  lastBridgeNotice = now;
+  const notices = globalThis.ui?.notifications;
+  const fn = notices?.[kind];
+  if (typeof fn === "function") fn.call(notices, message);
+}
+
+function normalizedEndpoint(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  try {
+    const u = new URL(value);
+    const local = ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(u.hostname);
+    if (u.protocol === "http:" && !local) u.protocol = "https:";
+    return u.href;
+  } catch { return value; }
+}
 
 function setting(key) {
   return game.settings.get(MODULE_ID, key);
@@ -175,35 +199,66 @@ function sceneSummary(scene) {
 
 async function sendState() {
   if (!game.user?.isGM || !setting("enabled")) return;
-  const endpoint = String(setting("endpoint") || "").trim();
-  if (!endpoint) return;
-  const combat = game.combat;
-  const payload = {
-    bridge_version: BRIDGE_VERSION,
-    foundry_version: game.version || "",
-    system: game.system?.id || "",
-    system_version: game.system?.version || "",
-    world: { id: game.world?.id || "", title: game.world?.title || "" },
-    scene: sceneSummary(canvas?.scene || game.scenes?.active),
-    actors: (game.actors?.contents || []).filter(a => a.hasPlayerOwner).slice(0, 60).map(actorSummary),
-    combat: combat ? {
-      active: !!combat.started,
-      round: combat.round ?? null,
-      turn: combat.turn ?? null,
-      combatant: combat.combatant?.name || ""
-    } : null,
-    sent_at: Date.now()
-  };
+  const configuredEndpoint = String(setting("endpoint") || "").trim();
+  const endpoint = normalizedEndpoint(configuredEndpoint);
+  if (!endpoint) {
+    bridgeNotice("warn", "Seeker Bridge is enabled, but no bridge endpoint is configured.");
+    return;
+  }
   try {
+    const combat = game.combat;
+    const actorDocs = (game.actors?.contents || []).filter(a => a.hasPlayerOwner).slice(0, 60);
+    const actors = [];
+    for (const actor of actorDocs) {
+      try { actors.push(actorSummary(actor)); }
+      catch (error) {
+        console.warn(`[${MODULE_ID}] Could not serialize actor ${actor?.name || actor?.id || "unknown"}`, error);
+        actors.push({
+          id: actor?.id || "", uuid: actor?.uuid || `Actor.${actor?.id || ""}`, name: actor?.name || "Character",
+          img: abs(actor?.img || ""), url: actorUrl(actor), type: actor?.type || "character",
+          active: true, owners: actorOwners(actor), sheet: {warning: "This actor could not be fully serialized by the bridge."}
+        });
+      }
+    }
+    const payload = {
+      bridge_version: BRIDGE_VERSION,
+      foundry_version: game.version || "",
+      system: game.system?.id || "",
+      system_version: game.system?.version || "",
+      world: { id: game.world?.id || "", title: game.world?.title || "" },
+      scene: sceneSummary(globalThis.canvas?.scene || game.scenes?.active),
+      actors,
+      combat: combat ? {
+        active: !!combat.started,
+        round: combat.round ?? null,
+        turn: combat.turn ?? null,
+        combatant: combat.combatant?.name || ""
+      } : null,
+      sent_at: Date.now()
+    };
     const response = await fetch(endpoint, {
       method: "POST",
       mode: "cors",
+      credentials: "omit",
+      cache: "no-store",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload)
     });
-    if (!response.ok) console.warn(`[${MODULE_ID}] Seeker rejected bridge state: ${response.status}`);
+    if (!response.ok) {
+      let detail = "";
+      try { detail = String((await response.json())?.detail || ""); } catch {}
+      console.warn(`[${MODULE_ID}] Seeker rejected bridge state: ${response.status}`, detail);
+      bridgeNotice("warn", `Seeker Bridge could not connect (${response.status})${detail ? `: ${detail}` : ". Check the campaign endpoint in Module Settings."}`);
+      return;
+    }
+    const firstSuccess = !String(bridgeStatus).startsWith("info:Seeker Bridge connected");
+    bridgeStatus = "info:Seeker Bridge connected";
+    if (firstSuccess) bridgeNotice("info", `Seeker Bridge connected · ${actors.length} player actor${actors.length === 1 ? "" : "s"} synced.`, {force: true});
   } catch (error) {
     console.warn(`[${MODULE_ID}] Could not reach Seeker`, error);
+    const mixed = configuredEndpoint.startsWith("http://") && endpoint.startsWith("https://");
+    const hint = mixed ? " The bridge automatically upgraded the public Seeker URL to HTTPS." : "";
+    bridgeNotice("warn", `Seeker Bridge cannot reach Seeker.${hint} Open F12 → Console for the network error.`);
   }
 }
 

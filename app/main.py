@@ -104,6 +104,31 @@ app.mount("/static", StaticFiles(directory=settings.root_dir / "static"), name="
 templates = Jinja2Templates(directory=settings.root_dir / "templates")
 
 
+def _external_base_url(request: Request) -> str:
+    """Return the browser-facing origin when Seeker is behind Railway/reverse proxies.
+
+    Integration URLs must never accidentally use Railway's internal HTTP origin: a
+    Foundry browser will either block that as mixed content or fail the CORS preflight
+    while following the HTTP -> HTTPS redirect.  An explicit SEEKER_PUBLIC_URL wins,
+    followed by Railway's public-domain variable, then standard forwarded headers.
+    """
+    explicit = os.getenv("SEEKER_PUBLIC_URL", "").strip().rstrip("/")
+    if explicit:
+        if not re.match(r"^https?://", explicit, flags=re.I):
+            explicit = "https://" + explicit
+        return explicit
+    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().strip("/")
+    if railway_domain:
+        return "https://" + railway_domain
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
+    forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",", 1)[0].strip()
+    host = forwarded_host or (request.headers.get("host") or "").strip()
+    scheme = forwarded_proto or request.url.scheme
+    if host and scheme:
+        return f"{scheme}://{host}".rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
 async def _stream_upload(upload: UploadFile, target: Path, max_bytes: int, too_large: str) -> int:
     """Stream an upload to disk with a hard bound on resident memory."""
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -1409,7 +1434,7 @@ def public_map_travel(request: Request,slug:str,from_id:int,to_id:int):
 def share_qr(request: Request, path: str = "/"):
     if not player_allowed(request): return player_gate_redirect(request)
     if not path.startswith("/") or path.startswith("//"): path="/"
-    target=str(request.base_url).rstrip("/")+path
+    target=_external_base_url(request)+path
     try:
         import qrcode
         import qrcode.image.svg
@@ -2154,7 +2179,7 @@ def admin_save_session(request: Request,payload:dict=Body(...)):
     date_before=str((before or {}).get("session_date") or "").strip()
     if date_now and date_now != date_before and row.get("status") in {"planned","live"}:
         try:
-            row["discord_announcement"]=discord_session_confirmation(settings,int(row["campaign_id"]),row,base_url=str(request.base_url).rstrip('/'))
+            row["discord_announcement"]=discord_session_confirmation(settings,int(row["campaign_id"]),row,base_url=_external_base_url(request))
         except Exception as exc:
             row["discord_announcement"]={"ok":False,"error":str(exc)[:300]}
     return row
@@ -3445,7 +3470,7 @@ def v6_continuity_page(request: Request):
 def v6_integrations_page(request: Request):
     require_gm(request);cid=_active_campaign_id(request);cfg=integration_config(settings,cid,include_secret=True)
     camp=get_campaign(settings,cid) or {}
-    base=str(request.base_url).rstrip('/')
+    base=_external_base_url(request)
     cfg['calendar_feed_url']=f"{base}/calendar-feed/{cid}/{cfg.get('calendar_token')}.ics"
     cfg['foundry_push_url']=f"{base}/api/v6/foundry/push/{cid}?token={quote(str(cfg.get('foundry_bridge_token') or ''))}"
     cfg['foundry_manifest_url']=f"{base}/foundry/seeker-bridge/module.json"
@@ -3527,7 +3552,11 @@ def v6_foundry_push(campaign_id:int,token:str='',payload:dict=Body(...)):
     try:
         return JSONResponse(foundry_accept(settings,campaign_id,token,payload),headers=_FOUNDRY_CORS)
     except PermissionError as exc:
-        raise HTTPException(403,str(exc))
+        return JSONResponse({'detail':str(exc)},status_code=403,headers=_FOUNDRY_CORS)
+    except Exception:
+        # Keep CORS headers even on a bridge-side server failure so Foundry can
+        # report the HTTP status instead of masking it as a generic CORS error.
+        return JSONResponse({'detail':'Seeker could not store the Foundry bridge state.'},status_code=500,headers=_FOUNDRY_CORS)
 
 
 @app.get('/api/v6/foundry/state')
@@ -3537,7 +3566,7 @@ def v6_foundry_state(request:Request):
 
 @app.get('/foundry/seeker-bridge/module.json')
 def v61_foundry_manifest(request:Request):
-    data=foundry_manifest(settings,str(request.base_url).rstrip('/'))
+    data=foundry_manifest(settings,_external_base_url(request))
     return JSONResponse(data,headers={'Cache-Control':'no-cache','Access-Control-Allow-Origin':'*'})
 
 
@@ -3545,16 +3574,16 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.1.0.zip'
-    build_foundry_module_zip(settings,str(request.base_url).rstrip('/'),out)
+    out=settings.build_dir/'seeker-foundry-bridge-1.1.1.zip'
+    build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
 
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.1.0.zip'
-    build_foundry_module_zip(settings,str(request.base_url).rstrip('/'),out)
+    out=settings.build_dir/'seeker-foundry-bridge-1.1.1.zip'
+    build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 
 
@@ -3583,7 +3612,7 @@ def v61_character_foundry_link(request:Request,character_id:int,payload:dict=Bod
 
 @app.get('/calendar-feed/{campaign_id}/{token}.ics')
 def v6_calendar_feed(request:Request,campaign_id:int,token:str):
-    try:data=calendar_feed(settings,campaign_id,token,str(request.base_url).rstrip('/'))
+    try:data=calendar_feed(settings,campaign_id,token,_external_base_url(request))
     except PermissionError as exc:raise HTTPException(404,str(exc))
     return Response(data,media_type='text/calendar; charset=utf-8',headers={'Content-Disposition':'inline; filename="seeker-campaign.ics"','Cache-Control':'no-cache'})
 
@@ -3593,7 +3622,7 @@ def v6_session_ics(request:Request,session_id:int):
     if not player_allowed(request):raise HTTPException(401)
     cid=_active_campaign_id(request);session=next((s for s in list_sessions(settings,campaign_id=cid) if int(s['id'])==int(session_id)),None)
     if not session:raise HTTPException(404,'Session not found.')
-    try:data=session_ics(session,(get_campaign(settings,cid) or {}).get('name','Seeker'),str(request.base_url).rstrip('/'))
+    try:data=session_ics(session,(get_campaign(settings,cid) or {}).get('name','Seeker'),_external_base_url(request))
     except ValueError as exc:raise HTTPException(400,str(exc))
     return Response(data,media_type='text/calendar; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="seeker-session-{session_id}.ics"'})
 
