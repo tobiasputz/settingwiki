@@ -18,6 +18,7 @@
   <nav class="v7-modebar" aria-label="Living Table workspaces">
     <button class="active" data-v7-tab="cockpit"><span>✦</span><b>Table</b><small>Run now</small></button>
     <button data-v7-tab="entities"><span>◇</span><b>Entities</b><small>Everything connected</small></button>
+    <button data-v7-tab="creatures"><span>♜</span><b>Creature Vault</b><small>AoN & collections</small></button>
     <button data-v7-tab="encounters"><span>⚔</span><b>Encounters</b><small>Budget & prepare</small></button>
     <button data-v7-tab="loot"><span>◆</span><b>Loot</b><small>Claim & distribute</small></button>
     <button data-v7-tab="knowledge"><span>◉</span><b>Knowledge</b><small>Reveal by fact</small></button>
@@ -84,8 +85,16 @@
     </div>
   </section>
 
+  <section class="v7-workspace" data-v7-pane="creatures">
+    <header class="v7-section-head"><div><span class="eyebrow">CREATURE VAULT · ARCHIVES OF NETHYS</span><h2>Bring published creatures into the same workflow as your own.</h2><p>Paste Archives of Nethys creature links and Seeker turns the stat blocks into editable Workshop monsters. Organize them into campaign collections, add them to encounters, or send an entire collection to a Foundry Actor folder in one action.</p></div><div class="v7-head-actions"><button class="v7-button ghost" data-v7-new-creature-folder>＋ New collection</button><button class="v7-button" data-v7-import-aon>⇣ Import AoN</button></div></header>
+    <div class="v7-creature-vault-layout">
+      <aside class="v7-panel"><header class="v7-panel-head"><div><span class="eyebrow">COLLECTIONS</span><h2>Foundry-ready folders</h2></div></header><div id="v7CreatureFolders" class="v7-folder-stack"></div></aside>
+      <section class="v7-panel v7-panel-large"><header class="v7-panel-head"><div><span class="eyebrow">ARCHIVE</span><h2>Imported creatures</h2></div><div class="v7-searchbox compact"><span>⌕</span><input id="v7CreatureSearch" placeholder="Search imported creatures"></div></header><div id="v7AonCreatures" class="v7-aon-grid"></div></section>
+    </div>
+  </section>
+
   <section class="v7-workspace" data-v7-pane="encounters">
-    <header class="v7-section-head"><div><span class="eyebrow">ENCOUNTER BUILDER</span><h2>Balance the threat. Keep the fiction attached.</h2><p>PF2e XP budgets are calculated from party level and size. Preparing an encounter updates existing Seeker-managed Foundry actors where possible instead of duplicating them.</p></div><button class="v7-button" data-v7-new-encounter>＋ Build encounter</button></header>
+    <header class="v7-section-head"><div><span class="eyebrow">ENCOUNTER BUILDER</span><h2>Balance the threat. Keep the fiction attached.</h2><p>PF2e XP budgets are calculated from party level and size. Preparing an encounter updates existing Seeker-managed Foundry actors where possible instead of duplicating them.</p></div><div class="v7-head-actions"><button class="v7-button ghost" data-v7-import-aon-encounter>⇣ Import AoN</button><button class="v7-button" data-v7-new-encounter>＋ Build encounter</button></div></header>
     <div id="v7EncounterGrid" class="v7-encounter-grid"></div>
   </section>
 
@@ -136,5 +145,5 @@
 </main>
 <script id="v7State" type="application/json">{{ v7|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7000">{% endblock %}
-{% block scripts %}<script src="/static/v7.js?v=7000"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7030">{% endblock %}
+{% block scripts %}<script src="/static/v7.js?v=7030"></script>{% endblock %}

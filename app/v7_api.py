@@ -19,8 +19,9 @@ from .v5 import list_objectives
 from .v51 import list_scenes, save_closeout
 from .v6 import (
     foundry_state, foundry_actors, foundry_link_for_character, list_foundry_prepared_content,
-    queue_foundry_command, recent_foundry_commands,
+    save_foundry_prepared_content, queue_foundry_command, recent_foundry_commands,
 )
+from .aon import AoNImportError, fetch_aon_creatures, normalize_aon_url
 from .v7 import (
     ALL_PERMISSIONS, asset_catalog, dependency_warnings, effective_permissions, get_encounter, get_entity,
     get_loot_item, get_loot_pool, ingest_foundry_command_results, integration_registry, list_encounters,
@@ -29,9 +30,12 @@ from .v7 import (
     save_encounter_creature, delete_encounter_creature, save_entity, delete_entity, save_invite_permissions,
     save_knowledge_fact, save_loot_item, save_loot_pool, save_relation, save_relationship_state,
     save_role_permissions, save_token_recipe, session_changes, set_sync_link, sync_existing_entities,
-    sync_link, v7_dashboard, visible_entity_facts, reveal_fact, claim_loot, create_session_change,
+    sync_link, v7_dashboard, visible_entity_facts, reveal_fact, reveal_fact_to_party, share_revealed_fact,
+    list_player_observations, save_player_observation, set_player_observation_visibility,
+    delete_player_observation, review_player_observation, claim_loot, create_session_change,
     invite_permission_overrides, delete_token_recipe, player_entity_view, entity_allows_public_statblock,
-    entity_versions, restore_entity_version,
+    entity_versions, restore_entity_version, upsert_source_entity, list_creature_folders, get_creature_folder,
+    save_creature_folder, add_creature_to_folder, remove_creature_from_folder, delete_creature_folder,
 )
 
 
@@ -92,9 +96,42 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             'fronts':list_fronts(settings,admin=True,campaign_id=cid), 'objectives':list_objectives(settings,cid),
             'foundry':foundry_state(settings,cid), 'foundry_actors':foundry_actors(settings,cid),
             'foundry_commands':recent_foundry_commands(settings,cid,30), 'token_recipes':list_token_recipes(settings,cid),
+            'creature_folders':list_creature_folders(settings,cid),
             'integrations':integration_registry(), 'permissions':{role:effective_permissions(settings,role) for role in ('owner','co-gm','player','spectator')},
             'all_permissions':ALL_PERMISSIONS, 'current_is_owner':bool(helpers.get('is_admin',lambda _r:False)(request)),
         }
+
+    def _prepared_entity(row:dict) -> dict:
+        p=row.get('payload') if isinstance(row.get('payload'),dict) else {}
+        kind=str(row.get('kind') or 'monster').lower()
+        vis='players' if bool(p.get('codex_publish') or p.get('publish_codex')) else 'gm'
+        return upsert_source_entity(settings,int(row['campaign_id']),'foundry_prepared',str(row['id']),{
+            'kind':kind,'name':row.get('title') or 'Imported creature','subtitle':row.get('subtitle') or '',
+            'summary':row.get('summary') or '','body':p.get('description') or '', 'visibility':vis,
+            'image_ref':p.get('img') or '', 'token_ref':p.get('token_img') or '',
+            'tags':[x.strip() for x in str(row.get('tags') or '').split(',') if x.strip()],
+            'data':{**p,'prepared_content_id':int(row['id']),'legacy_source':'foundry_prepared'},
+        })
+
+    def _bundle_entry(entity:dict) -> dict:
+        payload=_entity_foundry_payload(entity)
+        link=sync_link(settings,int(entity['id']))
+        if link and link.get('foundry_uuid'):payload['foundry_uuid']=link['foundry_uuid']
+        return payload
+
+    def _queue_creature_bundle(request:Request, *, title:str, bundle_kind:str, bundle_id:int, entities:list[dict]) -> dict:
+        cid=active_campaign_id(request);entries=[];seen=set()
+        for entity in entities:
+            if not entity or str(entity.get('kind') or '').lower() not in {'monster','npc','creature'}:continue
+            eid=int(entity['id'])
+            if eid in seen:continue
+            seen.add(eid);entries.append(_bundle_entry(entity))
+        if not entries:raise ValueError('There are no importable creatures in this collection.')
+        command=queue_foundry_command(settings,cid,'push_content_bundle',{
+            'folder_name':str(title or 'Seeker creatures')[:180], 'bundle_kind':str(bundle_kind)[:40],
+            'bundle_id':int(bundle_id), 'entries':entries,
+        },scope='world',requested_by=requester_label(request))
+        return {'ok':True,'command':command,'count':len(entries),'folder_name':str(title or 'Seeker creatures')[:180]}
 
     def _entity_foundry_payload(entity:dict) -> dict:
         data=dict(entity.get('data') or {})
@@ -168,6 +205,7 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         gm=bool(has_permission(request,'edit_entities'))
         if gm:
             entity['visible_facts']=visible_entity_facts(settings,entity_id,invite_id(request),gm=True)
+            entity['observations']=list_player_observations(settings,cid,entity_id,invite_id(request),gm=True)
             return entity
         return player_entity_view(settings,entity,invite_id(request),can_view_statblock=bool(has_permission(request,'view_statblocks')))
 
@@ -220,14 +258,65 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
     @app.post('/api/v7/facts/{fact_id}/reveal')
     def v7_fact_reveal(request:Request,fact_id:int,payload:dict=Body(...)):
         require_permission(request,'reveal_lore');cid=active_campaign_id(request)
-        if not payload.get('invite_id'):raise HTTPException(400,'Choose a player.')
-        try:return reveal_fact(settings,fact_id,int(payload['invite_id']),payload.get('session_id'),campaign_id=cid)
+        mode=str(payload.get('disclosure_mode') or payload.get('mode') or 'exact').lower()
+        try:
+            if payload.get('party') is True or str(payload.get('invite_id') or '').lower()=='party':
+                return {'ok':True,'reveals':reveal_fact_to_party(settings,cid,fact_id,mode,payload.get('session_id'))}
+            if not payload.get('invite_id'):raise HTTPException(400,'Choose a player or the whole party.')
+            return reveal_fact(settings,fact_id,int(payload['invite_id']),payload.get('session_id'),campaign_id=cid,disclosure_mode=mode)
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.post('/api/v7/facts/{fact_id}/share-party')
+    def v7_fact_share_party(request:Request,fact_id:int,payload:dict=Body(default={})):
+        if not player_allowed(request):raise HTTPException(401)
+        if not has_permission(request,'share_player_knowledge'):raise HTTPException(403,'Your role cannot share knowledge with the party.')
+        iid=invite_id(request)
+        if not iid:raise HTTPException(403,'A player invitation is required to share knowledge.')
+        try:return share_revealed_fact(settings,active_campaign_id(request),fact_id,int(iid),payload.get('session_id'))
         except ValueError as exc:raise HTTPException(400,str(exc))
 
     @app.post('/api/v7/entities/{entity_id}/recall')
     def v7_recall(request:Request,entity_id:int,payload:dict=Body(...)):
         require_permission(request,'reveal_lore')
         try:return record_recall(settings,active_campaign_id(request),entity_id,payload)
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.get('/api/v7/entities/{entity_id}/observations')
+    def v7_observations(request:Request,entity_id:int):
+        if not player_allowed(request):raise HTTPException(401)
+        cid=active_campaign_id(request);gm=bool(has_permission(request,'reveal_lore'));entity=get_entity(settings,cid,entity_id)
+        if not entity or (entity.get('visibility')=='gm' and not gm):raise HTTPException(404,'Entity not found.')
+        return list_player_observations(settings,cid,entity_id,invite_id(request),gm=gm)
+
+    @app.post('/api/v7/entities/{entity_id}/observations')
+    def v7_observation_save(request:Request,entity_id:int,payload:dict=Body(...)):
+        if not player_allowed(request):raise HTTPException(401)
+        if not has_permission(request,'create_player_notes'):raise HTTPException(403,'Your role cannot add field deductions.')
+        iid=invite_id(request)
+        if not iid:raise HTTPException(403,'A player invitation is required to add field deductions.')
+        try:return save_player_observation(settings,active_campaign_id(request),entity_id,int(iid),payload)
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.post('/api/v7/observations/{observation_id}/visibility')
+    def v7_observation_visibility(request:Request,observation_id:int,payload:dict=Body(...)):
+        if not player_allowed(request):raise HTTPException(401)
+        if not has_permission(request,'share_player_knowledge'):raise HTTPException(403,'Your role cannot share field deductions.')
+        iid=invite_id(request)
+        if not iid:raise HTTPException(403,'A player invitation is required.')
+        try:return set_player_observation_visibility(settings,active_campaign_id(request),observation_id,int(iid),str(payload.get('visibility') or 'party'))
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.delete('/api/v7/observations/{observation_id}')
+    def v7_observation_delete(request:Request,observation_id:int):
+        if not player_allowed(request):raise HTTPException(401)
+        cid=active_campaign_id(request);gm=bool(has_permission(request,'reveal_lore'));iid=invite_id(request)
+        try:delete_player_observation(settings,cid,observation_id,iid,gm=gm);return {'ok':True}
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.post('/api/v7/observations/{observation_id}/review')
+    def v7_observation_review(request:Request,observation_id:int,payload:dict=Body(...)):
+        require_permission(request,'reveal_lore')
+        try:return review_player_observation(settings,active_campaign_id(request),observation_id,str(payload.get('status') or 'inferred'))
         except ValueError as exc:raise HTTPException(400,str(exc))
 
     @app.post('/api/v7/entities/{entity_id}/foundry')
@@ -267,17 +356,115 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
     def v7_encounter_prepare_foundry(request:Request,encounter_id:int):
         require_permission(request,'manage_encounters');cid=active_campaign_id(request);enc=get_encounter(settings,cid,encounter_id)
         if not enc:raise HTTPException(404,'Encounter not found.')
-        commands=[];seen=set()
+        entities=[]
         for row in enc.get('creatures') or []:
-            entity=None
-            if row.get('entity_id'):entity=get_entity(settings,cid,int(row['entity_id']))
+            entity=get_entity(settings,cid,int(row['entity_id'])) if row.get('entity_id') else None
             if not entity and row.get('prepared_content_id'):
                 entity=next((e for e in list_entities(settings,cid) if e.get('source_type')=='foundry_prepared' and str(e.get('source_key'))==str(row['prepared_content_id'])),None)
-            if not entity:continue
-            if int(entity['id']) in seen:continue
-            seen.add(int(entity['id']));commands.append(_queue_entity_push(request,entity))
+            if entity:entities.append(entity)
+        try:out=_queue_creature_bundle(request,title=f"Encounter · {enc.get('title') or 'Untitled'}",bundle_kind='encounter',bundle_id=encounter_id,entities=entities)
+        except ValueError as exc:raise HTTPException(400,str(exc))
         save_encounter(settings,cid,{**enc,'status':'queued'},actor_label=requester_label(request))
-        return {'ok':True,'commands':commands,'count':len(commands)}
+        return out
+
+    @app.post('/api/v7/creature-folders')
+    def v7_creature_folder_save(request:Request,payload:dict=Body(...)):
+        require_permission(request,'edit_monsters')
+        try:return save_creature_folder(settings,active_campaign_id(request),payload,actor_label=requester_label(request))
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.delete('/api/v7/creature-folders/{folder_id}')
+    def v7_creature_folder_delete(request:Request,folder_id:int):
+        require_permission(request,'edit_monsters')
+        try:delete_creature_folder(settings,active_campaign_id(request),folder_id,actor_label=requester_label(request));return {'ok':True}
+        except ValueError as exc:raise HTTPException(404,str(exc))
+
+    @app.post('/api/v7/creature-folders/{folder_id}/members')
+    def v7_creature_folder_member_add(request:Request,folder_id:int,payload:dict=Body(...)):
+        require_permission(request,'edit_monsters')
+        try:return add_creature_to_folder(settings,active_campaign_id(request),folder_id,int(payload.get('entity_id') or 0))
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.delete('/api/v7/creature-folders/{folder_id}/members/{entity_id}')
+    def v7_creature_folder_member_delete(request:Request,folder_id:int,entity_id:int):
+        require_permission(request,'edit_monsters')
+        try:remove_creature_from_folder(settings,active_campaign_id(request),folder_id,entity_id);return {'ok':True}
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.post('/api/v7/creature-folders/{folder_id}/push-foundry')
+    def v7_creature_folder_push(request:Request,folder_id:int):
+        require_permission(request,'edit_monsters');cid=active_campaign_id(request);folder=get_creature_folder(settings,cid,folder_id)
+        if not folder:raise HTTPException(404,'Creature folder not found.')
+        try:return _queue_creature_bundle(request,title=f"Seeker · {folder['name']}",bundle_kind='creature_folder',bundle_id=folder_id,entities=folder.get('members') or [])
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.post('/api/v7/aon/import')
+    async def v7_aon_import(request:Request,payload:dict=Body(...)):
+        require_permission(request,'edit_monsters');cid=active_campaign_id(request)
+        raw_urls=payload.get('urls') or []
+        if isinstance(raw_urls,str):raw_urls=[x.strip() for x in raw_urls.replace(',', '\n').splitlines() if x.strip()]
+        if not isinstance(raw_urls,list) or not raw_urls:raise HTTPException(400,'Paste at least one Archives of Nethys creature URL.')
+        try:
+            canonical=[];seen=set()
+            for raw in raw_urls:
+                u=normalize_aon_url(str(raw))
+                if u not in seen:seen.add(u);canonical.append(u)
+            fetched=await fetch_aon_creatures(canonical)
+        except AoNImportError as exc:raise HTTPException(400,str(exc))
+        refresh=bool(payload.get('refresh_existing'));publish=bool(payload.get('publish_codex'))
+        codex_visibility=str(payload.get('codex_visibility') or 'field_notes')
+        if codex_visibility not in {'field_notes','full'}:codex_visibility='field_notes'
+        folder=None
+        folder_id=int(payload.get('folder_id') or 0)
+        folder_name=str(payload.get('folder_name') or '').strip()
+        if folder_id:
+            folder=get_creature_folder(settings,cid,folder_id)
+            if not folder:raise HTTPException(400,'Creature folder not found.')
+        elif folder_name:
+            try:folder=save_creature_folder(settings,cid,{'name':folder_name,'source':'aon'},actor_label=requester_label(request))
+            except ValueError as exc:raise HTTPException(400,str(exc))
+        encounter_id=int(payload.get('encounter_id') or 0)
+        encounter=get_encounter(settings,cid,encounter_id) if encounter_id else None
+        if encounter_id and not encounter:raise HTTPException(400,'Encounter not found.')
+        prepared=list_foundry_prepared_content(settings,cid);results=[];errors=[]
+        for result in fetched:
+            if result.error or not result.parsed:
+                errors.append({'url':result.url,'error':result.error or 'Could not parse creature.'});continue
+            parsed_doc=dict(result.parsed);parsed=dict(parsed_doc.get('payload') or {});url=str(parsed.get('aon_url') or result.url)
+            existing=next((r for r in prepared if str((r.get('payload') or {}).get('aon_url') or '')==url),None)
+            mode='imported'
+            if existing and not refresh:
+                row=existing;mode='reused'
+                # Reusing an AoN creature must not silently overwrite hand-edited mechanics.
+                # Publishing is metadata-only, though, so honor an explicit Codex request.
+                if publish:
+                    oldp=dict(row.get('payload') or {})
+                    if not bool(oldp.get('codex_publish') or oldp.get('publish_codex')) or str(oldp.get('codex_visibility') or '') != codex_visibility:
+                        content={**oldp,'codex_publish':True,'publish_codex':True,'codex_visibility':codex_visibility}
+                        content.setdefault('codex_category','Archives of Nethys')
+                        content.setdefault('codex_blurb',row.get('summary') or parsed.get('description') or '')
+                        row=save_foundry_prepared_content(settings,cid,{'id':int(row['id']),'kind':row.get('kind') or 'monster','title':row.get('title') or parsed_doc.get('title') or 'Imported creature','subtitle':row.get('subtitle') or parsed_doc.get('subtitle') or '', 'target_type':row.get('target_type') or 'world','summary':row.get('summary') or parsed_doc.get('summary') or '', 'tags':row.get('tags') or parsed_doc.get('tags') or '', 'payload':content})
+                        prepared=[r for r in prepared if int(r.get('id') or 0)!=int(row['id'])]+[row]
+            else:
+                oldp=dict((existing or {}).get('payload') or {})
+                preserved={k:oldp.get(k) for k in ('img','token_img','codex_publish','publish_codex','codex_visibility','codex_blurb','codex_category','gm_notes') if k in oldp}
+                content={**oldp,**parsed,**preserved}
+                if publish:
+                    content['codex_publish']=True;content['publish_codex']=True;content['codex_visibility']=codex_visibility
+                elif not existing:
+                    content['codex_visibility']=codex_visibility
+                content.setdefault('codex_category','Archives of Nethys')
+                content.setdefault('codex_blurb',parsed.get('description') or parsed.get('summary') or '')
+                save_payload={'id':int(existing['id']) if existing else 0,'kind':'monster','title':parsed_doc.get('title') or 'Imported creature','subtitle':parsed_doc.get('subtitle') or f"Archives of Nethys · Level {parsed.get('level',0)}",'target_type':'world','summary':parsed_doc.get('summary') or parsed.get('description') or '', 'tags':parsed_doc.get('tags') or str(parsed.get('traits') or ''),'payload':content}
+                try:row=save_foundry_prepared_content(settings,cid,save_payload)
+                except ValueError as exc:errors.append({'url':url,'error':str(exc)});continue
+                prepared=[r for r in prepared if int(r.get('id') or 0)!=int(row['id'])]+[row];mode='updated' if existing else 'imported'
+            entity=_prepared_entity(row)
+            if folder:add_creature_to_folder(settings,cid,int(folder['id']),int(entity['id']))
+            if encounter and not any(int(x.get('entity_id') or 0)==int(entity['id']) for x in (encounter.get('creatures') or [])):
+                save_encounter_creature(settings,cid,encounter_id,{'entity_id':entity['id'],'prepared_content_id':row['id'],'name':row['title'],'level':int((row.get('payload') or {}).get('level') or 0),'quantity':1,'disposition':'enemy'})
+            results.append({'url':url,'mode':mode,'prepared_id':row['id'],'entity_id':entity['id'],'name':row['title']})
+        return {'ok':not errors,'results':results,'errors':errors,'count':len(results),'folder':folder}
 
     @app.post('/api/v7/loot')
     def v7_loot_pool_save(request:Request,payload:dict=Body(...)):
@@ -437,7 +624,7 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             queue={r['status']:r['n'] for r in conn.execute('SELECT status,COUNT(*) AS n FROM foundry_command_queue WHERE campaign_id=? GROUP BY status',(cid,)).fetchall()}
             pages=int(conn.execute('SELECT COUNT(*) AS n FROM v7_entities WHERE campaign_id=?',(cid,)).fetchone()['n'])
         backups=settings.data_dir/'migration-backups'
-        return {'ok':True,'version':'7.0.0','campaign_id':cid,'entities':pages,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
+        return {'ok':True,'version':'7.0.3','campaign_id':cid,'entities':pages,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
 
     @app.get('/entity/{entity_id}',response_class=HTMLResponse)
     def v7_entity_page(request:Request,entity_id:int):
@@ -445,9 +632,12 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         cid=active_campaign_id(request);gm=bool(has_permission(request,'edit_entities'));entity=get_entity(settings,cid,entity_id)
         if not entity or (entity.get('visibility')=='gm' and not gm):raise HTTPException(404,'Entity not found.')
         can_stats=bool(has_permission(request,'view_statblocks') or entity_allows_public_statblock(entity))
-        facts=visible_entity_facts(settings,entity_id,invite_id(request),gm=gm)
-        view=entity if gm else player_entity_view(settings,entity,invite_id(request),can_view_statblock=can_stats)
-        return templates.TemplateResponse('v7_entity.html',{'request':request,'wiki':visible_wiki(request),'maps':list_maps(settings,public=not gm),'entity':view,'facts':facts,'gm_view':gm,'can_view_statblock':can_stats})
+        iid=invite_id(request);facts=visible_entity_facts(settings,entity_id,iid,gm=gm)
+        observations=list_player_observations(settings,cid,entity_id,iid,gm=gm)
+        view=entity if gm else player_entity_view(settings,entity,iid,can_view_statblock=can_stats)
+        role='owner' if helpers.get('is_admin',lambda _r:False)(request) else player_role(request)
+        perms=effective_permissions(settings,role,iid,cid)
+        return templates.TemplateResponse('v7_entity.html',{'request':request,'wiki':visible_wiki(request),'maps':list_maps(settings,public=not gm),'entity':view,'facts':facts,'observations':observations,'gm_view':gm,'can_view_statblock':can_stats,'v7_permissions':perms,'viewer_invite_id':iid})
 
     @app.get('/app',response_class=HTMLResponse)
     def v7_player_app(request:Request,character_id:int|None=None):
@@ -458,7 +648,9 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         foundry=foundry_link_for_character(settings,int(selected['id'])) if selected else None
         loot=list_loot_pools(settings,cid,None,public=not gm)
         entities=list_entities(settings,cid,include_hidden=gm)
-        session=_campaign_session(request,cid)
         role='owner' if helpers.get('is_admin',lambda _r:False)(request) else player_role(request)
         perms=effective_permissions(settings,role,iid,cid)
+        if not gm:
+            entities=[player_entity_view(settings,e,iid,can_view_statblock=bool(perms.get('view_statblocks'))) for e in entities]
+        session=_campaign_session(request,cid)
         return templates.TemplateResponse('v7_player.html',{'request':request,'wiki':visible_wiki(request),'maps':list_maps(settings,public=True),'characters':chars,'character':selected,'foundry_actor':foundry,'loot_pools':loot,'entities':entities,'live_session':session,'v7_permissions':perms,'gm_view':gm})

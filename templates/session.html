@@ -106,4 +106,4 @@
 <div class="modal-backdrop hidden" id="livingModal"><div class="modal living-modal"><button class="modal-close" data-living-close>×</button><div id="livingModalContent"></div></div></div><div class="toast-stack" id="toastStack"></div>
 <script>window.LF_LIVING={{ {"threads":threads,"journals":party_journals,"characters":session_characters,"submissions":[],"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":(active_character.id if active_character else none),"session_id":(session.id if session else none),"session_context":true,"character_selection_made":character_selection_made,"sessions":([session] if session else [])}|tojson }};window.SEEKER_V5_SESSION={{ {"session_id":(session.id if session else none),"player_id":(player.id if player else none),"gm":gm_view}|tojson }};</script>
 {% endblock %}
-{% block scripts %}{{ super() }}<script src="/static/living.js?v=7000"></script><script src="/static/session-v5.js?v=7000"></script>{% endblock %}
+{% block scripts %}{{ super() }}<script src="/static/living.js?v=7030"></script><script src="/static/session-v5.js?v=7030"></script>{% endblock %}

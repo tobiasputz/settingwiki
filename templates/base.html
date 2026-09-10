@@ -13,8 +13,8 @@
   <link rel="icon" href="/static/seeker-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Seeker' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=7000">
-  <link rel="stylesheet" href="/static/tour.css?v=7000">
+  <link rel="stylesheet" href="/static/wiki.css?v=7030">
+  <link rel="stylesheet" href="/static/tour.css?v=7030">
   {% block head %}{% endblock %}
 </head>
 {% set campaign_ctx = campaign_context(request) %}
@@ -97,8 +97,8 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=7000"></script>
-  <script src="/static/tour.js?v=7000"></script>
+  <script src="/static/wiki.js?v=7030"></script>
+  <script src="/static/tour.js?v=7030"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

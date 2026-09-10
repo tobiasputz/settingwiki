@@ -1,3 +1,37 @@
+# Seeker 7.0.3 — Layered Knowledge & Party Deductions
+
+- Adds three Recall Knowledge disclosure fidelities: **Exact**, **Vague**, and **Comparative**. The GM can reveal a qualitative weakness or relative save ranking without exposing the stored number.
+- Makes disclosure privacy server-side rather than cosmetic. A vague/comparative player projection strips the exact body and private mechanics JSON before leaving the server.
+- Adds per-fact disclosure selection to both direct reveals and Recall Knowledge resolution, plus an **Entire party** target.
+- Lets players share an already-revealed fact with the rest of the party while preserving the disclosure mode they actually learned. Party sharing never downgrades a party member who already knows an exact version.
+- Adds player-authored **Field Deductions** with private/party visibility, inference/confirmed/rejected state, freeform notes, hypotheses, comparisons and numeric ranges.
+- Adds AC evidence shortcuts: a normal miss establishes a lower bound and a normal hit establishes an upper bound. Seeker refuses contradictory ranges and explicitly warns that natural 1/20 results should not be used for this inference.
+- Lets a player share or privatize their own deduction later. GMs can confirm or reject player deductions without silently converting them into canonical mechanics.
+- Hardens the phone Table App journal to use the same player-safe entity projection as the entity dossier.
+- Static/PWA cache generation moves to **7030**. Foundry Bridge remains **1.6.0**; no module update is needed.
+
+# Seeker 7.0.2 — Archives of Nethys Creature Vault & Foundry folders
+
+- Adds a polished **Creature Vault** to the Living Table. Paste one or many Archives of Nethys creature/NPC links and Seeker turns them into normal editable monster entries while retaining the canonical AoN source link.
+- AoN import is duplicate-safe and intentionally lean: Seeker stores parsed creature data and source metadata, not copies of the fetched HTML. Existing imports are reused unless **Refresh existing AoN entries** is selected.
+- Imports can be sent directly into the Monster Codex, an encounter, or a reusable Creature Vault collection. Refreshing an AoN entry preserves Seeker artwork/token choices, GM notes and Codex visibility settings.
+- Adds campaign-scoped **Creature Vault collections**. Deleting a collection removes only the grouping, never its creatures or Foundry actors.
+- Encounter **Prepare in Foundry** and Creature Vault **Push folder** now queue one bundle command. Foundry Bridge 1.6.0 creates a real Actor folder and creates/updates every Seeker-managed creature inside it, reporting per-creature failures without aborting the rest of the bundle.
+- AoN-created strikes support multiple damage components and imported creatures support multiple spellcasting blocks.
+- Hardens the server-side AoN fetcher with an exact host/path allowlist, bounded response size/batch size, and redirect validation so redirects cannot escape the AoN creature endpoints.
+- Static/PWA cache generation moves to **7020**. Foundry Bridge moves to **1.6.0** and must be updated for folder/bundle import support.
+
+# Seeker 7.0.1 — Proficiency Without Level encounters
+
+- Adds a polished **Rules math** selector to every V7 encounter: Standard PF2e or Proficiency without Level.
+- Implements the official GM Core PWL creature-XP table from party level −7 through +7 (9/12/14/18/21/26/32/40/48/60/72/90/108/135/160 XP).
+- Keeps the normal PF2e encounter threat budgets and existing party-size adjustment under PWL, as specified by the variant rules.
+- Shows the rules variant, per-creature XP, total XP contribution, and incomplete-budget warnings directly in the encounter UI.
+- Adds an optional per-creature XP override. PWL creatures outside the published ±7 table are explicitly marked as needing an override rather than receiving invented math.
+- Rejects negative/non-integer XP overrides.
+- Static cache generation moves to **7010** so existing browsers/PWA installs receive the updated encounter builder immediately.
+- Foundry Bridge remains **1.5.0**; no Foundry module update is required for this encounter-math-only release.
+
 # Seeker 7.0.0 — The Living Table
 
 - Adds the **Living Table** campaign operating surface built around Prepare → Run → Resolve → Remember.

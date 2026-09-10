@@ -1,10 +1,29 @@
-# Seeker 7.0.0
+# Seeker 7.0.3
 
 **Seeker 7 — The Living Table** turns the existing campaign wiki, session tools, Foundry Workshop, maps and world-state systems into one campaign operating layer. The primary GM workspace is `/gm/v7`; the phone-oriented player surface is `/app`. Existing Seeker data is migrated additively and a pre-V7 SQLite backup is created automatically on first schema initialization.
 
-For the current Railway deployment the canonical public origin is `https://seeker.up.railway.app`. Foundry Bridge 1.5.0 is installed/updated from `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
+For the current Railway deployment the canonical public origin is `https://seeker.up.railway.app`. Foundry Bridge 1.6.0 is installed/updated from `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
 
-This build includes Foundry Bridge 1.5.0 with hardened PF2e creature strikes/spellcasting/spell imports, structured special-ability authoring, expanded Token Forge, forced post-push refresh, and Discord mention fixes.
+This build includes Foundry Bridge 1.6.0 with hardened PF2e creature strikes/spellcasting/spell imports, structured special-ability authoring, expanded Token Forge, forced post-push refresh, and Discord mention fixes.
+
+
+## Seeker 7.0.3: Layered Knowledge & Party Deductions
+
+Recall Knowledge and combat discovery now support **Exact**, **Vague**, and **Comparative** disclosure. A GM can keep the real statistic private while revealing qualitative or relative information such as “it is extremely vulnerable to fire” or “Fortitude is its highest save.” Disclosure is enforced server-side: player APIs receive only the chosen wording and never the hidden exact mechanics stored on the same knowledge fact. The Living Table knowledge panel lets the GM choose disclosure fidelity per fact both for direct reveals and for Recall Knowledge results, including an entire-party reveal target.
+
+Players can now add **Field Deductions** to any visible entity. Notes may be private or party-shared, can represent freeform hypotheses/comparisons, or can track a numeric range such as an estimated AC. The AC helper can infer a range from a normal missed attack total and a normal hit total. Players can later share a private deduction with the party, and can also share a GM-revealed fact with everyone while preserving its original disclosure fidelity. Player deductions remain visibly marked as inference until a GM confirms or rejects them; they never silently become canonical monster mechanics.
+
+The Table App and entity dossiers use the same player-safe projection, preventing exact creature summaries or knowledge metadata from bypassing Field Notes visibility. Static/PWA cache generation moves to **7030**. Foundry Bridge remains **1.6.0**; this release does not require a module update.
+
+## Seeker 7.0.2: Archives of Nethys Creature Vault
+
+The **Creature Vault** turns Archives of Nethys creature and NPC pages into normal Seeker monster entries. Paste one link or a batch of links, optionally publish them to the Monster Codex, attach them directly to an encounter, or organize them in reusable campaign collections. Seeker retains the canonical source link and stores the parsed creature fields rather than archiving the fetched webpage, keeping Railway storage small. Re-importing the same canonical AoN URL reuses the existing creature by default; **Refresh existing** deliberately refreshes mechanics while preserving Seeker artwork/token choices, GM notes and Codex visibility.
+
+Encounter preparation and Creature Vault collections can now be pushed as a **single Foundry bundle**. Seeker Bridge 1.6.0 creates a real Actor folder for the encounter/collection, updates existing Seeker-managed actors when a UUID is already linked, creates missing actors, and reports failures per creature without discarding the rest of the folder. Imported AoN strikes support multiple damage components and imported statblocks may contain multiple spellcasting entries.
+
+## Seeker 7.0.1: Proficiency Without Level encounters
+
+The V7 Encounter Builder now supports both **Standard PF2e** and the official **Proficiency Without Level** encounter math. The rules mode is stored per encounter so old and new encounters remain reproducible. PWL uses the GM Core creature-XP table from party level −7 through +7 while retaining the normal encounter threat budgets and party-size scaling. Each creature row shows its calculated XP contribution, and an optional manual XP override is available for creatures outside the published PWL range instead of Seeker inventing values.
 
 # Seeker — interactive setting & session companion
 
@@ -19,7 +38,7 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 
 V6.1 turns the optional Foundry connection into a normal installable Foundry module. On the active campaign's **GM → Integrations** page, copy the manifest URL and paste it into Foundry's **Install Module → Manifest URL** field. Enable the module in the world, then paste Seeker's private bridge endpoint into the module settings. Only a GM Foundry client pushes data, and the bridge is read-only: Seeker never changes Foundry actors or scenes. The bridge now repairs reverse-proxy HTTP/HTTPS mismatches automatically and shows an in-Foundry success/failure notification after its first heartbeat, so a failed connection no longer leaves the GM with only an unexplained “Waiting for Foundry” state.
 
-For the current Railway deployment, the canonical public origin is `https://seeker.up.railway.app`. Seeker normally derives this from the public request host (rather than blindly trusting a secondary Railway domain). You can still pin it explicitly with `SEEKER_PUBLIC_URL=https://seeker.up.railway.app`. Foundry Bridge 1.5.0 also repairs an old saved Seeker hostname after the module is updated from the current manifest.
+For the current Railway deployment, the canonical public origin is `https://seeker.up.railway.app`. Seeker normally derives this from the public request host (rather than blindly trusting a secondary Railway domain). You can still pin it explicitly with `SEEKER_PUBLIC_URL=https://seeker.up.railway.app`. Foundry Bridge 1.6.0 also repairs an old saved Seeker hostname after the module is updated from the current manifest.
 
 Player characters can be linked to synced Foundry actors from the Seeker character editor. The owning player then gets a polished read-only PF2e sheet on Seeker with identity, vitals, defenses, skills, attacks, feats, actions, inventory, spells, conditions and a deep link back to the real Foundry actor. Foundry remains the source of truth; Seeker stores a bounded snapshot for display. Other players do not receive that private mechanical snapshot.
 

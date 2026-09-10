@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.5.0";
+const BRIDGE_VERSION = "1.6.0";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 
 function seekerSlugify(value) {
@@ -511,7 +511,7 @@ function buildPreparedActor(payload, endpoint = "") {
       attributes: {
         ac: { value: Math.max(0, numericOr(data.ac, 10)), details: "" },
         hp: { value: hp, max: hp, temp: 0, details: "" },
-        speed: { value: speed, otherSpeeds: [], details: "" },
+        speed: { value: speed, otherSpeeds: (Array.isArray(data.other_speeds) ? data.other_speeds : []).map(row => ({ type: String(row?.type || "").toLowerCase(), value: Math.max(0, numericOr(row?.value, 0)) })).filter(row => ["burrow","climb","fly","swim"].includes(row.type) && row.value > 0), details: String(data.speed_details || "") },
         immunities: parsedIWR(data.immunities, "immunity"),
         weaknesses: parsedIWR(data.weaknesses, "weakness"),
         resistances: parsedIWR(data.resistances, "resistance"),
@@ -560,42 +560,51 @@ function parseDamage(attack) {
   if (!type || !Object.prototype.hasOwnProperty.call(known, type)) type = "bludgeoning";
   return { formula: formula || "1d4", type };
 }
+function npcDamageRolls(attack = {}) {
+  const known = globalThis.CONFIG?.PF2E?.damageTypes || {};
+  const raw = Array.isArray(attack.damage_components) && attack.damage_components.length
+    ? attack.damage_components
+    : [{ formula: attack.damage, type: attack.damage_type }];
+  const out = {};
+  raw.slice(0, 8).forEach((part, index) => {
+    let formula = String(part?.formula ?? part?.damage ?? "").trim();
+    if (!formula) return;
+    let type = String(part?.type ?? part?.damage_type ?? "bludgeoning").trim().toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(known, type)) type = "bludgeoning";
+    const rawCategory = String(part?.category || "").toLowerCase();
+    const category = rawCategory === "persistent" || type === "bleed" ? "persistent" : null;
+    out[`seeker-${index + 1}`] = { damage: formula, damageType: type, category };
+  });
+  if (!Object.keys(out).length) {
+    const { formula, type } = parseDamage(attack);
+    out["seeker-1"] = { damage: formula, damageType: type, category: type === "bleed" ? "persistent" : null };
+  }
+  return out;
+}
 function buildNpcAttack(attack = {}) {
-  const { formula, type } = parseDamage(attack);
   const ranged = String(attack.type || "melee").toLowerCase() === "ranged";
   const range = ranged ? Math.max(5, Math.round(numericOr(attack.range, 30) / 5) * 5) : 0;
   return {
-    name: String(attack.name || "Strike"),
-    type: "melee",
+    name: String(attack.name || "Strike"), type: "melee",
     img: ranged ? "icons/svg/target.svg" : "icons/svg/sword.svg",
     flags: { seeker: { managedEmbedded: true, role: "strike" } },
     system: {
-      description: { value: "" },
-      traits: {
-        value: validTraitList(attack.traits, globalThis.CONFIG?.PF2E?.npcAttackTraits),
-        otherTags: [],
-      },
-      rules: [],
-      slug: seekerSlugify(String(attack.name || "strike")),
-      action: "strike",
-      area: null,
+      description: { value: String(attack.effects || "") ? `<p>${seekerEscapeHTML(String(attack.effects))}</p>` : "" },
+      traits: { value: validTraitList(attack.traits, globalThis.CONFIG?.PF2E?.npcAttackTraits), otherTags: [] },
+      rules: [], slug: seekerSlugify(String(attack.name || "strike")), action: "strike", area: null,
       bonus: { value: Math.trunc(numericOr(attack.bonus, 0)) },
-      // PF2e 8.x stores NPC strike damage in a RecordField named damageRolls.
-      // Use a stable non-empty key and the exact MeleeSystemSource field names.
-      damageRolls: { "seeker-base": { damage: formula, damageType: type, category: type === "bleed" ? "persistent" : null } },
+      damageRolls: npcDamageRolls(attack),
       attackEffects: { value: slugList(attack.effects).map(String) },
-      range: ranged ? { increment: range, max: null } : null,
-      subjectToMAP: true,
+      range: ranged ? { increment: range, max: null } : null, subjectToMAP: true,
     },
   };
 }
 function npcAttackPatch(attack = {}) {
-  const { formula, type } = parseDamage(attack);
   const ranged = String(attack.type || "melee").toLowerCase() === "ranged";
   const range = ranged ? Math.max(5, Math.round(numericOr(attack.range, 30) / 5) * 5) : 0;
   return {
     "system.bonus.value": Math.trunc(numericOr(attack.bonus, 0)),
-    "system.damageRolls": { "seeker-base": { damage: formula, damageType: type, category: type === "bleed" ? "persistent" : null } },
+    "system.damageRolls": npcDamageRolls(attack),
     "system.range": ranged ? { increment: range, max: null } : null,
   };
 }
@@ -857,6 +866,21 @@ async function addSpellToEntry(actor, entry, spell, data) {
   const docs = await actor.createEmbeddedDocuments("Item", [source]);
   return docs?.[0] || null;
 }
+function normalizedSpellcastingGroups(data = {}) {
+  const groups = Array.isArray(data.spellcasting_entries) ? data.spellcasting_entries.filter(g => g && typeof g === "object") : [];
+  if (groups.length) return groups.map((g, index) => ({
+    ...data,
+    spell_tradition: g.tradition ?? data.spell_tradition,
+    spell_mode: g.mode ?? data.spell_mode,
+    spell_dc: g.dc ?? data.spell_dc,
+    spell_attack: g.attack ?? data.spell_attack,
+    spellcasting: g.label ?? data.spellcasting,
+    spells: Array.isArray(g.spells) ? g.spells : [],
+    spellcasting_name: g.name || g.label || `Spellcasting ${index + 1}`,
+  }));
+  const spells = Array.isArray(data.spells) ? data.spells : [];
+  return spells.length ? [data] : [];
+}
 async function populatePreparedActor(actor, payload) {
   const data = payload?.data || {};
   const report = { attacks: 0, abilities: 0, spells: 0, spellcasting: 0, warnings: [] };
@@ -869,13 +893,13 @@ async function populatePreparedActor(actor, payload) {
         // Re-apply numeric/damage data after creation. This avoids migrations/defaults
         // in different PF2e releases eating the custom values from the create source.
         await created.update(npcAttackPatch(attack));
-        const { formula, type } = parseDamage(attack);
-        const storedDamage = Object.values(created.system?.damageRolls || {}).find(d => String(d?.damage || "").trim() === formula);
-        if (!storedDamage) {
-          // Some PF2e releases migrate a newly-created melee item before the first
-          // update finishes. A second, source-shaped replacement is harmless and
-          // makes the intended damage roll deterministic across those releases.
-          await created.update({ "system.damageRolls": { "seeker-base": { damage: formula, damageType: type, category: type === "bleed" ? "persistent" : null } } });
+        const wantedRolls = npcDamageRolls(attack);
+        const stored = Object.values(created.system?.damageRolls || {});
+        const retained = Object.values(wantedRolls).every(w => stored.some(d => String(d?.damage || "").trim() === String(w.damage) && String(d?.damageType || "") === String(w.damageType)));
+        if (!retained) {
+          // Replacing only the managed damage record is harmless and keeps multi-component
+          // AoN attacks (for example piercing plus fire) intact across PF2e migrations.
+          await created.update({ "system.damageRolls": wantedRolls });
         }
         if (!Object.values(created.system?.damageRolls || {}).length) throw new Error("PF2e did not retain the strike damage roll.");
         report.attacks += 1;
@@ -895,27 +919,27 @@ async function populatePreparedActor(actor, payload) {
       report.warnings.push(`abilities: ${error?.message || error}`);
     }
   }
-  const spells = (Array.isArray(data.spells) ? data.spells : []).filter(s => String(s?.name || "").trim());
-  if (spells.length) {
+  const castingGroups = normalizedSpellcastingGroups(data);
+  for (const casting of castingGroups) {
+    const spells = (Array.isArray(casting.spells) ? casting.spells : []).filter(sp => String(sp?.name || "").trim());
     try {
-      const entries = await actor.createEmbeddedDocuments("Item", [buildSpellcastingEntry(data)]);
+      const entrySource = buildSpellcastingEntry(casting);
+      if (casting.spellcasting_name) entrySource.name = String(casting.spellcasting_name).slice(0, 180);
+      const entries = await actor.createEmbeddedDocuments("Item", [entrySource]);
       const entry = entries?.[0];
       if (!entry) throw new Error("Spellcasting entry was not created.");
-      await entry.update(spellcastingPatch(data));
-      const wantedDC = Math.max(0, Math.trunc(numericOr(data.spell_dc, 10)));
-      const attackRaw = String(data.spell_attack ?? "").trim();
-      const wantedAttack = attackRaw === "" ? Math.max(0, wantedDC - 8) : Math.trunc(numericOr(data.spell_attack, 0));
-      // Verify the source values PF2e actually retained. These are the two
-      // explicit NPC spell statistic inputs used by PF2e when it prepares the
-      // spell attack and spell DC statistics.
+      await entry.update(spellcastingPatch(casting));
+      const wantedDC = Math.max(0, Math.trunc(numericOr(casting.spell_dc, 10)));
+      const attackRaw = String(casting.spell_attack ?? "").trim();
+      const wantedAttack = attackRaw === "" ? Math.max(0, wantedDC - 8) : Math.trunc(numericOr(casting.spell_attack, 0));
       if (Number(entry.system?.spelldc?.dc) !== wantedDC || Number(entry.system?.spelldc?.value) !== wantedAttack) {
         await entry.update({ "system.spelldc": { value: wantedAttack, dc: wantedDC } });
       }
-      report.spellcasting = 1;
+      report.spellcasting += 1;
       const created = [];
       for (const spell of spells) {
         try {
-          const doc = await addSpellToEntry(actor, entry, spell, data);
+          const doc = await addSpellToEntry(actor, entry, spell, casting);
           if (doc) { created.push(doc); report.spells += 1; }
           else report.warnings.push(`spell ${spell?.name || "unknown"}: Foundry did not add the spell.`);
         } catch (error) {
@@ -923,14 +947,14 @@ async function populatePreparedActor(actor, payload) {
           report.warnings.push(`spell ${spell?.name || "unknown"}: ${error?.message || error}`);
         }
       }
-      if (String(data.spell_mode || "").toLowerCase() === "prepared") {
+      if (String(casting.spell_mode || "").toLowerCase() === "prepared") {
         const slotPatch = {};
         for (let rank = 1; rank <= 10; rank += 1) {
           const rankSpells = created.filter(doc => Math.max(0, Math.trunc(numericOr(doc?.rank ?? doc?.system?.level?.value, 1))) === rank);
           if (!rankSpells.length) continue;
           slotPatch[`system.slots.slot${rank}.max`] = rankSpells.length;
           slotPatch[`system.slots.slot${rank}.value`] = rankSpells.length;
-          slotPatch[`system.slots.slot${rank}.prepared`] = rankSpells.map(s => ({ id: s.id, expended: false }));
+          slotPatch[`system.slots.slot${rank}.prepared`] = rankSpells.map(sp => ({ id: sp.id, expended: false }));
         }
         if (Object.keys(slotPatch).length) await entry.update(slotPatch);
       }
@@ -1022,6 +1046,47 @@ async function syncManagedDocument(doc, payload, endpoint = "") {
   return { message: `${doc.name} synchronized from Seeker.`, uuid: doc.uuid, document_type: "Item", entity_id: payload.entity_id };
 }
 
+async function importCreatureBundle(payload, endpoint = "") {
+  const entries = Array.isArray(payload?.entries) ? payload.entries.slice(0, 150) : [];
+  if (!entries.length) throw new Error("The Seeker collection is empty.");
+  const folderName = String(payload?.folder_name || "Seeker Creatures").slice(0, 180);
+  const bundleKind = String(payload?.bundle_kind || "collection");
+  const bundleId = payload?.bundle_id ?? null;
+  let folder = (game.folders?.contents || []).find(f => f.type === "Actor" && f.name === folderName && f.flags?.seeker?.managedBundle);
+  if (!folder) folder = await Folder.create({ name: folderName, type: "Actor", flags: { seeker: { managedBundle: true, bundleKind, bundleId } } });
+  const items = [];
+  for (const entry of entries) {
+    try {
+      const kind = String(entry?.prepared_kind || "monster").toLowerCase();
+      if (!["monster","npc"].includes(kind) && !(kind === "homebrew" && (entry?.data?.hp || entry?.data?.ac))) {
+        items.push({ entity_id: entry?.entity_id ?? null, status: "skipped", message: "Not a creature actor." }); continue;
+      }
+      let actor = null;
+      const uuid = String(entry?.foundry_uuid || "").trim();
+      if (uuid) {
+        const existing = await fromUuid(uuid);
+        if (existing?.documentName === "Actor") {
+          await syncManagedDocument(existing, entry, endpoint);
+          actor = existing;
+        }
+      }
+      if (!actor) {
+        const source = buildPreparedActor(entry, endpoint); source.folder = folder?.id || null;
+        actor = await Actor.create(source);
+        await populatePreparedActor(actor, entry);
+      } else if (folder?.id && actor.folder?.id !== folder.id) {
+        await actor.update({ folder: folder.id });
+      }
+      items.push({ entity_id: entry?.entity_id ?? null, uuid: actor?.uuid || "", document_type: "Actor", status: "done", name: actor?.name || entry?.title || "Creature" });
+    } catch (error) {
+      console.warn(`[${MODULE_ID}] Bundle creature failed`, entry?.title, error);
+      items.push({ entity_id: entry?.entity_id ?? null, status: "failed", name: entry?.title || "Creature", message: error?.message || String(error) });
+    }
+  }
+  const done = items.filter(x => x.status === "done").length;
+  const failed = items.filter(x => x.status === "failed").length;
+  return { message: `${done} creature${done === 1 ? "" : "s"} prepared in Foundry folder “${folderName}”${failed ? `; ${failed} failed` : ""}.`, folder_id: folder?.id || "", items };
+}
 async function runFoundryCommand(command, endpoint = "") {
   const type = String(command?.command_type || "").toLowerCase();
   const payload = command?.payload || {};
@@ -1073,6 +1138,9 @@ async function runFoundryCommand(command, endpoint = "") {
     }
     const created = await Item.create(buildPreparedItem(payload, endpoint));
     return { message: `${created?.name || payload.title || "Prepared content"} created in the Items directory.`, uuid: created?.uuid || "", document_type: "Item", entity_id: payload.entity_id ?? null };
+  }
+  if (type === "push_content_bundle") {
+    return importCreatureBundle(payload, endpoint);
   }
   if (type === "sync_entity_document") {
     const uuid = String(payload.foundry_uuid || "").trim();

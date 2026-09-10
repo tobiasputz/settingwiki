@@ -4,7 +4,7 @@
 <main class="bestiary-shell">
   <header class="bestiary-hero">
     <div><span class="eyebrow">MONSTER CODEX</span><h1>Creatures encountered</h1><p>A field guide to beings known in this campaign. Some entries contain complete mechanics; others reveal only what the party has learned.</p></div>
-    {% if gm_view %}<a class="quiet-btn" href="/gm/foundry-workshop">Open Foundry Workshop</a>{% endif %}
+    {% if gm_view %}<div style="display:flex;gap:8px;flex-wrap:wrap"><a class="quiet-btn" href="/gm/v7#creatures">Creature Vault</a><a class="quiet-btn" href="/gm/foundry-workshop">Open Foundry Workshop</a></div>{% endif %}
   </header>
   {% if monsters %}<section class="bestiary-grid">
     {% for entry in monsters %}{% set p=entry.payload or {} %}
@@ -21,4 +21,4 @@
   </section>{% else %}<div class="bestiary-empty"><span class="eyebrow">NO PUBLIC ENTRIES</span><h2>The field guide is still empty.</h2><p>Creatures appear here when the GM publishes them from the Foundry Workshop.</p></div>{% endif %}
 </main>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7000">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7030">{% endblock %}

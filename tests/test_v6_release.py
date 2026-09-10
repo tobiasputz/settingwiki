@@ -31,11 +31,11 @@ def setup(tmp_path: Path) -> Settings:
 
 def test_v6_release_identity_and_assets():
     root=Path(__file__).resolve().parents[1]
-    assert (root/'VERSION').read_text().strip()=='7.0.0'
+    assert (root/'VERSION').read_text().strip()=='7.0.3'
     sw=(root/'static/sw.js').read_text(encoding='utf-8')
-    assert 'seeker-static-v7000' in sw
+    assert 'seeker-static-v7030' in sw
     shipped='\n'.join((root/'templates'/name).read_text(encoding='utf-8') for name in ['gm_continuity.html','gm_integrations.html','gm_media.html','display.html','lore_history.html'])
-    assert '/static/v6.js?v=7000' in shipped
+    assert '/static/v6.js?v=7030' in shipped
     for name in ['gm_continuity.html','gm_integrations.html','gm_media.html','display.html','lore_history.html']:
         assert (root/'templates'/name).exists()
     foundry=root/'integrations'/'foundry-seeker-bridge'

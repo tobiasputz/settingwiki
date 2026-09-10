@@ -5,3 +5,4 @@ python-multipart==0.0.20
 itsdangerous==2.2.0
 httpx==0.28.1
 qrcode[pil]==8.2
+beautifulsoup4==4.14.3
