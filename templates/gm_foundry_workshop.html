@@ -316,24 +316,29 @@
           <button type="button" data-token-preset="minimal">Minimal</button><button type="button" data-token-preset="portrait">Portrait</button><button type="button" data-token-preset="badge">Badge</button><button type="button" data-token-preset="borderless">Borderless</button>
         </div></section>
         <section class="fw-token-recipe-bar"><small>CAMPAIGN RECIPES</small><div><select data-token-recipe-select><option value="">Choose saved recipe…</option></select><button type="button" class="quiet-btn" data-token-recipe-apply>Apply</button><input data-token-recipe-name maxlength="160" placeholder="New recipe name"><button type="button" class="quiet-btn" data-token-recipe-save>Save current</button><button type="button" class="quiet-btn" data-token-recipe-delete>Delete</button></div></section>
-        <section class="fw-token-control-grid">
-          <label><span>Shape</span><select data-token-shape><option value="circle">Circle</option><option value="roundsquare">Rounded square</option><option value="square">Square</option><option value="hex">Hex</option><option value="octagon">Octagon</option><option value="diamond">Diamond</option><option value="shield">Shield</option></select></label>
-          <label><span>Frame pattern</span><select data-token-pattern><option value="clean">Clean</option><option value="ticks">Ticks</option><option value="runes">Runes</option><option value="rivets">Rivets</option><option value="cardinal">Cardinal marks</option><option value="segmented">Segmented ring</option></select></label>
-          <label><span>Ring color</span><input type="color" value="#b79661" data-token-ring></label>
-          <label><span>Background</span><input type="color" value="#171513" data-token-bg></label>
-          <label><span>Inner accent</span><input type="color" value="#e3c68f" data-token-accent></label>
-          <label><span>Line style</span><select data-token-line-style><option value="solid">Solid</option><option value="dash">Dashed</option><option value="dot">Dotted</option></select></label>
-        </section>
-        <section class="fw-token-sliders">
-          <label><span>Artwork scale</span><input type="range" min="0.55" max="2.4" step="0.01" value="1" data-token-scale><output data-token-scale-out>100%</output></label>
-          <label><span>Horizontal</span><input type="range" min="-240" max="240" step="1" value="0" data-token-x><output data-token-x-out>0</output></label>
-          <label><span>Vertical</span><input type="range" min="-240" max="240" step="1" value="0" data-token-y><output data-token-y-out>0</output></label>
-          <label><span>Ring width</span><input type="range" min="0" max="70" step="1" value="30" data-token-width><output data-token-width-out>30</output></label>
-          <label><span>Vignette</span><input type="range" min="0" max="100" step="1" value="18" data-token-vignette><output data-token-vignette-out>18</output></label>
-          <label><span>Brightness</span><input type="range" min="60" max="140" step="1" value="100" data-token-brightness><output data-token-brightness-out>100%</output></label>
-          <label><span>Saturation</span><input type="range" min="0" max="180" step="1" value="100" data-token-saturation><output data-token-saturation-out>100%</output></label>
-        </section>
-        <div class="fw-token-options"><label><input type="checkbox" data-token-shadow checked> Drop shadow</label><label><input type="checkbox" data-token-double checked> Double ring</label><label><input type="checkbox" data-token-glow> Accent glow</label><label><input type="checkbox" data-token-inner-ring> Inner hairline</label></div>
+        <details class="fw-fine-tune">
+          <summary><span>Fine tune frame & artwork</span><small>Shape, colors, framing and finishing controls</small></summary>
+          <div class="fw-fine-tune-body">
+            <section class="fw-token-control-grid">
+              <label><span>Shape</span><select data-token-shape><option value="circle">Circle</option><option value="roundsquare">Rounded square</option><option value="square">Square</option><option value="hex">Hex</option><option value="octagon">Octagon</option><option value="diamond">Diamond</option><option value="shield">Shield</option></select></label>
+              <label><span>Frame pattern</span><select data-token-pattern><option value="clean">Clean</option><option value="ticks">Ticks</option><option value="runes">Runes</option><option value="rivets">Rivets</option><option value="cardinal">Cardinal marks</option><option value="segmented">Segmented ring</option></select></label>
+              <label><span>Ring color</span><input type="color" value="#b79661" data-token-ring></label>
+              <label><span>Background</span><input type="color" value="#171513" data-token-bg></label>
+              <label><span>Inner accent</span><input type="color" value="#e3c68f" data-token-accent></label>
+              <label><span>Line style</span><select data-token-line-style><option value="solid">Solid</option><option value="dash">Dashed</option><option value="dot">Dotted</option></select></label>
+            </section>
+            <section class="fw-token-sliders">
+              <label><span>Artwork scale</span><input type="range" min="0.55" max="2.4" step="0.01" value="1" data-token-scale><output data-token-scale-out>100%</output></label>
+              <label><span>Horizontal</span><input type="range" min="-240" max="240" step="1" value="0" data-token-x><output data-token-x-out>0</output></label>
+              <label><span>Vertical</span><input type="range" min="-240" max="240" step="1" value="0" data-token-y><output data-token-y-out>0</output></label>
+              <label><span>Ring width</span><input type="range" min="0" max="70" step="1" value="30" data-token-width><output data-token-width-out>30</output></label>
+              <label><span>Vignette</span><input type="range" min="0" max="100" step="1" value="18" data-token-vignette><output data-token-vignette-out>18</output></label>
+              <label><span>Brightness</span><input type="range" min="60" max="140" step="1" value="100" data-token-brightness><output data-token-brightness-out>100%</output></label>
+              <label><span>Saturation</span><input type="range" min="0" max="180" step="1" value="100" data-token-saturation><output data-token-saturation-out>100%</output></label>
+            </section>
+            <div class="fw-token-options"><label><input type="checkbox" data-token-shadow checked> Drop shadow</label><label><input type="checkbox" data-token-double checked> Double ring</label><label><input type="checkbox" data-token-glow> Accent glow</label><label><input type="checkbox" data-token-inner-ring> Inner hairline</label></div>
+          </div>
+        </details>
         <div class="fw-token-modal-actions"><label class="quiet-btn fw-upload-button">Use another image<input type="file" accept="image/png,image/jpeg,image/webp" data-token-source-file hidden></label><button type="button" class="quiet-btn" data-token-reset>Reset</button><button type="button" class="primary-button" data-token-save>Save token to Seeker</button></div>
       </div>
     </div>
@@ -341,5 +346,5 @@
 </div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7040">{% endblock %}
-{% block scripts %}<script src="/static/foundry-workshop.js?v=7040"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7100">{% endblock %}
+{% block scripts %}<script src="/static/foundry-workshop.js?v=7100"></script>{% endblock %}

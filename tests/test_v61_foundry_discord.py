@@ -168,7 +168,7 @@ def test_v61_scroll_contract_and_foundry_frontend_assets():
     assert 'data-foundry-manifest' in integrations and 'Automatically announce confirmed session dates' in integrations
     assert '/api/v61/characters/' in chars and 'data-foundry-tab' in chars
     assert 'data-notification-pref="spotlight"' not in base
-    assert 'seeker-static-v7040' in sw
+    assert 'seeker-static-v7100' in sw
 
 
 def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
@@ -233,7 +233,7 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200
     assert 'Homebrew Forge' in workshop.text and 'foundryWorkshopForm' in workshop.text
-    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=7040' in workshop.text
+    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=7100' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})
@@ -404,7 +404,8 @@ def test_v704_foundry_bridge_actor_item_and_resource_contract():
     assert 'Foundry did not retain the requested' in bridge and 'Foundry did not retain the item' in bridge
     assert 'Could not mark command ${id} as executing' in bridge
     assert 'const result = await runFoundryCommand(command, endpoint);' in bridge
-    assert '/api/v6/foundry/commands/' in table and '/api/v6/foundry/commands/' in chars
+    helper=(root/'static/foundry-live.js').read_text(encoding='utf-8')
+    assert '/api/v6/foundry/commands/' in helper and 'SeekerFoundryLive' in table and 'SeekerFoundryLive' in chars
 
 
 def test_v704_discord_wait_response_verifies_real_mentions(tmp_path: Path, monkeypatch):
@@ -451,3 +452,54 @@ def test_v704_monster_codex_inline_edit_and_remove_preserves_source(tmp_path: Pa
     source=next(x for x in list_foundry_prepared_content(s,cid) if int(x['id'])==int(row['id']))
     assert source['title']=='New Name' and source['payload']['hp']==33 and source['payload']['codex_publish'] is False
     assert 'New Name' not in gm.get('/bestiary').text
+
+
+def test_v710_foundry_ack_immediately_projects_resource_snapshot(tmp_path: Path):
+    from app.v6 import queue_foundry_command, start_foundry_commands
+    s=setup(tmp_path);cid=default_campaign_id(s);cfg=integration_config(s,cid,include_secret=True);token=cfg['foundry_bridge_token']
+    assert foundry_accept(s,cid,token,actor_payload())['ok']
+    inv=create_player_invite(s,'Alice');set_campaign_members(s,cid,[inv['id']])
+    char=save_player_character(s,{'campaign_id':cid,'name':'Aster'},invite_id=inv['id']);foundry_link(s,char['id'],cid,'abc123')
+    cmd=queue_foundry_command(s,cid,'adjust_resource',{'resource':'hp','delta':-7,'character_id':char['id'],'character_name':'Aster','actor_uuid':'Actor.abc123'},actor_id='abc123',requested_by='Alice')
+    claim_foundry_commands(s,cid,token);start_foundry_commands(s,cid,token,[cmd['id']])
+    complete_foundry_commands(s,cid,token,[{'id':cmd['id'],'status':'done','result':{'message':'HP applied','after':65}}])
+    fresh=foundry_link_for_character(s,char['id'])
+    assert fresh['sheet']['vitals']['hp']['value']==65
+
+
+def test_v710_foundry_ack_immediately_projects_item_quantity(tmp_path: Path):
+    from app.v6 import queue_foundry_command, start_foundry_commands
+    s=setup(tmp_path);cid=default_campaign_id(s);cfg=integration_config(s,cid,include_secret=True);token=cfg['foundry_bridge_token']
+    payload=actor_payload();payload['actors'][0]['sheet']['inventory'][0]['id']='lantern1';payload['actors'][0]['sheet']['inventory'][0]['quantity']=3
+    foundry_accept(s,cid,token,payload)
+    inv=create_player_invite(s,'Alice');set_campaign_members(s,cid,[inv['id']])
+    char=save_player_character(s,{'campaign_id':cid,'name':'Aster'},invite_id=inv['id']);foundry_link(s,char['id'],cid,'abc123')
+    cmd=queue_foundry_command(s,cid,'adjust_item_quantity',{'item_id':'lantern1','delta':-1,'character_id':char['id'],'character_name':'Aster','actor_uuid':'Actor.abc123'},actor_id='abc123',requested_by='Alice')
+    claim_foundry_commands(s,cid,token);start_foundry_commands(s,cid,token,[cmd['id']])
+    complete_foundry_commands(s,cid,token,[{'id':cmd['id'],'status':'done','result':{'message':'Quantity applied','after':2}}])
+    inv_rows=foundry_link_for_character(s,char['id'])['sheet']['inventory']
+    assert next(x for x in inv_rows if x.get('id')=='lantern1')['quantity']==2
+
+
+def test_v710_foundry_state_endpoint_is_owner_scoped_and_fresh(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
+    cid=default_campaign_id(s);alice=create_player_invite(s,'Alice');bob=create_player_invite(s,'Bob');set_campaign_members(s,cid,[alice['id'],bob['id']])
+    char=save_player_character(s,{'campaign_id':cid,'name':'Aster','visibility':'party'},invite_id=alice['id'])
+    cfg=integration_config(s,cid,include_secret=True);foundry_accept(s,cid,cfg['foundry_bridge_token'],actor_payload());foundry_link(s,char['id'],cid,'abc123')
+    pa=TestClient(main.app);assert pa.get(alice['invite_path'],follow_redirects=False).status_code==303
+    own=pa.get(f'/api/v61/characters/{char["id"]}/foundry-state');assert own.status_code==200 and own.json()['sheet']['vitals']['hp']['value']==72
+    pb=TestClient(main.app);assert pb.get(bob['invite_path'],follow_redirects=False).status_code==303
+    other=pb.get(f'/api/v61/characters/{char["id"]}/foundry-state');assert other.status_code in {403,404}
+
+
+def test_v710_live_foundry_frontend_contract_uses_shared_reconciler():
+    root=Path(__file__).resolve().parents[1]
+    helper=(root/'static/foundry-live.js').read_text(encoding='utf-8')
+    table=(root/'static/v7-player.js').read_text(encoding='utf-8')
+    chars=(root/'static/characters.js').read_text(encoding='utf-8')
+    assert '/api/v6/foundry/commands/' in helper and '/foundry-state' in helper
+    assert 'SeekerFoundryLive' in table and 'SeekerFoundryLive' in chars
+    assert 'beginResource' in table and 'beginResource' in chars
+    assert 'commit' in table and 'rollback' in table and 'commit' in chars and 'rollback' in chars
+    assert 'live?.refresh()' in table and 'foundryLive?.refresh()' in chars

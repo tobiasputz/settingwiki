@@ -1,3 +1,18 @@
+# Seeker 7.1.0 — Tempered
+
+- Adds a shared **finish-and-flow design layer** across Living Table, Studio, Session Console, Monster Codex, Workshop, Table App and player-facing surfaces: consistent focus states, 44–48 px touch targets, busy states, state chips, motion behavior and denser responsive hierarchy without flattening Seeker's visual identity.
+- Fixes the Foundry resource-sync race. Successful resource/item-quantity ACKs immediately project the confirmed value into Seeker's cached character snapshot, while the normal Foundry heartbeat remains the authoritative later reconciliation.
+- Character Sheet and Table App resource controls now update optimistically, track multiple rapid taps independently, wait for the exact Foundry command result, reconcile from the fresh Seeker snapshot without a page reload, and visibly roll back on failure.
+- Makes the **Foundry Delivery Center** easier to trust at a glance with clearer target/error/attempt metadata and progress-state treatment; no delivery disappears merely because the originating page changed.
+- Adds pre-push structured PF2e validation in Foundry Workshop and moves advanced Token Forge controls behind a polished **Fine tune** disclosure so common authoring stays compact without removing power.
+- Improves Encounter Builder readability with visible XP threshold markers, contribution/status treatment and clearer Standard/PWL state without changing encounter math.
+- Improves Knowledge and Recall Knowledge scanning with distinct Exact/Vague/Comparative and Inferred/Confirmed/Rejected visual states; improves permissions editing by showing effective access alongside overrides.
+- Refines Monster Codex browsing, AoN batch-import confidence, relationship history, fronts/session-change presentation, Asset Library usage safety, campaign-search relevance wording and one-handed Table App ergonomics.
+- Reduces decorative map work when the page is hidden and honors reduced-motion preferences more aggressively.
+- Adds query-path cleanup for Living Table Foundry-link lookups and creature bundle preparation to reduce repeated database work and redundant object loading.
+- Includes the refinement stylesheet in the offline/PWA shell so installed clients retain the same interaction polish offline.
+- Static/PWA cache generation moves to **7100**. Foundry Bridge remains **1.7.0**; no module update is required.
+
 # Seeker 7.0.4 — Codex & Relay
 
 - Adds full in-place **Monster Codex editing** for monster/NPC names, descriptions, visibility and structured PF2e mechanics, plus a safe **Remove from Codex** action that preserves the underlying Workshop/Creature Vault source.
@@ -36,7 +51,7 @@
 
 # Seeker 7.0.1 — Proficiency Without Level encounters
 
-- Adds a polished **Rules math** selector to every V7 encounter: Standard PF2e or Proficiency without Level.
+- Adds a polished **Rules math** selector to every Living Table encounter: Standard PF2e or Proficiency without Level.
 - Implements the official GM Core PWL creature-XP table from party level −7 through +7 (9/12/14/18/21/26/32/40/48/60/72/90/108/135/160 XP).
 - Keeps the normal PF2e encounter threat budgets and existing party-size adjustment under PWL, as specified by the variant rules.
 - Shows the rules variant, per-creature XP, total XP contribution, and incomplete-budget warnings directly in the encounter UI.
@@ -49,7 +64,7 @@
 
 - Adds the **Living Table** campaign operating surface built around Prepare → Run → Resolve → Remember.
 - Adds a universal, campaign-scoped entity registry linking lore, characters, monsters, NPCs, factions, places, items, sessions, maps, relationships, knowledge and Foundry documents.
-- Adds versioned entity history with restore, an audit trail, additive V7 schema migration, and automatic pre-V7 SQLite backup.
+- Adds versioned entity history with restore, an audit trail, additive major-release schema migration, and automatic pre-V7 SQLite backup.
 - Adds managed Foundry synchronization with Seeker-owned document flags, UUID tracking, field-level comparison, conflict states and safe directional resolution.
 - Adds PF2e encounter budgeting, reusable encounters, Foundry preparation, live loot pools and player claims.
 - Adds layered per-player knowledge facts, Recall Knowledge records and selective reveals without exposing full statblocks.

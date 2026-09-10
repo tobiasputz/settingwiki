@@ -6,9 +6,9 @@
     <div><span class="eyebrow">MONSTER CODEX</span><h1>Creatures encountered</h1><p>A field guide to beings known in this campaign. Some entries contain complete mechanics; others reveal only what the party has learned.</p></div>
     {% if gm_view %}<div class="bestiary-hero-actions"><a class="quiet-btn" href="/gm/living-table#creatures">Creature Vault</a><a class="quiet-btn" href="/gm/foundry-workshop">Open Foundry Workshop</a></div>{% endif %}
   </header>
-  {% if monsters %}<section class="bestiary-grid">
+  {% if monsters %}<section class="bestiary-toolbar" aria-label="Monster Codex filters"><div class="v7-searchbox"><span>⌕</span><input type="search" data-bestiary-search placeholder="Search creatures, traits or notes"></div><div class="bestiary-filter-chips"><button type="button" class="active" data-bestiary-filter="all">All</button><button type="button" data-bestiary-filter="full">Full statblocks</button><button type="button" data-bestiary-filter="field_notes">Field notes</button>{% if gm_view %}<button type="button" data-bestiary-filter="aon">AoN</button><button type="button" data-bestiary-filter="seeker">Seeker</button>{% endif %}</div></section><section class="bestiary-grid">
     {% for entry in monsters %}{% set p=entry.payload or {} %}
-    <article class="bestiary-card" data-codex-card="{{ entry.id }}">
+    <article class="bestiary-card" data-codex-card="{{ entry.id }}" data-codex-visibility="{{ p.codex_visibility or 'field_notes' }}" data-codex-source="{{ 'aon' if p.aon_url else 'seeker' }}" data-codex-search="{{ (entry.title ~ ' ' ~ entry.summary ~ ' ' ~ (p.codex_blurb or '') ~ ' ' ~ (p.traits or ''))|lower|e }}"><span class="bestiary-source-badge">{{ 'AoN' if p.aon_url else ('Homebrew' if entry.kind in ['monster','npc'] else 'Seeker') }}</span>
       <a class="bestiary-card-link" href="/bestiary/{{ entry.id }}">
         <div class="bestiary-card-art" {% if p.img %}style="background-image:url('{{ p.img }}')"{% endif %}></div>
         <div class="bestiary-card-body">
@@ -24,5 +24,5 @@
   </section>{% else %}<div class="bestiary-empty"><span class="eyebrow">NO PUBLIC ENTRIES</span><h2>The field guide is still empty.</h2><p>Creatures appear here when the GM publishes them from the Foundry Workshop or Creature Vault.</p></div>{% endif %}
 </main>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7040">{% endblock %}
-{% block scripts %}{% if gm_view %}<script src="/static/bestiary.js?v=7040"></script>{% endif %}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7100">{% endblock %}
+{% block scripts %}<script src="/static/bestiary.js?v=7100"></script>{% endblock %}

@@ -4,7 +4,7 @@
 <main class="v7-shell" data-v7-root>
   <section class="v7-hero">
     <div class="v7-hero-copy">
-      <span class="eyebrow">SEEKER 7 · THE LIVING TABLE</span>
+      <span class="eyebrow">SEEKER · LIVING TABLE</span>
       <h1>Prepare. Run. Resolve. Remember.</h1>
       <p>One operating surface for the campaign itself. Seeker keeps the context, Foundry executes mechanics, and permanent canon changes only when you approve them.</p>
     </div>
@@ -30,11 +30,11 @@
   </nav>
 
   <section class="v7-workspace active" data-v7-pane="cockpit">
-    <div class="v7-flowstrip">
-      <article class="active"><span>01</span><div><strong>Prepare</strong><small>Scenes, encounters, clues, media</small></div></article>
-      <article class="active"><span>02</span><div><strong>Run</strong><small>One control surface at the table</small></div></article>
-      <article><span>03</span><div><strong>Resolve</strong><small>Review what changed</small></div></article>
-      <article><span>04</span><div><strong>Remember</strong><small>Advance campaign state</small></div></article>
+    <div class="v7-flowstrip" aria-label="Session flow">
+      <article class="{{ 'active' if v7.session else '' }}"><span>01</span><div><strong>Prepare</strong><small>Scenes, encounters, clues, media</small></div></article>
+      <article class="{{ 'active' if v7.session and v7.session.status == 'live' else '' }}"><span>02</span><div><strong>Run</strong><small>One control surface at the table</small></div></article>
+      <article class="{{ 'active' if v7.changes else '' }}"><span>03</span><div><strong>Resolve</strong><small>Review what changed</small></div></article>
+      <article class="{{ 'active' if v7.session and v7.session.status in ['ended','closed'] else '' }}"><span>04</span><div><strong>Remember</strong><small>Advance campaign state</small></div></article>
     </div>
 
     <div class="v7-dashboard-grid">
@@ -145,5 +145,5 @@
 </main>
 <script id="v7State" type="application/json">{{ v7|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7040">{% endblock %}
-{% block scripts %}<script src="/static/v7.js?v=7040"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7100">{% endblock %}
+{% block scripts %}<script src="/static/v7.js?v=7100"></script>{% endblock %}

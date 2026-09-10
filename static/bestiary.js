@@ -5,6 +5,11 @@
   const send=(url,method,body)=>api(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
   const toast=(msg,bad=false)=>{let n=$('#codexToast');if(!n){n=document.createElement('div');n.id='codexToast';n.className='v6-toast';document.body.appendChild(n)}n.textContent=msg;n.classList.toggle('bad',bad);n.classList.add('show');clearTimeout(n._t);n._t=setTimeout(()=>n.classList.remove('show'),3200)};
 
+  let codexFilter='all',codexQuery='';
+  const applyCodexFilter=()=>{$$('[data-codex-card]').forEach(card=>{const q=codexQuery,matchQ=!q||String(card.dataset.codexSearch||'').includes(q),f=codexFilter,matchF=f==='all'||card.dataset.codexVisibility===f||card.dataset.codexSource===f;card.hidden=!(matchQ&&matchF)});$$('[data-bestiary-filter]').forEach(b=>b.classList.toggle('active',b.dataset.bestiaryFilter===codexFilter))};
+  $('[data-bestiary-search]')?.addEventListener('input',e=>{codexQuery=e.currentTarget.value.trim().toLowerCase();applyCodexFilter()});
+  $$('[data-bestiary-filter]').forEach(b=>b.addEventListener('click',()=>{codexFilter=b.dataset.bestiaryFilter;applyCodexFilter()}));
+
   async function removeEntry(button){
     const id=button?.dataset.codexRemove;if(!id)return;
     const name=button.dataset.codexName||'this entry';

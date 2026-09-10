@@ -604,6 +604,7 @@ def get_entity(settings: Settings,campaign_id:int,entity_id:int)->dict|None:
     if not row:return None
     out=entity_payload(row)
     out['relations']=entity_relations(settings,campaign_id,int(entity_id))
+    out['relationship_states']=relationship_states_for_entity(settings,campaign_id,int(entity_id))
     out['facts']=knowledge_facts(settings,int(entity_id))
     out['locations']=_rows(settings,'SELECT * FROM v7_entity_locations WHERE entity_id=? ORDER BY is_current DESC,created_at DESC,id DESC',(int(entity_id),))
     out['sessions']=_rows(settings,'''SELECT es.*,s.title AS session_title,s.session_number,s.session_date FROM v7_entity_sessions es
@@ -754,6 +755,17 @@ def relationship_timeline(settings: Settings,campaign_id:int,source_entity_id:in
     return _rows(settings,'''SELECT rs.*,s.title AS session_title FROM v7_relationship_states rs LEFT JOIN campaign_sessions s ON s.id=rs.session_id
                              WHERE rs.campaign_id=? AND ((source_entity_id=? AND target_entity_id=?) OR (source_entity_id=? AND target_entity_id=?)) ORDER BY sort_key,created_at,id''',
                  (int(campaign_id),int(source_entity_id),int(target_entity_id),int(target_entity_id),int(source_entity_id)))
+
+
+def relationship_states_for_entity(settings: Settings,campaign_id:int,entity_id:int)->list[dict]:
+    return _rows(settings,'''SELECT rs.*,se.name AS source_name,te.name AS target_name,cs.title AS session_title
+                             FROM v7_relationship_states rs
+                             JOIN v7_entities se ON se.id=rs.source_entity_id
+                             JOIN v7_entities te ON te.id=rs.target_entity_id
+                             LEFT JOIN campaign_sessions cs ON cs.id=rs.session_id
+                             WHERE rs.campaign_id=? AND (rs.source_entity_id=? OR rs.target_entity_id=?)
+                             ORDER BY rs.sort_key DESC,rs.created_at DESC,rs.id DESC''',
+                 (int(campaign_id),int(entity_id),int(entity_id)))
 
 
 def knowledge_facts(settings: Settings,entity_id:int)->list[dict]:
@@ -1412,6 +1424,28 @@ def sync_link(settings: Settings,entity_id:int)->dict|None:
         r['diffs']=_sync_diffs(entity,r['foundry_snapshot'])
     else:r['diffs']=[]
     return r
+
+
+def sync_links_for_entities(settings: Settings, entities:list[dict])->dict[int,dict]:
+    """Load managed Foundry state for a rendered entity collection in one query.
+
+    The Living Table already has the entity payloads in memory; asking sync_link() for
+    every card used to re-read both the link and the entity row N times. Keeping this
+    bulk path separate preserves the simple single-entity API while making workspace
+    refreshes scale with larger campaigns.
+    """
+    by_id={int(e['id']):e for e in entities or [] if isinstance(e,dict) and e.get('id')}
+    if not by_id:return {}
+    ids=list(by_id);marks=','.join('?' for _ in ids)
+    rows=_rows(settings,f'SELECT * FROM v7_foundry_sync_links WHERE entity_id IN ({marks})',tuple(ids))
+    out={}
+    for row in rows:
+        r=dict(row);eid=int(r['entity_id'])
+        r['base_snapshot']=_json(r.pop('base_snapshot_json','{}'),{})
+        r['foundry_snapshot']=_json(r.pop('foundry_snapshot_json','{}'),{})
+        entity=by_id.get(eid);r['diffs']=_sync_diffs(entity,r['foundry_snapshot']) if entity else []
+        out[eid]=r
+    return out
 
 
 def _seeker_sync_snapshot(entity:dict)->dict:

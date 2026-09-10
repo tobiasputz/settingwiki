@@ -148,9 +148,9 @@ def test_v5_frontend_release_contracts():
     sw=(root/'static/sw.js').read_text(encoding='utf-8')
     assert 'PARTY-OWNED MEMORY' in session and 'session-v5-tabs' in session and 'data-rsvp' in session
     assert 'PINNED TO TONIGHT' in prep and 'SEEKER_PREP' in prep
-    assert 'INVESTIGATION' in investigation and 'investigation.js?v=7040' in investigation
+    assert 'INVESTIGATION' in investigation and 'investigation.js?v=7100' in investigation
     assert 'Previously on' in recap
     assert 'Pathbuilder / sheet URL' in chars and 'Foundry actor' in chars and 'shAttacks' not in (root/'static/characters.js').read_text()
     assert 'planSession(key)' in schedule and '/gm/prep?session_id=' in schedule
     assert "'/api/admin/campaigns/'+b.dataset.archiveCampaign+'/archive'" in campaign and 'data-delete-campaign' in campaign
-    assert 'seeker-static-v7040' in sw and "'/investigation','/recap'" in sw
+    assert 'seeker-static-v7100' in sw and "'/investigation','/recap'" in sw

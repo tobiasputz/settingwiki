@@ -35,6 +35,7 @@ from .v7 import (
     delete_player_observation, review_player_observation, claim_loot, create_session_change,
     invite_permission_overrides, delete_token_recipe, player_entity_view, entity_allows_public_statblock,
     entity_versions, restore_entity_version, upsert_source_entity, list_creature_folders, get_creature_folder,
+    sync_links_for_entities,
     save_creature_folder, add_creature_to_folder, remove_creature_from_folder, delete_creature_folder,
 )
 
@@ -85,8 +86,9 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         sessions=list_sessions(settings,public=False,campaign_id=cid)
         dashboard=v7_dashboard(settings,cid,wiki,session)
         scenes=list_scenes(settings,cid,int(session['id'])) if session else []
+        sync_map=sync_links_for_entities(settings,dashboard['entities'])
         for entity in dashboard['entities']:
-            entity['sync']=sync_link(settings,int(entity['id']))
+            entity['sync']=sync_map.get(int(entity['id']))
         return {
             'campaign':get_campaign(settings,cid) or {}, 'session':session, 'sessions':sessions,
             'scenes':scenes,
@@ -113,19 +115,19 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             'data':{**p,'prepared_content_id':int(row['id']),'legacy_source':'foundry_prepared'},
         })
 
-    def _bundle_entry(entity:dict) -> dict:
-        payload=_entity_foundry_payload(entity)
+    def _bundle_entry(entity:dict, prepared_lookup:dict[int,dict]|None=None) -> dict:
+        payload=_entity_foundry_payload(entity,prepared_lookup)
         link=sync_link(settings,int(entity['id']))
         if link and link.get('foundry_uuid'):payload['foundry_uuid']=link['foundry_uuid']
         return payload
 
     def _queue_creature_bundle(request:Request, *, title:str, bundle_kind:str, bundle_id:int, entities:list[dict]) -> dict:
-        cid=active_campaign_id(request);entries=[];seen=set()
+        cid=active_campaign_id(request);entries=[];seen=set();prepared_lookup={int(r['id']):r for r in list_foundry_prepared_content(settings,cid)}
         for entity in entities:
             if not entity or str(entity.get('kind') or '').lower() not in {'monster','npc','creature'}:continue
             eid=int(entity['id'])
             if eid in seen:continue
-            seen.add(eid);entries.append(_bundle_entry(entity))
+            seen.add(eid);entries.append(_bundle_entry(entity,prepared_lookup))
         if not entries:raise ValueError('There are no importable creatures in this collection.')
         command=queue_foundry_command(settings,cid,'push_content_bundle',{
             'folder_name':str(title or 'Seeker creatures')[:180], 'bundle_kind':str(bundle_kind)[:40],
@@ -133,11 +135,12 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         },scope='world',requested_by=requester_label(request))
         return {'ok':True,'command':command,'count':len(entries),'folder_name':str(title or 'Seeker creatures')[:180]}
 
-    def _entity_foundry_payload(entity:dict) -> dict:
+    def _entity_foundry_payload(entity:dict, prepared_lookup:dict[int,dict]|None=None) -> dict:
         data=dict(entity.get('data') or {})
         prepared_id=data.get('prepared_content_id')
         if prepared_id:
-            row=next((x for x in list_foundry_prepared_content(settings,int(entity['campaign_id'])) if int(x.get('id') or 0)==int(prepared_id)),None)
+            if prepared_lookup is not None: row=prepared_lookup.get(int(prepared_id))
+            else: row=next((x for x in list_foundry_prepared_content(settings,int(entity['campaign_id'])) if int(x.get('id') or 0)==int(prepared_id)),None)
         else: row=None
         if row:
             merged={**(row.get('payload') or {}),**data}
@@ -625,7 +628,7 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             queue={r['status']:r['n'] for r in conn.execute('SELECT status,COUNT(*) AS n FROM foundry_command_queue WHERE campaign_id=? GROUP BY status',(cid,)).fetchall()}
             pages=int(conn.execute('SELECT COUNT(*) AS n FROM v7_entities WHERE campaign_id=?',(cid,)).fetchone()['n'])
         backups=settings.data_dir/'migration-backups'
-        return {'ok':True,'version':'7.0.4','campaign_id':cid,'entities':pages,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
+        return {'ok':True,'version':'7.1.0','campaign_id':cid,'entities':pages,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
 
     @app.get('/entity/{entity_id}',response_class=HTMLResponse)
     def v7_entity_page(request:Request,entity_id:int):

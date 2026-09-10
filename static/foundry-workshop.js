@@ -19,6 +19,7 @@
   const kindName=k=>({monster:'Creature',npc:'NPC',item:'Item',feat:'Feat',homebrew:'Freeform'}[k]||'Homebrew');
   const kindIcon=k=>({monster:'♜',npc:'♟',item:'◇',feat:'✦',homebrew:'⌘'}[k]||'◇');
   const creatureKind=k=>k==='monster'||k==='npc';
+  const relativeTime=epoch=>{const sec=Math.max(0,Math.round(Date.now()/1000-Number(epoch||0)));if(!epoch)return 'unknown time';if(sec<8)return 'just now';if(sec<60)return `${sec}s ago`;if(sec<3600)return `${Math.floor(sec/60)}m ago`;if(sec<86400)return `${Math.floor(sec/3600)}h ago`;return `${Math.floor(sec/86400)}d ago`};
   const jsonFetch=async(url,opts={})=>{const r=await fetch(url,opts),b=await r.json().catch(()=>({}));if(!r.ok)throw Error(b.detail||'Request failed');return b};
   const send=(url,method,data)=>jsonFetch(url,{method,headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});
   const toast=(msg,bad=false)=>{const n=document.createElement('div');n.className=`v6-toast${bad?' bad':''}`;n.textContent=msg;document.body.appendChild(n);requestAnimationFrame(()=>n.classList.add('show'));setTimeout(()=>{n.classList.remove('show');setTimeout(()=>n.remove(),240)},2400)};
@@ -162,6 +163,38 @@
     const payload={};payloadFields.forEach(k=>payload[k]=fieldValue(k));payload.codex_publish=!!field('codex_publish')?.checked;payload.attacks=state.attacks;payload.abilities=state.abilities;payload.spells=state.spells;
     return {id:fieldValue('id')||undefined,kind,target_type:'world',title:fieldValue('title').trim(),subtitle:fieldValue('subtitle').trim(),summary:fieldValue('summary'),tags:fieldValue('traits'),payload};
   }
+
+  function clearValidation(){
+    $$('.fw-validation',form).forEach(el=>el.remove());
+    $$('.has-validation-error',form).forEach(el=>el.classList.remove('has-validation-error'));
+    $$('.fw-field-error',form).forEach(el=>el.remove());
+    const title=field('title');if(title)title.setCustomValidity('');
+  }
+  function addRowProblem(row,message){
+    if(!row)return;row.classList.add('has-validation-error');
+    let box=$('.fw-validation',row);if(!box){box=document.createElement('div');box.className='fw-validation';row.appendChild(box)}
+    const line=document.createElement('div');line.textContent=message;box.appendChild(line);
+  }
+  function validateData(data,{announce=false}={}){
+    clearValidation();const problems=[];const p=data?.payload||{};
+    if(!String(data?.title||'').trim()){
+      problems.push('Give this entry a name.');const title=field('title');
+      if(title){title.setCustomValidity('Give this entry a name.');const note=document.createElement('small');note.className='fw-field-error';note.textContent='A name is required before saving or sending to Foundry.';title.insertAdjacentElement('afterend',note)}
+    }
+    const numberProblem=(name,label,min=null,max=null)=>{const raw=String(fieldValue(name)||'').trim();if(!raw)return;const n=Number(raw);if(!Number.isFinite(n)||(min!==null&&n<min)||(max!==null&&n>max)){problems.push(`${label} has an invalid value.`);const el=field(name);el?.closest('label')?.classList.add('has-validation-error')}};
+    if(creatureKind(data?.kind)){
+      numberProblem('level','Level',-1,30);numberProblem('ac','AC',0,80);numberProblem('hp','HP',0,99999);numberProblem('spell_dc','Spell DC',0,80);numberProblem('spell_attack','Spell attack modifier',-20,80);
+      (p.attacks||[]).forEach((a,i)=>{const row=$(`[data-attack-index="${i}"]`);const has=Object.values(a||{}).some(v=>String(v??'').trim());if(!has)return;if(!String(a.name||'').trim()){problems.push(`Strike ${i+1} needs a name.`);addRowProblem(row,'Add a name to this strike.')}if(String(a.bonus??'').trim()&&!Number.isFinite(Number(a.bonus))){problems.push(`Strike ${i+1} attack bonus is invalid.`);addRowProblem(row,'Attack bonus must be a whole number.')}const dmg=String(a.damage||'').trim();if(dmg&&!(/^[-+]?\d+$/.test(dmg)||/\d+d\d+/i.test(dmg))){problems.push(`Strike ${i+1} damage looks malformed.`);addRowProblem(row,'Damage should contain a PF2e roll such as 2d8+4 (or a flat number).')}});
+      (p.abilities||[]).forEach((a,i)=>{const row=$(`[data-ability-index="${i}"]`);const has=Object.values(a||{}).some(v=>String(v??'').trim());if(!has)return;if(!String(a.name||'').trim()){problems.push(`Ability ${i+1} needs a name.`);addRowProblem(row,'Add an ability name before saving.')}if(a.dc_type&&!String(a.dc??'').trim()){problems.push(`Ability ${i+1} has a check but no DC.`);addRowProblem(row,'This check shortcut needs a DC, or choose No check.')}if(String(a.dc??'').trim()&&!Number.isFinite(Number(a.dc))){problems.push(`Ability ${i+1} DC is invalid.`);addRowProblem(row,'DC must be a number.')}});
+      (p.spells||[]).forEach((sp,i)=>{const row=$(`[data-spell-index="${i}"]`);const has=Object.values(sp||{}).some(v=>String(v??'').trim());if(!has)return;if(!String(sp.name||'').trim()){problems.push(`Spell ${i+1} needs a name.`);addRowProblem(row,'Add a spell name or remove this row.')}const rank=String(sp.rank??'').trim();if(rank&&(!Number.isInteger(Number(rank))||Number(rank)<0||Number(rank)>10)){problems.push(`Spell ${i+1} rank is invalid.`);addRowProblem(row,'Spell rank must be a whole number from 0 to 10.')}const dmg=String(sp.damage||'').trim();if(dmg&&!(/^[-+]?\d+$/.test(dmg)||/\d+d\d+/i.test(dmg))){problems.push(`Spell ${i+1} damage looks malformed.`);addRowProblem(row,'Damage should contain a roll such as 6d6, or leave it blank for an official compendium spell.')}});
+    }
+    if(data?.kind==='item'&&String(p.item_type||'')==='weapon'){
+      numberProblem('weapon_damage_dice','Damage dice',0,8);numberProblem('weapon_damage_modifier','Damage modifier',-99,99);numberProblem('weapon_bonus','Item bonus',-20,20);numberProblem('weapon_range','Range',1,10000);numberProblem('weapon_reload','Reload',0,20);
+      const die=String(p.weapon_damage_die||'');if(die&&!['d4','d6','d8','d10','d12'].includes(die)){problems.push('Weapon damage die is not a normal PF2e die.');field('weapon_damage_die')?.closest('label')?.classList.add('has-validation-error')}
+    }
+    if(announce&&problems.length)toast(`Fix ${problems.length} highlighted field${problems.length===1?'':'s'} before saving.`,true);
+    return problems;
+  }
   function fillForm(entry=null){
     form.reset();state.currentId=entry?.id||null;state.attacks=[];state.abilities=[];state.spells=[];
     setField('id',entry?.id||'');setField('title',entry?.title||'');setField('subtitle',entry?.subtitle||'');setField('summary',entry?.summary||'');
@@ -185,7 +218,7 @@
   }
   function renderLog(){
     const rows=state.commands||[];
-    log.innerHTML=rows.length?rows.slice(0,25).map(r=>`<article class="command-log-item" data-command-row="${esc(r.id)}"><span class="status ${esc(r.status||'queued')}">${esc(r.delivery_label||r.status||'queued')}</span><strong>${esc(String(r.command_type||'action').replaceAll('_',' '))}</strong><small>${esc(r.requested_by||'GM')} · ${esc(r.actor_id||'world')} · attempt ${esc(r.attempt_count||0)}</small>${r.last_error?`<div class="command-error">${esc(r.last_error)}</div>`:(r.result?.message?`<div>${esc(r.result.message)}</div>`:'')}${r.can_retry?`<button class="quiet-btn command-retry" type="button" data-retry-command="${esc(r.id)}">Retry delivery</button>`:''}</article>`).join(''):'<p class="muted">No bridge actions yet.</p>';
+    log.innerHTML=rows.length?rows.slice(0,25).map(r=>{const status=String(r.status||'queued'),target=r.target_label||r.actor_id||'Foundry world',attempt=Number(r.attempt_count||0),step=Math.max(0,Math.min(3,Number(r.progress_step??({queued:0,dispatched:1,executing:2,done:3,failed:3}[status]??0))));return `<article class="command-log-item command-${esc(status)}" data-command-row="${esc(r.id)}"><div class="command-log-head"><span class="status ${esc(status)}">${esc(r.delivery_label||status)}</span><small>${esc(relativeTime(r.last_activity_at||r.updated_at||r.created_at))}</small></div><strong>${esc(String(r.command_type||'action').replaceAll('_',' '))}</strong><small>→ ${esc(target)} · ${esc(r.requested_by||'GM')} · attempt ${attempt}</small><div class="command-mini-progress" aria-label="Delivery progress">${[0,1,2,3].map(i=>`<i class="${i<=step?'active':''}"></i>`).join('')}</div>${r.last_error?`<div class="command-error">${esc(r.last_error)}</div>`:(r.result?.message?`<div class="command-result">${esc(r.result.message)}</div>`:'')}${r.can_retry?`<button class="quiet-btn command-retry" type="button" data-retry-command="${esc(r.id)}">Retry delivery</button>`:''}</article>`}).join(''):'<p class="muted">No Foundry deliveries yet. Successful pushes will appear here while you work.</p>';
   }
 
   function traitHtml(kind,p){const rarity=String(p.rarity||'common');const raw=[rarity!=='common'?rarity:'',creatureKind(kind)?p.size:'',...slugList(p.traits)].filter(Boolean);return raw.length?`<div class="fw-preview-traits ${kind==='item'?'fw-item-traits':kind==='feat'?'fw-feat-traits':kind==='homebrew'?'fw-free-traits':''}">${raw.map((t,i)=>`<span class="${i===0&&rarity!=='common'?`rarity-${esc(rarity)}`:''}">${esc(t)}</span>`).join('')}</div>`:''}
@@ -225,7 +258,7 @@
   async function refresh(){const data=await jsonFetch('/api/v61/foundry/workshop');state.actors=data.actors||[];state.entries=data.prepared_content||[];state.commands=data.commands||[];renderLibrary();renderLog()}
   log?.addEventListener('click',async e=>{const b=e.target.closest('[data-retry-command]');if(!b)return;b.disabled=true;try{await send(`/api/v6/foundry/commands/${b.dataset.retryCommand}/retry`,'POST',{});toast('Foundry delivery queued again.');await refresh()}catch(err){toast(err.message||'Could not retry delivery.',true)}finally{b.disabled=false}});
   async function saveCurrent({silent=false}={}){
-    const data=collectData();if(!data.title)throw Error('Give this entry a name first.');
+    const data=collectData();const problems=validateData(data,{announce:true});if(problems.length){field('title')?.reportValidity?.();throw Error('Fix the highlighted PF2e fields before saving.');}
     const saved=await send('/api/v61/foundry/content','POST',data);state.currentId=saved.id;setField('id',saved.id);state.savedSnapshot=JSON.stringify(collectData());setDirty();$('[data-fw-duplicate]').disabled=false;if(!silent)toast('Homebrew saved.');await refresh();return saved
   }
   async function pushCurrent(target='world'){
@@ -256,8 +289,10 @@
     }catch(e){toast(e.message||'Could not queue the Foundry push.',true)}
   }
 
-  form.addEventListener('submit',async e=>{e.preventDefault();try{await saveCurrent()}catch(err){toast(err.message||'Could not save.',true)}});
-  form.addEventListener('input',()=>{renderPreview();setDirty()});form.addEventListener('change',e=>{if(e.target?.name==='item_type')updateItemSubtype();renderPreview();setDirty()});
+  form.addEventListener('submit',async e=>{e.preventDefault();try{await saveCurrent()}catch(err){if(!String(err.message||'').startsWith('Fix the highlighted'))toast(err.message||'Could not save.',true)}});
+  let validationTimer=null;
+  const onWorkshopEdit=()=>{renderPreview();setDirty();clearTimeout(validationTimer);validationTimer=setTimeout(()=>validateData(collectData(),{announce:false}),180)};
+  form.addEventListener('input',onWorkshopEdit);form.addEventListener('change',e=>{if(e.target?.name==='item_type')updateItemSubtype();onWorkshopEdit()});
   $$('[data-fw-kind]').forEach(b=>b.addEventListener('click',()=>setKind(b.dataset.fwKind)));
   $$('[data-fw-template]').forEach(b=>b.addEventListener('click',()=>{
     const key=b.dataset.fwTemplate;

@@ -7,29 +7,21 @@
   function tab(name){$$('[data-player-tab]').forEach(b=>b.classList.toggle('active',b.dataset.playerTab===name));$$('[data-player-pane]').forEach(p=>p.classList.toggle('active',p.dataset.playerPane===name));history.replaceState(null,'',`#${name}`);scrollTo({top:0,behavior:'instant'})}
   $$('[data-player-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.playerTab));const h=location.hash.slice(1);if($(`[data-player-tab="${CSS.escape(h)}"]`))tab(h);
   $('[data-character-switch]')?.addEventListener('change',e=>location.href=`/app?character_id=${encodeURIComponent(e.currentTarget.value)}${location.hash}`);
-  async function waitForFoundryCommand(id){
-    const deadline=Date.now()+18000;let last='';
-    while(Date.now()<deadline){
-      const r=await fetch(`/api/v6/foundry/commands/${encodeURIComponent(id)}`,{cache:'no-store'});
-      const row=await r.json().catch(()=>({}));if(!r.ok)throw Error(row.detail||'Could not read Foundry delivery state.');
-      const status=String(row.status||'queued');
-      if(status!==last){last=status;const label=row.delivery_label||status;toast(`${label}${['queued','dispatched','executing'].includes(status)?'…':''}`,status==='failed')}
-      if(status==='done')return row;
-      if(status==='failed'||status==='cancelled')throw Error(row.last_error||row.result?.message||'Foundry rejected the action.');
-      await new Promise(r=>setTimeout(r,700));
-    }
-    return null;
-  }
+  const live=charId&&window.SeekerFoundryLive?new window.SeekerFoundryLive.FoundryLiveState(root,charId):null;
+  const statusToast=(row,status)=>{const label=row.delivery_label||status;if(status==='failed')toast(label,true);else if(['queued','dispatched','executing'].includes(status))toast(`${label}…`)};
   async function actorAction(payload,button){
-    if(!charId)return;button.disabled=true;
+    if(!charId)return;
+    const delta=Number(payload.delta||0);const op=payload.action==='adjust_resource'?live?.beginResource(payload.resource,delta):payload.action==='adjust_item_quantity'?live?.beginItem(payload.item_id,delta):null;
+    button.dataset.busy='1';button.setAttribute('aria-busy','true');
     try{
       const queued=await send(`/api/v61/characters/${charId}/foundry/action`,payload);const id=queued?.command?.id;
       if(!id)throw Error('Seeker did not create a Foundry delivery record.');
-      toast('Waiting for Foundry…');
-      const result=await waitForFoundryCommand(id);
-      if(result){toast(result.result?.message||'Applied in Foundry.');setTimeout(()=>location.reload(),350)}
-      else toast('Still waiting. The action remains safely queued and will not disappear.',true);
-    }catch(err){toast(err.message,true)}finally{button.disabled=false}
+      const result=await window.SeekerFoundryLive.waitForCommand(id,{onStatus:statusToast,timeout:45000});
+      if(!result){live?.rollback(op);toast('Foundry is not responding yet. The action remains queued; the display will update when it is applied.',true);return}
+      live?.commit(op,result.result?.after);
+      try{await live?.refresh()}catch(_){/* ACK projection already keeps the visible value authoritative. */}
+      toast(result.result?.message||'Applied in Foundry.');
+    }catch(err){live?.rollback(op);toast(err.message,true)}finally{delete button.dataset.busy;button.removeAttribute('aria-busy')}
   }
   $$('[data-player-resource]').forEach(b=>b.onclick=()=>actorAction({action:'adjust_resource',resource:b.dataset.playerResource,delta:Number(b.dataset.delta)},b));
   $$('[data-player-item]').forEach(b=>b.onclick=()=>actorAction({action:'adjust_item_quantity',item_id:b.dataset.playerItem,delta:Number(b.dataset.delta)},b));

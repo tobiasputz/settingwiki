@@ -7,11 +7,12 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Table App · {{ wiki.title }}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=7040">
-  <link rel="stylesheet" href="/static/v7.css?v=7040">
+  <link rel="stylesheet" href="/static/wiki.css?v=7100">
+  <link rel="stylesheet" href="/static/v7.css?v=7100">
+  <link rel="stylesheet" href="/static/refinement.css?v=7100">
 </head>
 {% set fs = foundry_actor.sheet if foundry_actor else {} %}{% set vitals = fs.vitals or {} %}{% set ident = fs.identity or {} %}
-<body class="v7-player-body" data-v7-player-app data-character-id="{{ character.id if character else '' }}">
+<body class="v7-player-body" data-v7-player-app data-character-id="{{ character.id if character else '' }}" data-foundry-received-at="{{ foundry_actor.received_at if foundry_actor else 0 }}">
   <div class="ambient-grain"></div>
   <header class="v7-player-top">
     <a href="/" class="v7-player-brand"><span>✦</span><div><strong>{{ wiki.title }}</strong><small>TABLE APP</small></div></a>
@@ -27,10 +28,10 @@
       </article>
       {% if foundry_actor %}
       <div class="v7-mobile-vitals">
-        <article class="hp"><small>HP</small><strong>{{ vitals.hp.value or 0 }}<span>/{{ vitals.hp.max or 0 }}</span></strong>{% if vitals.hp.temp %}<em>+{{ vitals.hp.temp }} temp</em>{% endif %}</article>
+        <article class="hp" data-resource-card="hp"><small>HP</small><strong><b data-resource-value="hp" data-current="{{ vitals.hp.value or 0 }}" data-max="{{ vitals.hp.max or 0 }}">{{ vitals.hp.value or 0 }}</b><span>/{{ vitals.hp.max or 0 }}</span></strong>{% if vitals.hp.temp %}<em data-resource-temp>+{{ vitals.hp.temp }} temp</em>{% else %}<em data-resource-temp hidden></em>{% endif %}<i class="resource-sync-mark" data-resource-sync="hp"></i></article>
         <article><small>AC</small><strong>{{ vitals.ac or '—' }}</strong></article>
-        <article><small>Hero</small><strong>{{ vitals.hero_points.value if vitals.hero_points else '—' }}<span>/{{ vitals.hero_points.max if vitals.hero_points else '—' }}</span></strong></article>
-        <article><small>Focus</small><strong>{{ vitals.focus.value if vitals.focus and vitals.focus.value is not none else '—' }}<span>/{{ vitals.focus.max if vitals.focus and vitals.focus.max is not none else '—' }}</span></strong></article>
+        <article data-resource-card="hero_points"><small>Hero</small><strong><b data-resource-value="hero_points" data-current="{{ vitals.hero_points.value if vitals.hero_points else 0 }}" data-max="{{ vitals.hero_points.max if vitals.hero_points else 3 }}">{{ vitals.hero_points.value if vitals.hero_points else '—' }}</b><span>/{{ vitals.hero_points.max if vitals.hero_points else '—' }}</span></strong><i class="resource-sync-mark" data-resource-sync="hero_points"></i></article>
+        <article data-resource-card="focus"><small>Focus</small><strong><b data-resource-value="focus" data-current="{{ vitals.focus.value if vitals.focus and vitals.focus.value is not none else 0 }}" data-max="{{ vitals.focus.max if vitals.focus and vitals.focus.max is not none else 0 }}">{{ vitals.focus.value if vitals.focus and vitals.focus.value is not none else '—' }}</b><span>/{{ vitals.focus.max if vitals.focus and vitals.focus.max is not none else '—' }}</span></strong><i class="resource-sync-mark" data-resource-sync="focus"></i></article>
       </div>
       {% if v7_permissions.push_foundry_character %}<section class="v7-phone-controls"><header><div><span class="eyebrow">QUICK ADJUST</span><h2>Table controls</h2></div><small>Safe queued writes</small></header><div class="v7-phone-control-grid"><article><span>HP</span><div><button data-player-resource="hp" data-delta="-5">−5</button><button data-player-resource="hp" data-delta="-1">−1</button><button data-player-resource="hp" data-delta="1">+1</button><button data-player-resource="hp" data-delta="5">+5</button></div></article><article><span>Hero Points</span><div><button data-player-resource="hero_points" data-delta="-1">−1</button><button data-player-resource="hero_points" data-delta="1">+1</button></div></article><article><span>Focus</span><div><button data-player-resource="focus" data-delta="-1">−1</button><button data-player-resource="focus" data-delta="1">+1</button></div></article></div></section>{% endif %}
 
@@ -43,7 +44,7 @@
 
     <section class="v7-player-pane" data-player-pane="inventory">
       <header class="v7-phone-page-head"><span class="eyebrow">INVENTORY</span><h1>What you're carrying</h1><p>Use consumables from here or claim new loot from the table.</p></header>
-      {% if foundry_actor %}<div class="v7-phone-inventory">{% for item in fs.inventory or [] %}<article><div class="v7-phone-item-art">{% if item.img %}<img src="{{ item.img }}" alt="">{% else %}◇{% endif %}</div><div><strong>{{ item.name }}</strong><small>{{ item.type|title }} · ×{{ item.quantity or 1 }}{% if item.equipped %} · equipped{% endif %}</small>{% if item.traits %}<p>{{ item.traits|join(' · ') }}</p>{% endif %}</div>{% if v7_permissions.push_foundry_character and item.id %}<button data-player-item="{{ item.id }}" data-delta="-1">Use</button>{% endif %}</article>{% else %}<p class="v7-muted">No inventory synced.</p>{% endfor %}</div>{% endif %}
+      {% if foundry_actor %}<div class="v7-phone-inventory">{% for item in fs.inventory or [] %}<article><div class="v7-phone-item-art">{% if item.img %}<img src="{{ item.img }}" alt="">{% else %}◇{% endif %}</div><div><strong>{{ item.name }}</strong><small>{{ item.type|title }} · ×<span data-item-quantity="{{ item.id }}" data-current="{{ item.quantity or 1 }}">{{ item.quantity or 1 }}</span>{% if item.equipped %} · equipped{% endif %}</small>{% if item.traits %}<p>{{ item.traits|join(' · ') }}</p>{% endif %}</div>{% if v7_permissions.push_foundry_character and item.id %}<button data-player-item="{{ item.id }}" data-delta="-1">Use</button>{% endif %}</article>{% else %}<p class="v7-muted">No inventory synced.</p>{% endfor %}</div>{% endif %}
       <section class="v7-phone-loot"><header><span class="eyebrow">ON THE TABLE</span><h2>Available loot</h2></header>{% for pool in loot_pools if pool.status == 'open' %}<article class="v7-player-loot-pool"><h3>{{ pool.title }}</h3><p>{{ pool.note }}</p>{% for item in pool['items'] if item.remaining > 0 and item.visibility != 'gm' %}<div class="v7-player-loot-row"><div><strong>{{ item.name }}</strong><small>{{ item.remaining }} available · {{ item.description }}</small></div>{% if v7_permissions.manage_own_inventory and character %}<button data-claim-loot="{{ item.id }}">Claim</button>{% endif %}</div>{% endfor %}</article>{% else %}<div class="v7-player-empty compact"><span>◆</span><p>No open loot drops.</p></div>{% endfor %}</section>
     </section>
 
@@ -72,6 +73,7 @@
     <button data-player-tab="map"><span>⌖</span><small>Map</small></button>
     <button data-player-tab="party"><span>⌘</span><small>Party</small></button>
   </nav>
-  <script src="/static/wiki.js?v=7040"></script>
-  <script src="/static/v7-player.js?v=7040"></script>
+  <script src="/static/wiki.js?v=7100"></script>
+  <script src="/static/foundry-live.js?v=7100"></script>
+  <script src="/static/v7-player.js?v=7100"></script>
 </body></html>

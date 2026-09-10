@@ -1,4 +1,14 @@
-# Seeker 7.0.4 — Codex & Relay
+# Seeker 7.1.0 — Tempered
+
+**Tempered** is a finish-and-flow release: it does not add another subsystem, but makes the existing Seeker surfaces faster, clearer and more trustworthy in daily play. Living Table, Monster Codex, Foundry Workshop, Encounter Builder, Knowledge, Table App, Asset Library, maps, permissions and campaign search now share a more consistent interaction language, clearer state feedback and stronger mobile ergonomics.
+
+The most important reliability change is **live Foundry reconciliation**. HP, temporary HP, Hero Points, Focus and item quantities update optimistically in Seeker, follow the exact queued Foundry command through acknowledgement, and reconcile against the confirmed value without a full-page reload. The Foundry ACK also projects confirmed resource/quantity changes into Seeker's cached character snapshot immediately, closing the race where Foundry had already changed but Seeker still showed stale values until another refresh. Multiple rapid taps are tracked independently and failed writes roll back visibly.
+
+Tempered also tightens PF2e Workshop validation before push, simplifies Token Forge through progressive disclosure, improves Encounter Builder budget legibility, makes Knowledge fidelity/certainty and effective permissions easier to scan, strengthens Foundry delivery-state presentation, improves Codex browsing and AoN batch confidence, makes relationship/front/change history easier to read, and reduces unnecessary work in hidden/reduced-motion maps. No new Foundry protocol is required; Foundry Bridge **1.7.0** remains current. Static/PWA cache generation is **7100**.
+
+For the current Railway deployment the canonical public origin remains `https://seeker.up.railway.app`, with the Foundry module manifest at `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
+
+## Seeker 7.0.4 — Codex & Relay
 
 **Living Table** turns the existing campaign wiki, session tools, Foundry Workshop, maps and world-state systems into one campaign operating layer. The canonical GM workspace is `/gm/living-table`; the phone-oriented player surface is `/app`. Existing Seeker data migrates additively and a pre-major-release SQLite backup is created automatically on first schema initialization.
 

@@ -3657,7 +3657,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.0.4 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.1.0 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -4086,6 +4086,19 @@ def v61_foundry_content_push(request:Request,item_id:int,payload:dict=Body(...))
         'data':content_data,
     },actor_id=actor_id,scope=target_type,requested_by=requester_label(request))
     return {'ok':True,'command':command}
+
+
+@app.get('/api/v61/characters/{character_id}/foundry-state')
+def v71_character_foundry_state(request:Request,character_id:int):
+    if not player_allowed(request): raise HTTPException(401)
+    _character_owned(request,character_id)
+    link=foundry_link_for_character(settings,character_id)
+    if not link or not link.get('actor_id'): raise HTTPException(404,'This character is not linked to a Foundry actor.')
+    return {
+        'ok':True,'actor_id':link.get('actor_id'),'actor_uuid':link.get('actor_uuid') or '',
+        'name':link.get('name') or '','received_at':link.get('received_at'),
+        'sheet':link.get('sheet') or {},
+    }
 
 
 @app.post('/api/v61/characters/{character_id}/foundry/action')

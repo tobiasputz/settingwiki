@@ -363,6 +363,15 @@ def _decorate_command(row: dict) -> dict:
     status=str(item.get('status') or 'queued')
     labels={'queued':'Waiting for Foundry','dispatched':'Delivered to bridge','executing':'Applying in Foundry','done':'Applied','failed':'Failed','cancelled':'Cancelled'}
     item['delivery_label']=labels.get(status,status.replace('_',' ').title())
+    payload=item.get('payload') if isinstance(item.get('payload'),dict) else {}
+    result=item.get('result') if isinstance(item.get('result'),dict) else {}
+    item['target_label']=str(
+        payload.get('character_name') or payload.get('actor_name') or payload.get('title') or
+        payload.get('folder_name') or result.get('actor_name') or item.get('actor_id') or 'Foundry world'
+    )[:180]
+    item['age_seconds']=max(0,int(time.time()-float(item.get('created_at') or time.time())))
+    item['last_activity_at']=float(item.get('completed_at') or item.get('started_at') or item.get('last_attempt_at') or item.get('updated_at') or item.get('created_at') or 0)
+    item['progress_step']={'queued':0,'dispatched':1,'executing':2,'done':3,'failed':3,'cancelled':3}.get(status,0)
     # Never offer a second copy of an action while the bridge may still be
     # executing it. Stale in-flight commands are retried automatically; manual
     # retry is reserved for an explicit terminal failure.
@@ -411,6 +420,52 @@ def start_foundry_commands(settings: Settings, campaign_id: int, token: str, com
     return {'ok':True,'started':int(cur.rowcount or 0)}
 
 
+def _project_foundry_command_result(conn: sqlite3.Connection, campaign_id: int, command: dict, result_obj: dict, now: float) -> None:
+    """Immediately reconcile confirmed small writes into Seeker's actor snapshot.
+
+    The bridge ACK historically arrived slightly before the follow-up actor heartbeat.
+    A browser that refreshed in that gap could therefore show the old HP/quantity even
+    though Foundry had already applied the change. For commands whose authoritative
+    result contains the final value, update only that field in the cached projection.
+    The next full Foundry heartbeat still replaces the complete snapshot.
+    """
+    ctype=str(command.get('command_type') or '')
+    if ctype not in {'adjust_resource','adjust_item_quantity'}:
+        return
+    actor_id=str(command.get('actor_id') or '')
+    if not actor_id:
+        return
+    row=conn.execute('SELECT sheet_json FROM foundry_actor_snapshots WHERE campaign_id=? AND actor_id=?',(int(campaign_id),actor_id)).fetchone()
+    if not row:
+        return
+    sheet=_json(row['sheet_json'],{})
+    if not isinstance(sheet,dict):
+        return
+    payload=_json(command.get('payload_json'),{})
+    after=result_obj.get('after')
+    try:
+        after=int(after)
+    except (TypeError,ValueError):
+        return
+    if ctype=='adjust_resource':
+        resource=str(payload.get('resource') or '').lower()
+        vitals=sheet.setdefault('vitals',{})
+        if resource=='hp': vitals.setdefault('hp',{})['value']=after
+        elif resource=='temp_hp': vitals.setdefault('hp',{})['temp']=after
+        elif resource=='hero_points': vitals.setdefault('hero_points',{})['value']=after
+        elif resource=='focus': vitals.setdefault('focus',{})['value']=after
+        else: return
+    else:
+        item_id=str(payload.get('item_id') or '')
+        if not item_id:return
+        found=False
+        for item in sheet.get('inventory') or []:
+            if isinstance(item,dict) and str(item.get('id') or '')==item_id:
+                item['quantity']=after;found=True;break
+        if not found:return
+    conn.execute('UPDATE foundry_actor_snapshots SET sheet_json=?,received_at=? WHERE campaign_id=? AND actor_id=?',(json.dumps(sheet,ensure_ascii=False),now,int(campaign_id),actor_id))
+
+
 def complete_foundry_commands(settings: Settings, campaign_id: int, token: str, results: list[dict]) -> dict:
     _validate_foundry_token(settings,campaign_id,token)
     cid=int(campaign_id); now=time.time(); done=failed=0
@@ -418,13 +473,20 @@ def complete_foundry_commands(settings: Settings, campaign_id: int, token: str, 
         for item in results or []:
             try: cmd_id=int(item.get('id') or 0)
             except Exception: continue
+            command=conn.execute('SELECT * FROM foundry_command_queue WHERE campaign_id=? AND id=?',(cid,cmd_id)).fetchone()
+            if not command:continue
+            command=dict(command)
             status='done' if str(item.get('status') or 'done').lower() in {'ok','done','skipped'} else 'failed'
             result_obj=item.get('result') if isinstance(item.get('result'),dict) else {'message':str(item.get('result') or '')}
             result=json.dumps(result_obj,ensure_ascii=False)
             last_error='' if status=='done' else str(result_obj.get('message') or 'Foundry rejected this action.')[:2000]
             cur=conn.execute('UPDATE foundry_command_queue SET status=?,result_json=?,last_error=?,updated_at=?,completed_at=? WHERE id=? AND campaign_id=?',(status,result,last_error,now,now,cmd_id,cid))
             if cur.rowcount:
-                done += status=='done'; failed += status=='failed'
+                if status=='done':
+                    _project_foundry_command_result(conn,cid,command,result_obj,now)
+                    done += 1
+                else:
+                    failed += 1
     return {'ok':True,'completed':done,'failed':failed}
 
 
@@ -592,7 +654,7 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     query=urllib.parse.parse_qsl(parts.query,keep_blank_values=True)
     query=[(k,v) for k,v in query if k.lower()!='wait']+[('wait','true')]
     webhook_url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,parts.path,urllib.parse.urlencode(query),parts.fragment))
-    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.0.4'}, method='POST')
+    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.1.0'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             status=int(resp.status)
