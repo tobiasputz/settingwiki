@@ -221,7 +221,7 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     assert complete_foundry_commands(s,cid,cfg['foundry_bridge_token'],[{'id':pending[0]['id'],'status':'done','result':{'message':'ok'}}])['ok']
 
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
-    workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200 and 'Foundry Workshop' in workshop.text
+    workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200 and 'Prep content in Seeker. Push it when the table needs it.' in workshop.text and 'foundryWorkshopForm' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})
