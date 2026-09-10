@@ -7,6 +7,16 @@ Seeker turns a normal multi-file LaTeX campaign project into **two synchronized 
 
 It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX project is already the canonical setting document, while Seeker becomes the shared companion players and GMs actually use between and during sessions.
 
+## Seeker 6.0: campaign continuity & integrations
+
+V6 connects the systems Seeker already has rather than replacing them. It adds optional **Discord webhooks**, a small **read-only Foundry bridge**, private subscribable **calendar feeds / `.ics` exports**, rolling portable backups, campaign checkpoints/undo, Codex revision history, cross-campaign knowledge comparison and controlled campaign convergence. No external integration is required for normal use.
+
+The **Continuity Center** shows what changed since the previous session, possible state contradictions, campaign knowledge differences, stored checkpoints and portable backups. The universal command palette can jump directly to table tools and offers GM-only actions such as advancing a named campaign clock or revealing a Codex entry.
+
+For players, V6 adds a more useful campaign dashboard, private/party Atlas annotations and campaign travel history. For in-person tables, the GM gets a **Media Board** plus a token-restricted **Table Display** suitable for a TV or second monitor. Campaign archive export now produces a portable keepsake containing sessions, characters/milestones, objectives, discoveries, travel, mysteries, party notes, handouts, clocks and referenced local media.
+
+All V6 integrations are additive and optional. Existing V5.1 campaigns, characters, sessions, availability, prep, lore, maps and player knowledge migrate in place.
+
 ## Seeker 5.1: GM runbook & stability
 
 V5.1 turns **Session Prep** into a practical GM runbook rather than a long freeform note. A prepared session can now contain scene cards, movable clues/secrets, NPC quick cards, pacing guidance, consequences, campaign clocks, live event notes, reusable templates and random tables. **Improv Mode** collects useful NPCs, locations, unresolved material and random prompts when the party goes somewhere unexpected. The GM can push selected information to players without leaving prep.

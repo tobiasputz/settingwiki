@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Media Board · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="v6-shell" data-v6-media data-session-id="{{ session.id if session else '' }}">
+  <header class="v6-hero"><div><span class="eyebrow">SESSION MEDIA BOARD</span><h1>Put the right image on the table at the right moment.</h1><p>Preload portraits, location art, maps, letters, audio or short video. Push any item to a player-safe display with one tap.</p></div><div class="v6-hero-actions"><a class="primary-button" href="/display" target="_blank">Open Table Display ↗</a><a class="quiet-btn" href="/gm/prep{% if session %}?session_id={{ session.id }}{% endif %}">Back to Prep</a></div></header>
+  {% if not session %}<div class="v6-empty">Create a planned session first.</div>{% else %}
+  <section class="v6-card media-session-select"><label>Session<select onchange="location.href='/gm/media?session_id='+this.value">{% for s in sessions %}<option value="{{ s.id }}" {% if s.id==session.id %}selected{% endif %}>{{ s.title }}{% if s.session_date %} · {{ s.session_date }}{% endif %}</option>{% endfor %}</select></label><button class="quiet-btn" data-v6-display-clear>Clear table display</button></section>
+  <section class="v6-grid v6-grid-2 media-workspace">
+    <article class="v6-card"><h2>Add media</h2><form data-v6-media-upload enctype="multipart/form-data"><label>Upload image / video / audio / PDF<input type="file" name="file"></label><label>Title<input name="title" placeholder="Corvina enters the hall"></label><button class="primary-button">Upload</button></form><hr><form data-v6-media-url><label>Or use a URL<input name="source_url" placeholder="https://…"></label><div class="form-row"><label>Title<input name="title"></label><label>Type<select name="kind"><option>image</option><option>video</option><option>audio</option><option>document</option><option>text</option></select></label></div><label>Caption<textarea name="caption"></textarea></label><button class="quiet-btn">Add URL</button></form></article>
+    <article class="v6-card"><h2>Prepared for {{ session.title }}</h2><div class="media-board" data-v6-media-list>{% for item in media_items %}<article class="media-tile" data-media-id="{{ item.id }}">{% if item.kind=='image' %}<img src="{{ item.source_url }}" alt="">{% else %}<div class="media-kind-icon">{{ '▶' if item.kind=='video' else ('♫' if item.kind=='audio' else '▤') }}</div>{% endif %}<div><strong>{{ item.title }}</strong><p>{{ item.caption }}</p><div class="row-actions"><button data-v6-present="{{ item.id }}">Present</button><button data-v6-media-delete="{{ item.id }}">Delete</button></div></div></article>{% else %}<p class="muted">Nothing prepared yet.</p>{% endfor %}</div></article>
+  </section>{% endif %}
+</main>
+{% endblock %}
+{% block scripts %}<script src="/static/v6.js?v=6000"></script>{% endblock %}

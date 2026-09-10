@@ -22,6 +22,17 @@
   </section>
 
 
+  {% if player_v6 %}
+  <section class="home-section player-command-center reveal">
+    <div class="section-heading"><div><span class="eyebrow">YOUR TABLE</span><h2>Continue where you left off</h2></div><a href="/session" class="quiet-link">Open Session Mode →</a></div>
+    <div class="player-command-grid">
+      <article class="v6-card player-command-card character-focus"><small>CURRENT CHARACTER</small>{% if player_v6.character %}<h3>{{ player_v6.character.name }}</h3><p>{{ player_v6.character.summary or player_v6.character.goals or 'Your place in the story.' }}</p><div class="quick-links"><a class="quiet-btn" href="/characters/{{ player_v6.character.id }}">Open dossier</a>{% if player_v6.character.external_sheet_url %}<a class="quiet-btn" href="{{ player_v6.character.external_sheet_url }}" target="_blank" rel="noopener">Open sheet ↗</a>{% endif %}</div>{% else %}<h3>No active character yet</h3><p>Create a character and assign it to this table.</p><a class="quiet-btn" href="/characters">Create character</a>{% endif %}</article>
+      <article class="v6-card player-command-card"><small>NEXT SESSION</small>{% if player_v6.next_session %}<div class="big-date">{{ player_v6.next_session.session_date or 'Date TBD' }}</div><h3>{{ player_v6.next_session.title }}</h3><div class="quick-links"><a class="quiet-btn" href="/schedule">Availability</a>{% if player_v6.next_session.session_date %}<a class="quiet-btn" href="/api/v6/sessions/{{ player_v6.next_session.id }}.ics">Add to calendar</a>{% endif %}</div>{% else %}<h3>Nothing scheduled</h3><p>Your GM has not chosen the next session yet.</p><a class="quiet-btn" href="/schedule">Fill availability</a>{% endif %}</article>
+      <article class="v6-card player-command-card"><small>YOUR SIGNALS</small><h3>{{ player_v6.unread_notifications }} unread · {{ player_v6.follows|length }} followed</h3><p>{% if player_v6.objectives %}{{ player_v6.objectives|length }} active party objectives.{% else %}No active player-visible objectives.{% endif %}</p><div class="quick-links"><button class="quiet-btn" data-open-notifications>Notifications</button><a class="quiet-btn" href="/recap">Previously on…</a></div></article>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="home-section reveal campaign-now-home"><div class="section-heading"><div><span class="eyebrow">YOUR CHRONICLE NOW</span><h2>Pick up where the table left off</h2></div><a href="/campaign" class="quiet-link">Open Chronicle →</a></div><div class="campaign-now-grid">
     <a class="campaign-now-card" href="/campaign#threads"><small>OPEN THREADS</small><strong>{{ threads|selectattr('status','equalto','open')|list|length }}</strong><p>{% if threads %}{{ threads[0].title }}{% else %}No active plot threads yet.{% endif %}</p></a>
     <a class="campaign-now-card" href="/characters"><small>YOUR CHARACTERS</small><strong>{{ characters|length }}</strong><p>{% if characters %}{{ characters[0].name }}{% else %}Create a player character dossier.{% endif %}</p></a>

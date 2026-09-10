@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Continuity Center · {{ wiki.title }}{% endblock %}
+{% block body %}
+<main class="v6-shell gm-continuity" data-v6-continuity>
+  <header class="v6-hero">
+    <div><span class="eyebrow">CAMPAIGN CONTINUITY</span><h1>The world remembers what the table changed.</h1><p>Compare table knowledge, catch contradictions, checkpoint risky changes, merge crossover campaigns, and keep restorable backups.</p></div>
+    <div class="v6-hero-actions"><a class="primary-button" href="/gm/prep">Open Session Prep</a><a class="quiet-btn" href="/api/v6/campaign-archive">Export campaign chronicle</a></div>
+  </header>
+
+  <section class="v6-grid v6-grid-3">
+    <article class="v6-card accent-card"><small>SINCE LAST SESSION</small><strong>{{ changes.count }}</strong><p>tracked changes across objectives, clues, discoveries, clocks, consequences, event notes and party memory.</p><button class="quiet-btn" data-v6-scroll="#changes">Review changes</button></article>
+    <article class="v6-card"><small>CONTINUITY CHECK</small><strong>{{ continuity_v6.count }}</strong><p>{{ 'items worth checking before play.' if continuity_v6.count else 'No V6 continuity conflicts detected.' }}</p><button class="quiet-btn" data-v6-scroll="#continuity">Inspect</button></article>
+    <article class="v6-card"><small>SAFETY NET</small><strong>{{ backups|length }}</strong><p>portable backups currently retained on the Seeker volume.</p><button class="quiet-btn" data-v6-scroll="#backups">Manage backups</button></article>
+  </section>
+
+  <section class="v6-section" id="changes">
+    <div class="section-heading"><div><span class="eyebrow">STATE DELTA</span><h2>What changed since the last session?</h2></div><p>{% if changes.last_session %}Compared against {{ changes.last_session.title }}.{% else %}No completed session exists yet, so this shows current tracked state.{% endif %}</p></div>
+    <div class="v6-change-columns">
+      {% for key,label in [('objectives','Objectives'),('discoveries','Discoveries'),('clues','Clues'),('clocks','Clocks'),('consequences','Consequences'),('events','Table events'),('notes','Party notes')] %}
+      <article class="v6-card"><h3>{{ label }}</h3>{% set rows=changes[key] %}{% if rows %}<div class="v6-list">{% for row in rows[:10] %}<div><strong>{{ row.title or row.body or row.note or row.state or 'Changed' }}</strong><small>{{ row.status or row.state or '' }}</small></div>{% endfor %}</div>{% else %}<p class="muted">No changes.</p>{% endif %}</article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="v6-section" id="continuity">
+    <div class="section-heading"><div><span class="eyebrow">CONTINUITY CHECKER</span><h2>Things worth a second look</h2></div><p>Seeker only flags possible inconsistencies. It never rewrites canon for you.</p></div>
+    <div class="v6-issue-list">{% if continuity_v6.issues %}{% for issue in continuity_v6.issues %}<a href="{{ issue.href or '#' }}" class="v6-issue severity-{{ issue.severity }}"><span>{{ '!' if issue.severity == 'warning' else 'i' }}</span><div><strong>{{ issue.title }}</strong><p>{{ issue.message }}</p></div></a>{% endfor %}{% else %}<div class="v6-empty">Nothing suspicious in the current campaign state.</div>{% endif %}</div>
+  </section>
+
+  <section class="v6-section" id="knowledge">
+    <div class="section-heading"><div><span class="eyebrow">PARALLEL CAMPAIGNS</span><h2>Who knows what?</h2></div><p>Knowledge stays campaign-specific even when several tables inhabit the same setting.</p></div>
+    <div class="v6-matrix-wrap"><table class="v6-matrix"><thead><tr><th>Lore</th>{% for c in matrix.campaigns %}<th style="--matrix-accent:{{ c.accent }}">{{ c.name }}</th>{% endfor %}</tr></thead><tbody>{% for row in matrix.rows[:150] %}<tr><td><a href="/wiki/{{ row.slug }}">{{ row.slug|replace('-',' ')|title }}</a></td>{% for c in matrix.campaigns %}{% set state=row.states.get(c.id,'unknown') %}<td><span class="knowledge-pill state-{{ state }}">{{ state }}</span></td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+  </section>
+
+  <section class="v6-section" id="convergence">
+    <div class="section-heading"><div><span class="eyebrow">CROSSOVER TOOL</span><h2>Campaign convergence</h2></div><p>Copy shared discoveries into a target table without erasing either campaign's history. Seeker creates a checkpoint first.</p></div>
+    <form class="v6-card v6-form" data-v6-converge>
+      <label>Target campaign<select name="target_campaign_id">{% for c in matrix.campaigns %}<option value="{{ c.id }}" {% if c.id == campaign_context(request).active_campaign_id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></label>
+      <fieldset><legend>Source campaigns</legend><div class="check-grid">{% for c in matrix.campaigns %}<label><input type="checkbox" name="source_campaign_ids" value="{{ c.id }}"> {{ c.name }}</label>{% endfor %}</div></fieldset>
+      <fieldset><legend>Bring across</legend><div class="check-grid"><label><input type="checkbox" name="knowledge" checked> Player knowledge</label><label><input type="checkbox" name="reveals" checked> Revealed lore</label><label><input type="checkbox" name="discoveries" checked> Atlas discoveries</label><label><input type="checkbox" name="objectives" checked> Objectives</label><label><input type="checkbox" name="memberships" checked> Player memberships</label></div></fieldset>
+      <button class="primary-button" type="submit">Merge into target campaign</button><output data-v6-converge-result></output>
+    </form>
+  </section>
+
+  <section class="v6-section" id="backups">
+    <div class="section-heading"><div><span class="eyebrow">BACKUPS & UNDO</span><h2>Make risky changes reversible</h2></div><p>Checkpoints are quick in-app restore points. Portable backups include the database, campaign source and uploads.</p></div>
+    <div class="v6-grid v6-grid-2">
+      <article class="v6-card"><h3>Campaign checkpoints</h3><div class="v6-actions"><button class="primary-button" data-v6-checkpoint>Create checkpoint</button>{% if request.session.get('admin') %}<button class="danger-button" data-v6-undo>Undo to latest checkpoint</button>{% endif %}</div><div class="v6-list">{% for s in snapshots[:8] %}<div><strong>{{ s.label }}</strong><small><time data-epoch="{{ s.created_at }}"></time></small></div>{% else %}<p class="muted">No checkpoints yet.</p>{% endfor %}</div></article>
+      <article class="v6-card"><h3>Portable backups</h3><div class="v6-actions"><button class="primary-button" data-v6-backup>Create backup now</button></div><div class="v6-list" data-v6-backup-list>{% for b in backups[:12] %}<div data-backup-id="{{ b.id }}"><span><strong>{{ b.label }}</strong><small>{{ (b.size_bytes / 1048576)|round(1) }} MB · {{ b.kind }}</small></span><span class="row-actions"><a href="/api/v6/backups/{{ b.id }}/download">Download</a>{% if request.session.get('admin') %}<button data-v6-backup-restore="{{ b.id }}">Restore</button><button data-v6-backup-delete="{{ b.id }}">Delete</button>{% endif %}</span></div>{% else %}<p class="muted">No portable backups yet. Automatic daily backups begin after V6 is deployed.</p>{% endfor %}</div></article>
+    </div>
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}<script src="/static/v6.js?v=6000"></script>{% endblock %}

@@ -21,13 +21,13 @@ def test_studio_refresh_helpers_reconnect_status_files_and_project_controls():
 
 def test_admin_bundle_uses_new_cache_buster():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
-    assert '/static/admin.js?v=5100' in html
+    assert '/static/admin.js?v=6000' in html
     assert '/static/admin.js?v=3002' not in html
 
 
 def test_service_worker_does_not_pin_static_assets_cache_first():
     source = (ROOT / "static" / "sw.js").read_text(encoding="utf-8")
-    assert "seeker-static-v5100" in source
+    assert "seeker-static-v6000" in source
     assert "fetch(e.request).then" in source
     assert ".catch(()=>caches.match(e.request))" in source
     assert "caches.match(e.request).then(hit=>hit||fetch(e.request)" not in source

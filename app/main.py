@@ -9,6 +9,7 @@ import shutil
 import tempfile
 import threading
 import time
+import zipfile
 from pathlib import Path
 from urllib.parse import quote, unquote
 from urllib.request import Request as UrlRequest, urlopen
@@ -73,6 +74,13 @@ from .v51 import (
     list_clocks, save_clock, delete_clock, record_spotlight, spotlight_status, list_templates, save_template, delete_template,
     list_random_tables, save_random_table, delete_random_table, roll_random_table, forgotten_items, save_closeout, BUILTIN_TEMPLATES,
 )
+from .v6 import (
+    init_v6_db, integration_config, save_integration_config, discord_post, foundry_accept, foundry_state, calendar_feed, session_ics,
+    sync_lore_revisions, lore_revisions, lore_revision_diff, restore_lore_source_revision, page_update_status, knowledge_matrix, converge_campaigns,
+    changes_since_last_session, continuity_v6, player_dashboard, command_rows, save_map_annotation, list_map_annotations, delete_map_annotation,
+    record_travel_leg, travel_legs, delete_travel_leg, list_media_items, save_media_item, delete_media_item, display_state, set_display_state,
+    campaign_keepsake, create_backup, list_backups, delete_backup, maybe_auto_backup, restore_backup,
+)
 
 settings = load_settings()
 BUILD_LOCK = threading.Lock()
@@ -81,6 +89,7 @@ init_feature_db(settings)
 init_schedule_db(settings)
 init_v5_db(settings)
 init_v51_db(settings)
+init_v6_db(settings)
 seed_project(settings)
 
 app = FastAPI(title="Seeker", docs_url=None, redoc_url=None)
@@ -246,9 +255,17 @@ async def archive_read_only_guard(request: Request, call_next):
 
 def ensure_built() -> dict:
     try:
-        return load_wiki(settings)
+        wiki=load_wiki(settings)
+        # V6 keeps a bounded rendered revision history. This is essentially free
+        # on normal requests because sync_lore_revisions exits immediately when
+        # the wiki generation timestamp has not changed.
+        try:
+            sync_lore_revisions(settings,wiki)
+        except Exception:
+            pass
+        return wiki
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 5000}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 6000}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -572,7 +589,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 5000
+                    needs_build=int(existing.get("renderer_version") or 0) < 6000
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -589,6 +606,29 @@ def startup_build() -> None:
                 compile_pdf(settings)
     except Exception as exc:
         print(f"Seeker startup build warning: {exc}", flush=True)
+
+
+_V6_BACKUP_THREAD_STARTED=False
+@app.on_event("startup")
+def startup_v6_backups() -> None:
+    """Keep rolling portable backups without putting archive work on requests.
+
+    The sleeping daemon wakes only a few times per day and creates at most one
+    archive per 24h, so steady-state Railway cost is negligible.
+    """
+    global _V6_BACKUP_THREAD_STARTED
+    if _V6_BACKUP_THREAD_STARTED:
+        return
+    _V6_BACKUP_THREAD_STARTED=True
+    def worker():
+        time.sleep(12)
+        while True:
+            try:
+                maybe_auto_backup(settings)
+            except Exception as exc:
+                print(f"Seeker automatic backup warning: {exc}", flush=True)
+            time.sleep(6*60*60)
+    threading.Thread(target=worker,name="seeker-backups",daemon=True).start()
 
 
 @app.get("/health")
@@ -787,7 +827,8 @@ def home(request: Request):
     home_chars=list_player_characters(settings,invite_id=iid,admin=gm,campaign_id=cid)[:5]
     home_fronts=list_fronts(settings,admin=gm,invite_id=iid,campaign_id=cid)[:4]
     home_notifications=list_notifications(settings,iid,admin=gm,campaign_id=cid)[:6]
-    return templates.TemplateResponse("home.html", {"request": request, "wiki": wiki, "maps": maps, "featured": featured,"updates":updates,"live_session":live,"mysteries":list_mysteries(settings,admin=gm,campaign_id=cid)[:4],"threads":home_threads,"characters":home_chars,"fronts":home_fronts,"notifications":home_notifications,"calendar":_calendar_config()})
+    player_v6=player_dashboard(settings,cid,int(iid)) if (iid is not None and not gm) else None
+    return templates.TemplateResponse("home.html", {"request": request, "wiki": wiki, "maps": maps, "featured": featured,"updates":updates,"live_session":live,"mysteries":list_mysteries(settings,admin=gm,campaign_id=cid)[:4],"threads":home_threads,"characters":home_chars,"fronts":home_fronts,"notifications":home_notifications,"calendar":_calendar_config(),"player_v6":player_v6})
 
 
 @app.get("/wiki/{slug}", response_class=HTMLResponse)
@@ -829,6 +870,7 @@ def wiki_page(request: Request, slug: str):
             "request": request, "wiki": wiki, "page": page, "prev_page": prev_page, "next_page": next_page,
             "page_locked": page_locked, "admin_view": is_gm(request),"maps":([{"id":1}] if has_maps else []),"map_locations":map_locations,"appearances":appearances,
             "runtime_state": runtime_state_for_page(settings,slug,admin=is_gm(request)),"provenance":entity_provenance(settings,slug,campaign_id=cid),
+            "update_status":page_update_status(settings,slug,_invite_id(request)) if not is_gm(request) else {'updated_since_read':False},
         },
     )
 
@@ -934,6 +976,8 @@ def map_page(request: Request, slug: str):
     map_data["history_max"] = max([float(h.get("end_sort") if h.get("end_sort") is not None else h.get("start_sort")) for r in map_data["regions"] for h in r.get("history",[]) if h.get("start_sort") is not None], default=0)
     map_data["world_width"] = float(get_setting(settings,"world_width","1000") or 1000)
     map_data["travel_speed"] = float(get_setting(settings,"travel_speed","40") or 40)
+    map_data["annotations"] = list_map_annotations(settings,cid,int(map_data["id"]),_invite_id(request),admin=is_gm(request))
+    map_data["travel_history"] = travel_legs(settings,cid,int(map_data["id"]))
     live=next((x for x in list_sessions(settings,campaign_id=cid) if x.get("status")=="live"),None)
     return templates.TemplateResponse("map.html", {"request": request, "wiki": wiki, "map": map_data, "maps": list_maps(settings,public=True),"gm_view":is_gm(request),"live_session_id":(live or {}).get("id")})
 
@@ -3077,7 +3121,7 @@ def gm_prep_page(request:Request,session_id:int|None=None):
         'request':request,'wiki':wiki,'maps':list_maps(settings,public=False),'sessions':sessions,'selected_session':selected,'prep':prep,
         'mysteries':list_mysteries(settings,admin=True,campaign_id=cid),'handouts':list_handouts(settings,admin=True,campaign_id=cid),
         'fronts':list_fronts(settings,admin=True,campaign_id=cid),'rumors':list_rumors(settings,admin=True,campaign_id=cid),
-        'characters':chars,'objectives':objectives,'v51_workspace':workspace,
+        'characters':chars,'objectives':objectives,'v51_workspace':workspace,'foundry_v6':foundry_state(settings,cid),
     })
 
 
@@ -3354,3 +3398,352 @@ def v5_notification_prefs_get(request:Request):
 @app.put('/api/v5/notification-prefs/{kind}')
 def v5_notification_pref_save(request:Request,kind:str,payload:dict=Body(...)):
     require_player_author(request);invite=current_player_invite(request);return set_notification_pref(settings,int(invite['id']),kind,bool(payload.get('enabled',True)))
+
+# ---------------------------------------------------------------------------
+# Seeker V6 — continuity, integrations and table companion infrastructure
+# ---------------------------------------------------------------------------
+
+@app.get('/gm/continuity', response_class=HTMLResponse)
+def v6_continuity_page(request: Request):
+    require_gm(request)
+    wiki=_visible_wiki(request);cid=_active_campaign_id(request)
+    sync_lore_revisions(settings, ensure_built())
+    extra=continuity_v6(settings,cid,wiki);base=continuity_report(settings,wiki)
+    continuity={'issues':base.get('issues',[])+extra.get('issues',[])};continuity['count']=len(continuity['issues'])
+    return templates.TemplateResponse('gm_continuity.html', {
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=True),
+        'changes':changes_since_last_session(settings,cid),
+        'continuity_v6':continuity,
+        'matrix':knowledge_matrix(settings),
+        'snapshots':list_snapshots(settings),
+        'backups':list_backups(settings),
+    })
+
+
+@app.get('/gm/integrations', response_class=HTMLResponse)
+def v6_integrations_page(request: Request):
+    require_gm(request);cid=_active_campaign_id(request);cfg=integration_config(settings,cid,include_secret=True)
+    camp=get_campaign(settings,cid) or {}
+    base=str(request.base_url).rstrip('/')
+    cfg['calendar_feed_url']=f"{base}/calendar-feed/{cid}/{cfg.get('calendar_token')}.ics"
+    cfg['foundry_push_url']=f"{base}/api/v6/foundry/push/{cid}?token={quote(str(cfg.get('foundry_bridge_token') or ''))}"
+    cfg['display_url']=f"{base}/display?campaign_id={cid}&token={quote(str(cfg.get('display_token') or ''))}"
+    return templates.TemplateResponse('gm_integrations.html', {'request':request,'wiki':_visible_wiki(request),'maps':list_maps(settings,public=True),'integration':cfg,'campaign':camp,'foundry':foundry_state(settings,cid)})
+
+
+@app.get('/gm/media', response_class=HTMLResponse)
+def v6_media_page(request: Request, session_id: int|None=None):
+    require_gm(request);cid=_active_campaign_id(request);sessions=list_sessions(settings,campaign_id=cid)
+    session=next((s for s in sessions if session_id and int(s['id'])==int(session_id)),None)
+    if not session:session=next((s for s in sessions if s.get('status') in {'live','planned'}),None)
+    items=list_media_items(settings,cid,int(session['id'])) if session else []
+    return templates.TemplateResponse('gm_media.html', {'request':request,'wiki':_visible_wiki(request),'maps':list_maps(settings,public=True),'sessions':sessions,'session':session,'media_items':items,'display_state':display_state(settings,cid)})
+
+
+def _display_payload_for_token(state:dict,campaign_id:int,token:str='')->dict:
+    out=dict(state or {})
+    source=str(out.get('source_url') or '')
+    if token and out.get('media_item_id') and (source.startswith('/uploads/') or source.startswith('/project-asset/')):
+        out['source_url']=f"/api/v6/display/{int(campaign_id)}/asset/{int(out['media_item_id'])}?token={quote(str(token))}"
+    return out
+
+
+@app.get('/display', response_class=HTMLResponse)
+def v6_display_page(request: Request, campaign_id: int|None=None, token: str=''):
+    cid=resolve_campaign_id(settings,campaign_id or request.session.get('active_campaign_id'))
+    allowed=player_allowed(request)
+    if not allowed and token:
+        cfg=integration_config(settings,cid,include_secret=True)
+        allowed=secrets.compare_digest(str(cfg.get('display_token') or ''),str(token or ''))
+    if not allowed:return player_gate_redirect(request)
+    camp=get_campaign(settings,cid) or {}
+    return templates.TemplateResponse('display.html', {'request':request,'wiki':_visible_wiki(request) if player_allowed(request) else {'title':'Seeker'},'maps':list_maps(settings,public=True),'campaign':camp,'display_state':_display_payload_for_token(display_state(settings,cid),cid,token if not player_allowed(request) else ''),'display_campaign_id':cid,'display_token':token if not player_allowed(request) else ''})
+
+
+@app.get('/lore-history/{slug}', response_class=HTMLResponse)
+def v6_lore_history_page(request: Request, slug: str):
+    require_gm(request);sync_lore_revisions(settings,ensure_built())
+    wiki=_visible_wiki(request);page=next((p for p in wiki.get('pages',[]) if p.get('slug')==slug),None)
+    if not page:raise HTTPException(404,'Codex entry not found.')
+    return templates.TemplateResponse('lore_history.html', {'request':request,'wiki':wiki,'maps':list_maps(settings,public=True),'page':page,'revisions':lore_revisions(settings,slug)})
+
+
+@app.get('/api/v6/integrations')
+def v6_integrations_get(request: Request):
+    require_gm(request);return integration_config(settings,_active_campaign_id(request),include_secret=True)
+
+
+@app.put('/api/v6/integrations')
+def v6_integrations_save(request: Request,payload:dict=Body(...)):
+    require_gm(request);return save_integration_config(settings,_active_campaign_id(request),payload)
+
+
+@app.post('/api/v6/discord/test')
+def v6_discord_test(request: Request):
+    require_gm(request);cid=_active_campaign_id(request);camp=get_campaign(settings,cid) or {}
+    try:return discord_post(settings,cid,f"✦ Seeker is connected to **{camp.get('name','this campaign')}**.")
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.post('/api/v6/discord/send')
+def v6_discord_send(request: Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:return discord_post(settings,_active_campaign_id(request),str(payload.get('content') or ''))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.post('/api/v6/foundry/push/{campaign_id}')
+def v6_foundry_push(campaign_id:int,token:str='',payload:dict=Body(...)):
+    try:return foundry_accept(settings,campaign_id,token,payload)
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+
+
+@app.get('/api/v6/foundry/state')
+def v6_foundry_state(request:Request):
+    require_gm(request);return foundry_state(settings,_active_campaign_id(request))
+
+
+@app.get('/api/v6/foundry/module.zip')
+def v6_foundry_module(request:Request):
+    require_gm(request)
+    source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
+    if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
+    out=settings.build_dir/'seeker-foundry-bridge.zip';out.parent.mkdir(parents=True,exist_ok=True)
+    with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
+        for item in source.rglob('*'):
+            if item.is_file():z.write(item,'seeker-bridge/'+item.relative_to(source).as_posix())
+    return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
+
+
+@app.get('/calendar-feed/{campaign_id}/{token}.ics')
+def v6_calendar_feed(request:Request,campaign_id:int,token:str):
+    try:data=calendar_feed(settings,campaign_id,token,str(request.base_url).rstrip('/'))
+    except PermissionError as exc:raise HTTPException(404,str(exc))
+    return Response(data,media_type='text/calendar; charset=utf-8',headers={'Content-Disposition':'inline; filename="seeker-campaign.ics"','Cache-Control':'no-cache'})
+
+
+@app.get('/api/v6/sessions/{session_id}.ics')
+def v6_session_ics(request:Request,session_id:int):
+    if not player_allowed(request):raise HTTPException(401)
+    cid=_active_campaign_id(request);session=next((s for s in list_sessions(settings,campaign_id=cid) if int(s['id'])==int(session_id)),None)
+    if not session:raise HTTPException(404,'Session not found.')
+    try:data=session_ics(session,(get_campaign(settings,cid) or {}).get('name','Seeker'),str(request.base_url).rstrip('/'))
+    except ValueError as exc:raise HTTPException(400,str(exc))
+    return Response(data,media_type='text/calendar; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="seeker-session-{session_id}.ics"'})
+
+
+@app.get('/api/v6/lore/{slug}/revisions')
+def v6_lore_revisions(request:Request,slug:str):
+    require_gm(request);sync_lore_revisions(settings,ensure_built());return lore_revisions(settings,slug)
+
+
+@app.get('/api/v6/lore/{slug}/revisions/{revision_id}/diff')
+def v6_lore_revision_diff(request:Request,slug:str,revision_id:int):
+    require_gm(request)
+    try:return lore_revision_diff(settings,slug,revision_id)
+    except ValueError as exc:raise HTTPException(404,str(exc))
+
+
+@app.post('/api/v6/lore/revisions/{revision_id}/restore')
+def v6_lore_restore(request:Request,revision_id:int):
+    require_admin(request)
+    try:
+        create_snapshot(settings,'Automatic checkpoint before lore restore')
+        result=restore_lore_source_revision(settings,revision_id);build_wiki(settings);sync_lore_revisions(settings,ensure_built());return result
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.get('/api/v6/knowledge-matrix')
+def v6_knowledge_matrix(request:Request):
+    require_gm(request);return knowledge_matrix(settings)
+
+
+@app.post('/api/v6/converge')
+def v6_converge(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:
+        create_snapshot(settings,'Automatic checkpoint before campaign convergence')
+        return converge_campaigns(settings,int(payload.get('target_campaign_id') or _active_campaign_id(request)),payload.get('source_campaign_ids') or [],payload.get('options') or {})
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.get('/api/v6/changes')
+def v6_changes(request:Request):
+    require_gm(request);return changes_since_last_session(settings,_active_campaign_id(request))
+
+
+@app.get('/api/v6/continuity')
+def v6_continuity(request:Request):
+    require_gm(request);wiki=_visible_wiki(request);extra=continuity_v6(settings,_active_campaign_id(request),wiki);base=continuity_report(settings,wiki);issues=base.get('issues',[])+extra.get('issues',[]);return {'issues':issues,'count':len(issues)}
+
+
+@app.post('/api/v6/checkpoint')
+def v6_checkpoint(request:Request,payload:dict=Body(default={})):
+    require_gm(request);return create_snapshot(settings,str(payload.get('label') or 'V6 checkpoint'))
+
+
+@app.post('/api/v6/undo-latest')
+def v6_undo_latest(request:Request):
+    require_admin(request);rows=list_snapshots(settings)
+    if not rows:raise HTTPException(404,'No campaign checkpoint exists yet.')
+    latest=rows[0];safety=create_snapshot(settings,'Safety backup before undo')
+    result=restore_snapshot(settings,latest['path']);result['restored_snapshot']=latest;result['safety_snapshot']=safety;return result
+
+
+@app.get('/api/v6/commands')
+def v6_commands(request:Request,q:str=''):
+    if not player_allowed(request):raise HTTPException(401)
+    return command_rows(settings,q,_active_campaign_id(request),gm=is_gm(request),wiki=_visible_wiki(request))
+
+
+@app.post('/api/v6/commands/action')
+def v6_command_action(request:Request,payload:dict=Body(...)):
+    require_gm(request);kind=str(payload.get('kind') or '');cid=_active_campaign_id(request)
+    if kind=='advance_clock':
+        row=next((x for x in list_clocks(settings,cid,include_done=True) if int(x['id'])==int(payload.get('id') or 0)),None)
+        if not row:raise HTTPException(404,'Clock not found.')
+        return save_clock(settings,cid,{**row,'current_segments':min(int(row.get('total_segments') or 6),int(row.get('current_segments') or 0)+1)})
+    if kind=='reveal_page':
+        slug=str(payload.get('slug') or '')
+        return set_reveal(settings,{'campaign_id':cid,'target_type':'page','target_key':slug,'state':'discovered'})
+    raise HTTPException(400,'Unknown command action.')
+
+
+@app.get('/api/v6/maps/{map_id}/annotations')
+def v6_map_annotations(request:Request,map_id:int):
+    if not player_allowed(request):raise HTTPException(401)
+    return list_map_annotations(settings,_active_campaign_id(request),map_id,_invite_id(request),admin=is_gm(request))
+
+
+@app.post('/api/v6/maps/{map_id}/annotations')
+def v6_map_annotation_save(request:Request,map_id:int,payload:dict=Body(...)):
+    if not player_allowed(request):raise HTTPException(401)
+    invite=current_player_invite(request);label=('GM' if is_gm(request) else str((invite or {}).get('label') or 'Player'))
+    try:return save_map_annotation(settings,_active_campaign_id(request),map_id,_invite_id(request),label,payload,admin=is_gm(request))
+    except (ValueError,PermissionError) as exc:raise HTTPException(400 if isinstance(exc,ValueError) else 403,str(exc))
+
+
+@app.delete('/api/v6/map-annotations/{annotation_id}')
+def v6_map_annotation_delete(request:Request,annotation_id:int):
+    if not player_allowed(request):raise HTTPException(401)
+    try:delete_map_annotation(settings,annotation_id,_invite_id(request),admin=is_gm(request));return {'ok':True}
+    except PermissionError as exc:raise HTTPException(403,str(exc))
+
+
+@app.get('/api/v6/maps/{map_id}/travel-history')
+def v6_travel_history(request:Request,map_id:int):
+    if not player_allowed(request):raise HTTPException(401)
+    return travel_legs(settings,_active_campaign_id(request),map_id)
+
+
+@app.post('/api/v6/maps/{map_id}/travel-history')
+def v6_travel_save(request:Request,map_id:int,payload:dict=Body(...)):
+    require_gm(request)
+    try:return record_travel_leg(settings,_active_campaign_id(request),map_id,payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v6/travel-history/{leg_id}')
+def v6_travel_delete(request:Request,leg_id:int):
+    require_gm(request);delete_travel_leg(settings,leg_id);return {'ok':True}
+
+
+@app.get('/api/v6/media/{session_id}')
+def v6_media_list(request:Request,session_id:int):
+    require_gm(request);return list_media_items(settings,_active_campaign_id(request),session_id)
+
+
+@app.post('/api/v6/media/{session_id}')
+def v6_media_save(request:Request,session_id:int,payload:dict=Body(...)):
+    require_gm(request)
+    try:return save_media_item(settings,_active_campaign_id(request),session_id,payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v6/media-item/{item_id}')
+def v6_media_delete(request:Request,item_id:int):
+    require_gm(request);delete_media_item(settings,item_id);return {'ok':True}
+
+
+@app.post('/api/v6/media/{session_id}/upload')
+async def v6_media_upload(request:Request,session_id:int,file:UploadFile=File(...),title:str=Form('')):
+    require_gm(request);suffix=Path(file.filename or '').suffix.lower()
+    if suffix not in {'.png','.jpg','.jpeg','.webp','.gif','.mp4','.webm','.mp3','.ogg','.pdf'}:raise HTTPException(400,'Unsupported media type.')
+    folder=settings.uploads_dir/'session-media';folder.mkdir(parents=True,exist_ok=True)
+    name=f"{int(time.time())}-{secrets.token_hex(4)}{suffix}";target=folder/name
+    await _stream_upload(file,target,150*1024*1024,'Session media is limited to 150 MB.')
+    kind='image' if suffix in {'.png','.jpg','.jpeg','.webp','.gif'} else ('video' if suffix in {'.mp4','.webm'} else ('audio' if suffix in {'.mp3','.ogg'} else 'document'))
+    return save_media_item(settings,_active_campaign_id(request),session_id,{'title':title or Path(file.filename or name).stem,'kind':kind,'source_url':'/uploads/session-media/'+name})
+
+
+@app.get('/api/v6/display/{campaign_id}')
+def v6_display_state(request:Request,campaign_id:int,token:str=''):
+    if player_allowed(request):
+        if not is_gm(request) and not invite_has_campaign(settings,int(_invite_id(request) or 0),int(campaign_id)):raise HTTPException(403)
+    else:
+        cfg=integration_config(settings,int(campaign_id),include_secret=True)
+        if not token or not secrets.compare_digest(str(cfg.get('display_token') or ''),str(token)):
+            raise HTTPException(401)
+    state=display_state(settings,campaign_id)
+    return _display_payload_for_token(state,campaign_id,token if not player_allowed(request) else '')
+
+
+@app.get('/api/v6/display/{campaign_id}/asset/{item_id}')
+def v6_display_asset(campaign_id:int,item_id:int,token:str=''):
+    cfg=integration_config(settings,int(campaign_id),include_secret=True)
+    if not token or not secrets.compare_digest(str(cfg.get('display_token') or ''),str(token)):
+        raise HTTPException(401)
+    with connect(settings) as conn:
+        row=conn.execute('SELECT source_url FROM session_media_items WHERE id=? AND campaign_id=?',(int(item_id),int(campaign_id))).fetchone()
+    if not row:raise HTTPException(404,'Display media not found.')
+    source=str(row['source_url'] or '')
+    if source.startswith('/uploads/'):
+        rel=unquote(source[len('/uploads/'):]);path=(settings.uploads_dir/rel).resolve();base=settings.uploads_dir.resolve()
+    elif source.startswith('/project-asset/'):
+        rel=unquote(source[len('/project-asset/'):]);path=(settings.project_dir/rel).resolve();base=settings.project_dir.resolve()
+    else:raise HTTPException(404,'This media item is not a local Seeker asset.')
+    if base not in path.parents or not path.is_file():raise HTTPException(404)
+    return FileResponse(path)
+
+
+@app.post('/api/v6/display')
+def v6_display_set(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    try:return set_display_state(settings,_active_campaign_id(request),payload)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.get('/api/v6/campaign-archive')
+def v6_campaign_archive(request:Request):
+    require_gm(request);cid=_active_campaign_id(request);camp=get_campaign(settings,cid) or {'slug':'campaign'}
+    out=settings.build_dir/f"seeker-{camp.get('slug','campaign')}-chronicle.zip";campaign_keepsake(settings,cid,out)
+    return FileResponse(out,filename=out.name,media_type='application/zip')
+
+
+@app.get('/api/v6/backups')
+def v6_backups(request:Request):
+    require_gm(request);return list_backups(settings)
+
+
+@app.post('/api/v6/backups')
+def v6_backup_create(request:Request,payload:dict=Body(default={})):
+    require_gm(request);return create_backup(settings,str(payload.get('label') or 'Manual backup'),'manual')
+
+
+@app.get('/api/v6/backups/{backup_id}/download')
+def v6_backup_download(request:Request,backup_id:int):
+    require_gm(request);row=next((x for x in list_backups(settings) if int(x['id'])==int(backup_id)),None)
+    if not row:raise HTTPException(404,'Backup not found.')
+    return FileResponse(row['path'],filename=Path(row['path']).name,media_type='application/zip')
+
+
+@app.post('/api/v6/backups/{backup_id}/restore')
+def v6_backup_restore(request:Request,backup_id:int):
+    require_admin(request)
+    try:return restore_backup(settings,backup_id)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/v6/backups/{backup_id}')
+def v6_backup_delete(request:Request,backup_id:int):
+    require_admin(request);delete_backup(settings,backup_id);return {'ok':True}

@@ -348,6 +348,10 @@ def init_feature_db(settings: Settings) -> None:
     # that initialize through init_feature_db() never get a half-initialized V5.1.
     from .v51 import init_v51_db
     init_v51_db(settings)
+    # V6 continuity/integration tables are additive and initialized through the
+    # same public feature bootstrap so temporary/test databases are complete.
+    from .v6 import init_v6_db
+    init_v6_db(settings)
 
 
 

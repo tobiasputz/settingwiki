@@ -1,3 +1,16 @@
+# Seeker 6.0.0 — Campaign continuity & integrations
+
+- Added the **Continuity Center** with last-session change summaries, continuity warnings, cross-campaign knowledge comparison and campaign convergence controls.
+- Added rolling portable backups, manual backups, download/restore/delete controls, campaign checkpoints and owner-only undo with a safety snapshot.
+- Added Codex generated-revision history, diffs, restore support and player-facing “updated since last read” state.
+- Added optional Discord webhook announcements, a token-authenticated read-only Foundry bridge, campaign calendar feeds and per-session `.ics` export.
+- Added campaign-aware player Atlas annotations, private notes, shared party notes and recorded travel legs.
+- Added a GM Session Media Board and restricted second-screen **Table Display** for images, video, audio and text.
+- Added richer campaign archive/keepsake export with sessions, milestones, objectives, discoveries, travel, mysteries, party notes, handouts, clocks and referenced local media.
+- Expanded the player dashboard and command palette; GM commands can advance clocks and reveal Codex pages through server-authorized actions.
+- Bumped all static/PWA assets to **v6000**.
+- V6 schema is additive; V5.1 data migrates in place.
+
 # Seeker 5.1.0 — GM runbook & stability pass
 
 - Rebuilt **Session Prep** into a real GM runbook. Planned sessions now support structured scene cards, a movable clue/secrets pool, compact NPC quick cards, a live event log, consequence triggers, campaign clocks, a pacing strip, reusable prep templates, custom/random tables, Improv Mode, one-click player pushes, guided closeout, and automatic next-session seeding from unresolved material.
