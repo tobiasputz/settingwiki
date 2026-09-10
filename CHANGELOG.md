@@ -1,5 +1,6 @@
 # Seeker 6.1.0 — Foundry bridge & table reliability
 
+- Hardened Foundry connectivity behind Railway/reverse proxies: public integration URLs now honor the canonical HTTPS origin, the bridge automatically upgrades stale public HTTP endpoints, and Foundry surfaces explicit connected/error notifications instead of silently leaving Seeker on “Waiting for Foundry”.
 - Added a **public Foundry install manifest** at `/foundry/seeker-bridge/module.json` plus a matching public module ZIP, so the bridge can be installed directly through Foundry's **Install Module → Manifest URL** flow.
 - Upgraded the Foundry bridge to sync read-only PF2e actor snapshots (identity, HP/AC, saves, skills, strikes, feats, actions, inventory, spells, conditions and effects) while keeping Foundry as the mechanical source of truth.
 - Added explicit **Seeker character ↔ Foundry actor linking**. A player's own Seeker character page can render a polished read-only Foundry sheet and deep-link back to the actor in Foundry; other players do not receive the private mechanical snapshot.

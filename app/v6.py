@@ -459,9 +459,9 @@ def foundry_manifest(settings: Settings, base_url: str) -> dict:
     try:
         data=json.loads(source.read_text(encoding='utf-8'))
     except Exception:
-        data={'id':'seeker-bridge','title':'Seeker Bridge','version':'1.1.0','esmodules':['seeker-bridge.mjs']}
+        data={'id':'seeker-bridge','title':'Seeker Bridge','version':'1.1.1','esmodules':['seeker-bridge.mjs']}
     base=base_url.rstrip('/')
-    data['version']='1.1.0'
+    data['version']='1.1.1'
     data['manifest']=f'{base}/foundry/seeker-bridge/module.json'
     data['download']=f'{base}/foundry/seeker-bridge/seeker-bridge.zip'
     data['url']=base
