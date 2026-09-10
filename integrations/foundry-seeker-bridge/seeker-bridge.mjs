@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.2.0";
+const BRIDGE_VERSION = "1.2.1";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 let pushTimer = null;
 let intervalId = null;
@@ -254,22 +254,63 @@ function numericOr(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
+function preparedAbilityHtml(data) {
+  const abilities = Array.isArray(data?.abilities) ? data.abilities : [];
+  return abilities.filter(a => a?.name || a?.description).map(a => {
+    const actions = String(a?.actions || "");
+    const glyph = actions === "reaction" ? "↺" : actions === "free" ? "◇" : actions === "1" ? "◆" : actions === "2" ? "◆◆" : actions === "3" ? "◆◆◆" : "";
+    const traits = String(a?.traits || "").trim();
+    return `<p><strong>${foundry.utils.escapeHTML(String(a?.name || "Ability"))}${glyph ? ` ${glyph}` : ""}</strong>${traits ? ` <em>(${foundry.utils.escapeHTML(traits)})</em>` : ""}<br>${foundry.utils.escapeHTML(String(a?.description || "")).replace(/\n/g,"<br>")}</p>`;
+  }).join("");
+}
+function preparedAttackHtml(data) {
+  const attacks = Array.isArray(data?.attacks) ? data.attacks : [];
+  return attacks.filter(a => a?.name || a?.damage).map(a => {
+    const type = String(a?.type || "melee") === "ranged" ? "Ranged" : "Melee";
+    const bonus = Number(a?.bonus);
+    const bonusText = Number.isFinite(bonus) ? `${bonus >= 0 ? "+" : ""}${bonus}` : "";
+    const traits = String(a?.traits || "").trim();
+    return `<p><strong>${type}</strong> ${foundry.utils.escapeHTML(String(a?.name || "Strike"))} ${bonusText}${traits ? ` (${foundry.utils.escapeHTML(traits)})` : ""}, <strong>Damage</strong> ${foundry.utils.escapeHTML(String(a?.damage || "—"))}</p>`;
+  }).join("");
+}
+function preparedDetailsHtml(payload) {
+  const data = payload?.data || {};
+  const rows = [];
+  const add = (label, value) => { const raw = String(value || "").trim(); if (raw) rows.push(`<p><strong>${label}</strong> ${foundry.utils.escapeHTML(raw)}</p>`); };
+  add("Source", payload?.subtitle);
+  add("Price", data.price); add("Bulk", data.bulk); add("Usage", data.usage);
+  add("Prerequisites", data.prerequisites); add("Frequency", data.frequency || data.activation_frequency || data.homebrew_frequency);
+  add("Trigger", data.trigger || data.activation_trigger || data.homebrew_trigger); add("Requirements", data.requirements || data.activation_requirements);
+  add("Senses", data.senses); add("Languages", data.languages); add("Skills", data.skills);
+  add("Immunities", data.immunities); add("Weaknesses", data.weaknesses); add("Resistances", data.resistances);
+  if (data.spellcasting) rows.push(`<p><strong>Spellcasting</strong><br>${foundry.utils.escapeHTML(String(data.spellcasting)).replace(/\n/g,"<br>")}</p>`);
+  return rows.join("") + preparedAttackHtml(data) + preparedAbilityHtml(data);
+}
 function buildPreparedItem(payload) {
   const data = payload?.data || {};
   const kind = String(payload?.prepared_kind || "item").toLowerCase();
-  const type = kind === "feat" ? "feat" : (String(data.item_type || "equipment") || "equipment");
+  const type = kind === "feat" ? "feat" : kind === "homebrew" ? (String(data.homebrew_document || data.item_type || "equipment") || "equipment") : (String(data.item_type || "equipment") || "equipment");
+  const description = htmlDescription(payload?.summary, data.description) + preparedDetailsHtml(payload);
+  const system = {
+    description: { value: description },
+    level: { value: numericOr(data.level, 0) },
+    quantity: Math.max(0, numericOr(data.quantity, 1)),
+    traits: { value: slugList(data.traits), rarity: String(data.rarity || "common").toLowerCase() || "common" },
+    slug: foundry.utils.slugify(String(payload?.title || "prepared-item")),
+    source: { value: "Seeker" },
+  };
+  if (type === "feat" || type === "action") {
+    const action = String(data.action_cost || data.homebrew_actions || "");
+    system.actionType = { value: action === "reaction" ? "reaction" : action === "free" ? "free" : action ? "action" : "passive" };
+    system.actions = { value: /^[123]$/.test(action) ? Number(action) : null };
+    system.category = String(data.feat_category || "general");
+    system.prerequisites = { value: String(data.prerequisites || "").trim() ? [{ value: String(data.prerequisites).trim() }] : [] };
+  }
   return {
     name: String(payload?.title || "Prepared item"),
     type,
     img: String(data.img || "icons/svg/item-bag.svg"),
-    system: {
-      description: { value: htmlDescription(payload?.summary, data.description) },
-      level: { value: numericOr(data.level, 0) },
-      quantity: Math.max(0, numericOr(data.quantity, 1)),
-      traits: { value: slugList(data.traits), rarity: String(data.rarity || "common").toLowerCase() || "common" },
-      slug: foundry.utils.slugify(String(payload?.title || "prepared-item")),
-      source: { value: "Seeker" },
-    },
+    system,
   };
 }
 function buildPreparedActor(payload) {
@@ -277,6 +318,7 @@ function buildPreparedActor(payload) {
   const hp = Math.max(1, numericOr(data.hp, 1));
   const speed = numericOr(data.speed, 25);
   const level = numericOr(data.level, 0);
+  const publicNotes = htmlDescription(payload?.summary, data.description) + preparedDetailsHtml(payload);
   return {
     name: String(payload?.title || "Prepared creature"),
     type: "npc",
@@ -285,15 +327,21 @@ function buildPreparedActor(payload) {
       details: {
         level: { value: level },
         alliance: String(data.actor_role || "npc") === "ally" ? "party" : "opposition",
-        publicNotes: htmlDescription(payload?.summary, data.description),
+        publicNotes,
         languages: { value: slugList(data.languages) },
       },
-      traits: { value: slugList(data.traits), rarity: String(data.rarity || "common").toLowerCase() || "common" },
+      traits: { value: slugList(data.traits), rarity: String(data.rarity || "common").toLowerCase() || "common", size: { value: String(data.size || "med") } },
       attributes: {
         ac: { value: Math.max(0, numericOr(data.ac, 10)) },
         hp: { value: hp, max: hp },
         speed: { value: speed },
         perception: { value: numericOr(data.perception, 0) },
+      },
+      perception: { mod: numericOr(data.perception, 0), details: String(data.senses || "") },
+      saves: {
+        fortitude: { value: numericOr(data.fortitude, 0) },
+        reflex: { value: numericOr(data.reflex, 0) },
+        will: { value: numericOr(data.will, 0) },
       },
       abilities: {
         str: { mod: numericOr(data.str_mod, 0) }, dex: { mod: numericOr(data.dex_mod, 0) },

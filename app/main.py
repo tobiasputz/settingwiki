@@ -3623,7 +3623,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.2.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.2.1.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -3631,7 +3631,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.2.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.2.1.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 

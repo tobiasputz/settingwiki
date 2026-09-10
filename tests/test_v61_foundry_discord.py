@@ -87,7 +87,7 @@ def test_v61_public_foundry_manifest_and_install_zip(tmp_path: Path, monkeypatch
     client=TestClient(main.app)
     manifest=client.get('/foundry/seeker-bridge/module.json')
     assert manifest.status_code==200
-    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.2.0'
+    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.2.1'
     assert data['manifest'].endswith('/foundry/seeker-bridge/module.json')
     assert data['download'].endswith('/foundry/seeker-bridge/seeker-bridge.zip')
     package=client.get('/foundry/seeker-bridge/seeker-bridge.zip')
@@ -185,7 +185,7 @@ def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
 def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
     root=Path(__file__).resolve().parents[1]
     bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.2.0"' in bridge
+    assert 'const BRIDGE_VERSION = "1.2.1"' in bridge
     assert 'function normalizedEndpoint' in bridge
     assert 'u.protocol === "http:" && !local' in bridge
     assert 'processCommands(endpoint, body?.commands || [])' in bridge
@@ -221,7 +221,9 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     assert complete_foundry_commands(s,cid,cfg['foundry_bridge_token'],[{'id':pending[0]['id'],'status':'done','result':{'message':'ok'}}])['ok']
 
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
-    workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200 and 'Prep content in Seeker. Push it when the table needs it.' in workshop.text and 'foundryWorkshopForm' in workshop.text
+    workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200
+    assert 'Homebrew Forge' in workshop.text and 'foundryWorkshopForm' in workshop.text
+    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=6210' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})

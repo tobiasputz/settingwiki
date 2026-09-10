@@ -1,126 +1,242 @@
 {% extends 'base.html' %}
 {% block title %}Foundry Workshop · {{ wiki.title }}{% endblock %}
 {% block body %}
-<section class="v6-shell" data-foundry-workshop>
-  <header class="v6-hero">
+<main class="fw-shell" data-foundry-workshop>
+  <header class="fw-page-head">
     <div>
       <span class="eyebrow">GM · FOUNDRY WORKSHOP</span>
-      <h1>Prep content in Seeker. Push it when the table needs it.</h1>
-      <p>Build quick items, feats, monsters, NPCs, or freeform homebrew in Seeker, then queue them for Foundry. Player-safe sheet controls remain limited to small reversible changes; world-changing prep actions stay here in the GM workspace.</p>
+      <h1>Homebrew Forge</h1>
+      <p>Build Pathfinder 2e-ready creatures, NPCs, items and feats with a live statblock preview, then send them to Foundry when you need them.</p>
     </div>
-    <div class="v6-hero-actions">
-      <a class="primary-button" href="/gm/integrations">Bridge settings</a>
-      <a class="quiet-btn" href="/gm/session">Session console</a>
+    <div class="fw-head-actions">
+      <div class="fw-bridge-pill {{ 'online' if foundry.received_at else 'offline' }}">
+        <span></span>
+        <strong>{{ foundry.world_name or 'Foundry offline' }}</strong>
+        <small>{% if foundry.received_at %}{{ foundry_actors|length }} actors synced{% else %}queued pushes wait safely{% endif %}</small>
+      </div>
+      <a class="quiet-btn" href="/gm/integrations">Bridge settings</a>
     </div>
   </header>
 
-  <section class="v6-grid v6-grid-3">
-    <article class="v6-card">
-      <span class="eyebrow">BRIDGE STATUS</span>
-      <h2>{{ foundry.world_name or 'Waiting for Foundry' }}</h2>
-      <p>{% if foundry.received_at %}Bridge connected to {{ foundry.host or 'your table host' }} · synced <time data-epoch="{{ foundry.received_at }}"></time>{% else %}Open Foundry with the Seeker Bridge enabled on a GM client to receive queued actions.{% endif %}</p>
-    </article>
-    <article class="v6-card">
-      <span class="eyebrow">AVAILABLE ACTORS</span>
-      <h2>{{ foundry_actors|length }} synced actor{{ '' if foundry_actors|length == 1 else 's' }}</h2>
-      <p>Item and feat handouts can be pushed straight onto an actor without opening Foundry at the table.</p>
-    </article>
-    <article class="v6-card">
-      <span class="eyebrow">SAFETY MODEL</span>
-      <h2>Queue-based and auditable</h2>
-      <p>Every action is stored in Seeker, delivered to a connected Foundry GM client, and logged below. No Seeker control deletes actors or destroys world data.</p>
-    </article>
-  </section>
+  <nav class="fw-mobile-switch" aria-label="Workshop panels">
+    <button class="active" type="button" data-fw-mobile="editor">Edit</button>
+    <button type="button" data-fw-mobile="preview">Preview</button>
+    <button type="button" data-fw-mobile="library">Library</button>
+  </nav>
 
-  <section class="foundry-workshop-grid">
-    <div class="foundry-prep-list-wrap">
-      <article class="v6-card">
-        <div class="v6-card-head">
+  <section class="fw-workspace" data-fw-mobile-view="editor">
+    <aside class="fw-library-panel" data-fw-panel="library">
+      <div class="fw-panel-head">
+        <div><span class="eyebrow">MY HOMEBREW</span><h2>Library</h2></div>
+        <button class="fw-icon-button" type="button" data-fw-new title="New entry">＋</button>
+      </div>
+      <label class="fw-search"><span>⌕</span><input type="search" data-fw-search placeholder="Search homebrew…" autocomplete="off"></label>
+      <div class="fw-kind-filters" role="group" aria-label="Filter library">
+        <button class="active" type="button" data-fw-filter="all">All</button>
+        <button type="button" data-fw-filter="monster">Creatures</button>
+        <button type="button" data-fw-filter="npc">NPCs</button>
+        <button type="button" data-fw-filter="item">Items</button>
+        <button type="button" data-fw-filter="feat">Feats</button>
+      </div>
+      <div id="foundryPrepList" class="fw-library-list"></div>
+      <div class="fw-library-footer">
+        <button type="button" class="quiet-btn" data-fw-import>Import JSON</button>
+        <input type="file" accept="application/json,.json" data-fw-import-file hidden>
+      </div>
+    </aside>
+
+    <section class="fw-editor-panel" data-fw-panel="editor">
+      <form id="foundryWorkshopForm" autocomplete="off">
+        <input type="hidden" name="id">
+        <input type="hidden" name="kind" value="monster">
+
+        <header class="fw-editor-toolbar">
+          <div class="fw-editor-title">
+            <small id="fwEditingLabel">NEW CREATURE</small>
+            <strong id="fwToolbarTitle">Untitled creature</strong>
+          </div>
+          <div class="fw-editor-actions">
+            <button class="quiet-btn" type="button" data-fw-duplicate disabled>Duplicate</button>
+            <button class="quiet-btn" type="button" data-fw-copy-json>Copy JSON</button>
+            <button class="primary-button" type="submit">Save</button>
+          </div>
+        </header>
+
+        <section class="fw-type-picker" aria-label="Content type">
+          <button class="active" type="button" data-fw-kind="monster"><span>♜</span><strong>Creature</strong><small>Bestiary statblock</small></button>
+          <button type="button" data-fw-kind="npc"><span>♟</span><strong>NPC</strong><small>People & allies</small></button>
+          <button type="button" data-fw-kind="item"><span>◇</span><strong>Item</strong><small>Gear & treasure</small></button>
+          <button type="button" data-fw-kind="feat"><span>✦</span><strong>Feat</strong><small>Feats & abilities</small></button>
+          <button type="button" data-fw-kind="homebrew"><span>⌘</span><strong>Freeform</strong><small>Anything else</small></button>
+        </section>
+
+        <div class="fw-quick-start">
+          <span>Quick start</span>
           <div>
-            <span class="eyebrow">PREP LIBRARY</span>
-            <h2>Prepared Foundry content</h2>
+            <button type="button" data-fw-template="brute" data-fw-template-kind="monster">Brute</button>
+            <button type="button" data-fw-template="skirmisher" data-fw-template-kind="monster">Skirmisher</button>
+            <button type="button" data-fw-template="caster" data-fw-template-kind="monster">Spellcaster</button>
+            <button type="button" data-fw-template="social" data-fw-template-kind="npc">Social NPC</button>
+            <button type="button" data-fw-template="ally" data-fw-template-kind="npc">Combat ally</button>
+            <button type="button" data-fw-template="consumable" data-fw-template-kind="item">Consumable</button>
+            <button type="button" data-fw-template="weapon" data-fw-template-kind="item">Weapon</button>
+            <button type="button" data-fw-template="worn" data-fw-template-kind="item">Worn item</button>
+            <button type="button" data-fw-template="passive-feat" data-fw-template-kind="feat">Passive feat</button>
+            <button type="button" data-fw-template="action-feat" data-fw-template-kind="feat">Action feat</button>
+            <button type="button" data-fw-template="reaction-feat" data-fw-template-kind="feat">Reaction</button>
+            <button type="button" data-fw-template="free-action" data-fw-template-kind="homebrew">Custom action</button>
+            <button type="button" data-fw-template="free-item" data-fw-template-kind="homebrew">Custom item</button>
           </div>
-          <button class="quiet-btn" type="button" data-fw-new>＋ New entry</button>
         </div>
-        <div id="foundryPrepList" class="foundry-prep-list"></div>
-      </article>
-    </div>
 
-    <div class="foundry-workshop-side">
-      <article class="v6-card foundry-workshop-form">
-        <span class="eyebrow">CREATOR</span>
-        <h2 id="fwFormTitle">New prep entry</h2>
-        <p>Use a concise rules summary. For world actors, think “good enough to hand to future-you at the table,” not “replace every PF2e system field by hand.”</p>
-        <form id="foundryWorkshopForm">
-          <input type="hidden" name="id">
-          <div class="workshop-inline">
-            <label>Type<select name="kind"><option value="item">Item</option><option value="feat">Feat</option><option value="monster">Monster</option><option value="npc">NPC</option><option value="homebrew">Homebrew</option></select></label>
-            <label>Default push target<select name="target_type"><option value="world">World directory</option><option value="actor">Give to actor</option></select></label>
-          </div>
-          <div class="workshop-inline">
-            <label>Title<input name="title" required maxlength="180" placeholder="Ashen Relic"></label>
-            <label>Subtitle<input name="subtitle" maxlength="180" placeholder="Level 4 cursed treasure"></label>
-          </div>
-          <label>Summary<textarea name="summary" placeholder="What it does, when it matters, and what the players should understand at a glance."></textarea></label>
-          <div class="workshop-inline">
-            <label>Tags<input name="tags" maxlength="400" placeholder="consumable, fire, relic"></label>
-            <label>Image URL (optional)<input name="img" placeholder="https://..."></label>
-          </div>
-          <div class="workshop-inline">
-            <label>Item/feat mode<select name="item_type"><option value="equipment">Equipment</option><option value="consumable">Consumable</option><option value="weapon">Weapon</option><option value="armor">Armor</option><option value="treasure">Treasure</option><option value="feat">Feat</option><option value="action">Action</option><option value="lore">Lore</option></select></label>
-            <label>Level<input name="level" type="number" step="1" placeholder="0"></label>
-          </div>
-          <div class="workshop-inline">
-            <label>Quantity<input name="quantity" type="number" step="1" placeholder="1"></label>
-            <label>Price / value<input name="price" placeholder="15 gp"></label>
-          </div>
-          <div class="workshop-inline">
-            <label>Traits<input name="traits" placeholder="magical, occult"></label>
-            <label>Rarity<input name="rarity" placeholder="common"></label>
-          </div>
-          <label>Description / rules text<textarea name="description" placeholder="Full effect, activation, or encounter notes."></textarea></label>
-          <details>
-            <summary>Actor stats for NPC / monster / actor-style homebrew</summary>
-            <div class="workshop-inline">
-              <label>Actor role<select name="actor_role"><option value="npc">NPC</option><option value="hazard">Hazard-like NPC</option><option value="ally">Ally</option></select></label>
-              <label>Perception<input name="perception" type="number" step="1" placeholder="8"></label>
+        <div class="fw-form-scroll">
+          <section class="fw-form-section fw-core-section">
+            <div class="fw-section-heading"><span>01</span><div><h2>Identity</h2><p>The information players see first.</p></div></div>
+            <div class="fw-field-grid identity-grid">
+              <label class="span-2"><span>Name</span><input name="title" maxlength="180" required placeholder="Ashen Warden"></label>
+              <label><span>Level</span><input name="level" type="number" min="-1" max="30" step="1" value="1"></label>
+              <label><span>Rarity</span><select name="rarity"><option value="common">Common</option><option value="uncommon">Uncommon</option><option value="rare">Rare</option><option value="unique">Unique</option></select></label>
+              <label data-fw-show="creature"><span>Size</span><select name="size"><option value="tiny">Tiny</option><option value="sm">Small</option><option value="med" selected>Medium</option><option value="lg">Large</option><option value="huge">Huge</option><option value="grg">Gargantuan</option></select></label>
+              <label data-fw-show="creature"><span>Disposition</span><select name="actor_role"><option value="npc">Opposition / neutral</option><option value="ally">Party ally</option></select></label>
+              <label data-fw-show="item"><span>Item category</span><select name="item_type"><option value="equipment">Equipment</option><option value="consumable">Consumable</option><option value="weapon">Weapon</option><option value="armor">Armor</option><option value="shield">Shield</option><option value="treasure">Treasure</option><option value="backpack">Container</option></select></label>
+              <label data-fw-show="feat"><span>Feat category</span><select name="feat_category"><option value="general">General</option><option value="skill">Skill</option><option value="class">Class</option><option value="ancestry">Ancestry</option><option value="archetype">Archetype</option><option value="bonus">Bonus</option></select></label>
+              <label data-fw-show="homebrew"><span>Foundry document</span><select name="homebrew_document"><option value="equipment">Item / equipment</option><option value="feat">Feat</option><option value="action">Action</option><option value="npc">NPC / creature</option></select></label>
+              <label class="span-2"><span>Traits</span><input name="traits" placeholder="human, humanoid, fire"></label>
+              <label class="span-2"><span>Subtitle / source line</span><input name="subtitle" maxlength="180" placeholder="Elite guardian of the Cinder Gate"></label>
+              <label class="span-2"><span>Artwork URL <em>optional</em></span><input name="img" inputmode="url" placeholder="https://…"></label>
             </div>
-            <div class="workshop-inline">
-              <label>AC<input name="ac" type="number" step="1" placeholder="18"></label>
-              <label>HP<input name="hp" type="number" step="1" placeholder="45"></label>
-            </div>
-            <div class="workshop-inline">
-              <label>Speed<input name="speed" placeholder="25"></label>
-              <label>Languages<input name="languages" placeholder="Common, Draconic"></label>
-            </div>
-            <div class="workshop-inline">
-              <label>STR<input name="str_mod" type="number" step="1" placeholder="3"></label>
-              <label>DEX<input name="dex_mod" type="number" step="1" placeholder="2"></label>
-            </div>
-            <div class="workshop-inline">
-              <label>CON<input name="con_mod" type="number" step="1" placeholder="2"></label>
-              <label>INT<input name="int_mod" type="number" step="1" placeholder="0"></label>
-            </div>
-            <div class="workshop-inline">
-              <label>WIS<input name="wis_mod" type="number" step="1" placeholder="1"></label>
-              <label>CHA<input name="cha_mod" type="number" step="1" placeholder="-1"></label>
-            </div>
-          </details>
-          <div class="v6-actions">
-            <button class="primary-button" type="submit">Save prep entry</button>
-            <button class="quiet-btn" type="button" data-fw-reset>Reset</button>
-          </div>
-        </form>
-      </article>
+          </section>
 
-      <article class="v6-card">
-        <span class="eyebrow">ACTION LOG</span>
-        <h2>Recent bridge activity</h2>
-        <div id="foundryCommandLog" class="command-log-list"></div>
-      </article>
-    </div>
+          <section class="fw-form-section" data-fw-section="creature">
+            <div class="fw-section-heading"><span>02</span><div><h2>Statistics</h2><p>The PF2e numbers you need during play.</p></div></div>
+            <div class="fw-stat-editor">
+              <div class="fw-stat-group">
+                <h3>Awareness</h3>
+                <div class="fw-field-grid">
+                  <label><span>Perception</span><div class="fw-number-field"><b>+</b><input name="perception" type="number" step="1" placeholder="8"></div></label>
+                  <label><span>Speed</span><div class="fw-number-field"><input name="speed" type="number" min="0" step="5" placeholder="25"><b>ft</b></div></label>
+                  <label class="span-2"><span>Senses</span><input name="senses" placeholder="darkvision, scent (imprecise) 30 feet"></label>
+                  <label class="span-2"><span>Languages</span><input name="languages" placeholder="Common, Draconic"></label>
+                  <label class="span-2"><span>Skills</span><input name="skills" placeholder="Athletics +12, Intimidation +10, Stealth +8"></label>
+                </div>
+              </div>
+              <div class="fw-stat-group">
+                <h3>Ability modifiers</h3>
+                <div class="fw-ability-editor">
+                  {% for abbr, field in [('STR','str_mod'),('DEX','dex_mod'),('CON','con_mod'),('INT','int_mod'),('WIS','wis_mod'),('CHA','cha_mod')] %}
+                  <label><span>{{ abbr }}</span><input name="{{ field }}" type="number" step="1" value="0"></label>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="fw-stat-group span-full">
+                <h3>Defenses</h3>
+                <div class="fw-defense-row">
+                  <label><span>AC</span><input name="ac" type="number" min="0" step="1" placeholder="18"></label>
+                  <label><span>Fort</span><div class="fw-number-field"><b>+</b><input name="fortitude" type="number" step="1" placeholder="9"></div></label>
+                  <label><span>Ref</span><div class="fw-number-field"><b>+</b><input name="reflex" type="number" step="1" placeholder="7"></div></label>
+                  <label><span>Will</span><div class="fw-number-field"><b>+</b><input name="will" type="number" step="1" placeholder="6"></div></label>
+                  <label><span>HP</span><input name="hp" type="number" min="1" step="1" placeholder="30"></label>
+                </div>
+                <div class="fw-field-grid compact">
+                  <label><span>Immunities</span><input name="immunities" placeholder="fire, paralyzed"></label>
+                  <label><span>Weaknesses</span><input name="weaknesses" placeholder="cold 5"></label>
+                  <label class="span-2"><span>Resistances</span><input name="resistances" placeholder="physical 5 (except silver)"></label>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="fw-form-section" data-fw-section="creature">
+            <div class="fw-section-heading"><span>03</span><div><h2>Attacks</h2><p>Add the strikes that should appear directly in the statblock.</p></div><button class="quiet-btn" type="button" data-fw-add-attack>＋ Add strike</button></div>
+            <div class="fw-repeater" data-fw-attacks></div>
+          </section>
+
+          <section class="fw-form-section" data-fw-section="item">
+            <div class="fw-section-heading"><span>02</span><div><h2>Item details</h2><p>Everything needed to identify and hand out the item.</p></div></div>
+            <div class="fw-field-grid">
+              <label><span>Price / value</span><input name="price" placeholder="15 gp"></label>
+              <label><span>Bulk</span><input name="bulk" placeholder="L"></label>
+              <label><span>Usage</span><input name="usage" placeholder="held in 1 hand"></label>
+              <label><span>Hands</span><select name="hands"><option value="">—</option><option value="1">1</option><option value="2">2</option></select></label>
+              <label><span>Quantity</span><input name="quantity" type="number" min="0" step="1" value="1"></label>
+              <label><span>Category / group</span><input name="item_category" placeholder="adventuring gear"></label>
+            </div>
+          </section>
+
+          <section class="fw-form-section" data-fw-section="feat">
+            <div class="fw-section-heading"><span>02</span><div><h2>Feat details</h2><p>Requirements and action economy at a glance.</p></div></div>
+            <div class="fw-field-grid">
+              <label><span>Action cost</span><select name="action_cost"><option value="">Passive</option><option value="1">◆ One action</option><option value="2">◆◆ Two actions</option><option value="3">◆◆◆ Three actions</option><option value="reaction">↺ Reaction</option><option value="free">◇ Free action</option></select></label>
+              <label><span>Frequency</span><input name="frequency" placeholder="once per hour"></label>
+              <label class="span-2"><span>Prerequisites</span><input name="prerequisites" placeholder="expert in Athletics"></label>
+              <label class="span-2"><span>Trigger</span><input name="trigger" placeholder="A creature within reach moves away from you"></label>
+              <label class="span-2"><span>Requirements</span><input name="requirements" placeholder="You are wielding a melee weapon"></label>
+            </div>
+          </section>
+
+          <section class="fw-form-section" data-fw-section="item">
+            <div class="fw-section-heading"><span>03</span><div><h2>Activation</h2><p>Optional activation rules for active items.</p></div></div>
+            <div class="fw-field-grid">
+              <label><span>Actions</span><select name="activation_actions"><option value="">No activation</option><option value="1">◆ One action</option><option value="2">◆◆ Two actions</option><option value="3">◆◆◆ Three actions</option><option value="reaction">↺ Reaction</option><option value="free">◇ Free action</option></select></label>
+              <label><span>Frequency</span><input name="activation_frequency" placeholder="once per day"></label>
+              <label class="span-2"><span>Trigger</span><input name="activation_trigger" placeholder="You Cast a Spell"></label>
+              <label class="span-2"><span>Requirements</span><input name="activation_requirements" placeholder="The item is invested"></label>
+            </div>
+          </section>
+
+          <section class="fw-form-section" data-fw-section="homebrew">
+            <div class="fw-section-heading"><span>02</span><div><h2>Freeform fields</h2><p>Keep unusual rules structured without forcing them into the wrong template.</p></div></div>
+            <div class="fw-field-grid">
+              <label><span>Action cost</span><select name="homebrew_actions"><option value="">Passive / none</option><option value="1">◆ One action</option><option value="2">◆◆ Two actions</option><option value="3">◆◆◆ Three actions</option><option value="reaction">↺ Reaction</option><option value="free">◇ Free action</option></select></label>
+              <label><span>Frequency</span><input name="homebrew_frequency" placeholder="once per day"></label>
+              <label class="span-2"><span>Trigger / context</span><input name="homebrew_trigger" placeholder="When the moon is full…"></label>
+            </div>
+          </section>
+
+          <section class="fw-form-section">
+            <div class="fw-section-heading"><span data-fw-section-number>04</span><div><h2>Rules text & abilities</h2><p>Write the part you would actually read at the table.</p></div><button class="quiet-btn" type="button" data-fw-add-ability>＋ Add ability</button></div>
+            <div class="fw-field-grid">
+              <label class="span-2"><span>Short summary</span><textarea name="summary" rows="3" placeholder="One-sentence concept or GM-facing reminder."></textarea></label>
+              <label class="span-2"><span>Main rules text</span><textarea name="description" rows="7" placeholder="Write the rules text in normal Pathfinder language. This appears in the live preview and is carried into Foundry."></textarea></label>
+            </div>
+            <div class="fw-repeater fw-ability-repeater" data-fw-abilities></div>
+          </section>
+
+          <section class="fw-form-section" data-fw-section="creature">
+            <div class="fw-section-heading"><span>05</span><div><h2>Spellcasting & notes</h2><p>Fast text fields for content that does not need a dedicated builder yet.</p></div></div>
+            <div class="fw-field-grid">
+              <label class="span-2"><span>Spellcasting</span><textarea name="spellcasting" rows="4" placeholder="Arcane Prepared Spells DC 24, attack +16; 3rd fireball, haste; 2nd invisibility…"></textarea></label>
+              <label class="span-2"><span>GM notes <em>Seeker only</em></span><textarea name="gm_notes" rows="3" placeholder="Tactics, roleplay cues, encounter notes…"></textarea></label>
+            </div>
+          </section>
+        </div>
+
+        <footer class="fw-push-bar">
+          <div class="fw-save-state" data-fw-save-state><span></span><strong>Not saved yet</strong><small>Draft is also kept locally in this browser.</small></div>
+          <div class="fw-push-actions">
+            <button class="quiet-btn" type="button" data-fw-push-world>Save & push to world</button>
+            <label class="fw-actor-target"><span>Give to</span><select data-fw-actor-target><option value="">Choose actor…</option>{% for actor in foundry_actors %}<option value="{{ actor.actor_id }}">{{ actor.name }}</option>{% endfor %}</select></label>
+            <button class="primary-button" type="button" data-fw-push-actor>Save & give</button>
+          </div>
+        </footer>
+      </form>
+    </section>
+
+    <aside class="fw-preview-panel" data-fw-panel="preview">
+      <div class="fw-preview-head">
+        <div><span class="eyebrow">LIVE PREVIEW</span><h2>Statblock</h2></div>
+        <button class="fw-icon-button" type="button" data-fw-preview-refresh title="Refresh preview">↻</button>
+      </div>
+      <div class="fw-preview-scroll">
+        <article id="foundryLivePreview" class="fw-statblock"></article>
+        <details class="fw-command-drawer">
+          <summary>Recent Foundry activity <span>{{ command_log|length }}</span></summary>
+          <div id="foundryCommandLog" class="command-log-list"></div>
+        </details>
+      </div>
+    </aside>
   </section>
-</section>
+</main>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block scripts %}<script src="/static/foundry-workshop.js?v=6200"></script>{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=6210"><script src="/static/foundry-workshop.js?v=6210"></script>{% endblock %}
