@@ -603,6 +603,31 @@ def save_integration_config(settings: Settings, campaign_id: int, payload: dict)
     return integration_config(settings, cid, include_secret=True)
 
 
+
+def rotate_integration_token(settings: Settings, campaign_id: int, kind: str) -> dict:
+    """Rotate one private integration secret without rewriting unrelated settings.
+
+    This deliberately uses a single UPDATE instead of the broader integration
+    upsert. It is safer for long-lived/legacy Seeker databases and prevents a
+    bridge-token rotation from failing because an unrelated integration column
+    has an older schema or value.
+    """
+    cid=int(campaign_id);key=str(kind or '').strip().lower()
+    columns={'foundry':'foundry_bridge_token','calendar':'calendar_token','display':'display_token'}
+    column=columns.get(key)
+    if not column: raise ValueError('Unknown integration token type.')
+    # Ensure additive migrations have run even after an imported/older database
+    # was swapped into a running deployment.
+    init_v6_db(settings)
+    integration_config(settings,cid,include_secret=True)
+    token=secrets.token_urlsafe(24);now=time.time()
+    with connect(settings) as conn:
+        cur=conn.execute(f'UPDATE campaign_integrations SET {column}=?,updated_at=? WHERE campaign_id=?',(token,now,cid))
+        if not cur.rowcount: raise ValueError('Campaign integration settings were not found.')
+    data=integration_config(settings,cid,include_secret=True)
+    data['rotated']=key
+    return data
+
 def _normalize_discord_mention(value: Any) -> str:
     raw=str(value or '').strip()
     if not raw:
@@ -659,7 +684,7 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     query=urllib.parse.parse_qsl(parts.query,keep_blank_values=True)
     query=[(k,v) for k,v in query if k.lower()!='wait']+[('wait','true')]
     webhook_url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,parts.path,urllib.parse.urlencode(query),parts.fragment))
-    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.4.1'}, method='POST')
+    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.4.2'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             status=int(resp.status)

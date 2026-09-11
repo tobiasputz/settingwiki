@@ -4,12 +4,21 @@
   const api=async(url,opt={})=>{const r=await fetch(url,{cache:'no-store',...opt});const body=await r.json().catch(()=>({}));if(!r.ok)throw Error(body.detail||body.message||`Request failed (${r.status})`);return body};
   const send=(url,method,body)=>api(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let section='all',query='';
+  let section='all',query='',featCategory='all';
   function applyFilters(){
-    $$('[data-homebrew-section]').forEach(sec=>{const sectionMatch=section==='all'||sec.dataset.homebrewSection===section;let any=false;$$('[data-homebrew-entry]',sec).forEach(card=>{const hit=!query||String(card.dataset.search||'').includes(query);card.hidden=!hit;if(hit)any=true});sec.hidden=!sectionMatch||(query&&!any)});
+    const featFilter=$('[data-homebrew-feat-filter]');if(featFilter)featFilter.hidden=section!=='feats';
+    $$('[data-homebrew-section]').forEach(sec=>{
+      const indexOnly=sec.dataset.homebrewIndex==='true';
+      const sectionMatch=section==='all'?!indexOnly:sec.dataset.homebrewSection===section;let any=false;
+      $$('[data-homebrew-entry]',sec).forEach(card=>{const searchHit=!query||String(card.dataset.search||'').includes(query),cat=card.dataset.featCategoryCard||'',catHit=section!=='feats'||featCategory==='all'||cat===featCategory,hit=searchHit&&catHit;card.hidden=!hit;if(hit)any=true});
+      $$('[data-feat-category-group]',sec).forEach(group=>{const categoryHit=featCategory==='all'||group.dataset.featCategoryGroup===featCategory;const visible=[...group.querySelectorAll('[data-homebrew-entry]')].some(x=>!x.hidden);group.hidden=!categoryHit||!visible});
+      sec.hidden=!sectionMatch||((query||section==='feats')&&!any);
+    });
   }
   $('[data-homebrew-search]')?.addEventListener('input',e=>{query=e.currentTarget.value.trim().toLowerCase();applyFilters()});
   $$('[data-homebrew-filter] button').forEach(b=>b.addEventListener('click',()=>{section=b.dataset.section;$$('[data-homebrew-filter] button').forEach(x=>x.classList.toggle('active',x===b));applyFilters()}));
+  $$('[data-homebrew-feat-filter] button').forEach(b=>b.addEventListener('click',()=>{featCategory=b.dataset.featCategory||'all';$$('[data-homebrew-feat-filter] button').forEach(x=>x.classList.toggle('active',x===b));applyFilters()}));
+  applyFilters();
 
   async function sourceFoundry(button){button.disabled=true;try{const out=await send(`/api/homebrew/source/${encodeURIComponent(button.dataset.homebrewSourceFoundry)}/foundry`,'POST',{});const label=out.section==='ancestry'?'Ancestry bundle':'Homebrew bundle';toast(`${label} queued · ${out.rules||0} detected rule${out.rules===1?'':'s'} · command #${out.command?.id||'—'}`)}catch(e){toast(e.message,true)}finally{button.disabled=false}}
   $$('[data-homebrew-source-foundry]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();sourceFoundry(b)}));

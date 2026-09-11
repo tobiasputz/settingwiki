@@ -54,7 +54,7 @@
 @media(max-width:760px){.bestiary-hero-actions{width:100%}.bestiary-hero-actions>*{flex:1;justify-content:center}.bestiary-editor{width:100vw;height:100dvh;max-height:none;margin:0}.bestiary-editor-card{height:100dvh;max-height:none;border-radius:0;border-left:0;border-right:0}.bestiary-editor-scroll{padding:14px 12px}.bestiary-edit-grid.two,.bestiary-edit-grid.three,.bestiary-edit-grid.four,.bestiary-edit-grid.five,.bestiary-edit-grid.six{grid-template-columns:repeat(2,minmax(0,1fr))}.bestiary-editor-card>footer{grid-template-columns:1fr 1fr}.bestiary-editor-card>footer>span{display:none}.bestiary-card-actions>*{flex:1;text-align:center;justify-content:center}}
 
 
-/* 7.4.1 complete ancestry + archetype authoring */
+/* 7.4.2 complete ancestry + archetype authoring */
 .fw-bundle-section{background:linear-gradient(180deg,rgba(183,150,97,.035),transparent 180px)}
 .fw-bundle-help{margin:14px 0 18px;padding:11px 13px;border-left:2px solid #866e47;background:#171611;color:#8f897d;font:12px/1.55 var(--serif)}
 .fw-nested-heading{margin-top:24px;padding-top:20px;border-top:1px solid #2f302b}

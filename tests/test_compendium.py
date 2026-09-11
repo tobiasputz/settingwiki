@@ -163,9 +163,12 @@ Choose a Jotunari heritage appropriate to your lineage.
     homebrew=gm.get('/homebrew')
     assert homebrew.status_code==200
     assert 'Jotunari' in homebrew.text
-    # The landing page is intentionally one ancestry card, not a second list of
-    # all 1st/5th/etc. subsections or feat cards.
-    assert 'Stone Memory' not in homebrew.text and "Giant&#39;s Step" not in homebrew.text
+    # The default library still renders one ancestry card. Feats may exist in the
+    # dedicated PF2e Feat index, but that index is hidden until the Feats filter
+    # is explicitly selected and does not duplicate them as ancestry cards.
+    assert homebrew.text.count('data-homebrew-entry="source-jotunari"') == 1
+    assert 'data-homebrew-section="feats" data-homebrew-index="true" hidden' in homebrew.text
+    assert 'Stone Memory' in homebrew.text and "Giant&#39;s Step" in homebrew.text
     detail=gm.get(f"/homebrew/source/{jot['slug']}")
     assert detail.status_code==200
     assert 'The Jotunari are stone-blooded wanderers.' in detail.text
@@ -473,3 +476,52 @@ Remember the voice of the mountain.
     action=next(r for r in payload['rules'] if r['title']=='Stone Roar')
     assert action['frequency']=='once per day' and action['requirements']=='You are standing on stone.'
     assert 'Frequency' not in action['description_html'] and 'Requirements' not in action['description_html']
+
+
+def test_homebrew_library_has_heritage_and_pf2e_feat_indexes(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed(s);monkeypatch.setattr(main,'settings',s);gm=gm_client(main,s)
+    ancestry=gm.post('/api/v61/foundry/content',json={
+        'kind':'homebrew','title':'Cloudkin','summary':'People of the high valleys.',
+        'payload':{
+            'homebrew_document':'ancestry','homebrew_publish':True,'library_section':'ancestry','library_group':'Cloudkin',
+            'description':'Cloudkin live above the storms.','ancestry_hp':'8','ancestry_size':'med','ancestry_speed':'25',
+            'heritages':[{'title':'Skyborn Cloudkin','traits':'cloudkin, air','description':'Thin air feels like home.'}],
+            'bundle_feats':[{'title':'Ride the Gale','level':1,'traits':'cloudkin, ancestry','description':'Move with the wind.'}],
+        }
+    })
+    assert ancestry.status_code==200,ancestry.text
+    skill=gm.post('/api/v61/foundry/content',json={
+        'kind':'feat','title':'Impossible Appraisal','summary':'Read value at a glance.',
+        'payload':{'homebrew_publish':True,'library_section':'general','library_group':'General Feats','feat_category':'skill','level':2,'traits':'skill, general','description':'Appraise an object instantly.'}
+    })
+    assert skill.status_code==200,skill.text
+    bonus=gm.post('/api/v61/foundry/content',json={
+        'kind':'feat','title':'Unsorted Gift','summary':'A deliberately uncategorized boon.',
+        'payload':{'homebrew_publish':True,'library_section':'general','library_group':'Miscellaneous','feat_category':'bonus','level':0,'traits':'fortune','description':'Gain a strange boon.'}
+    })
+    assert bonus.status_code==200,bonus.text
+
+    page=gm.get('/homebrew');assert page.status_code==200
+    html=page.text
+    assert 'data-section="heritages"' in html and 'data-section="feats"' in html
+    assert 'data-homebrew-section="heritages" data-homebrew-index="true" hidden' in html
+    assert 'Skyborn Cloudkin' in html and 'Cloudkin' in html
+    assert 'data-feat-category="general"' in html and 'data-feat-category="skill"' in html and 'data-feat-category="other"' in html
+    assert 'Impossible Appraisal' in html and 'data-feat-category-card="skill"' in html
+    # Existing PF2e/Foundry "bonus" feats are intentionally collected under
+    # the human-facing Other filter instead of disappearing from the library.
+    assert 'Unsorted Gift' in html and 'data-feat-category-card="other"' in html
+
+
+def test_foundry_token_rotation_endpoint_is_atomic_and_does_not_500(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed(s);monkeypatch.setattr(main,'settings',s);gm=gm_client(main,s);cid=default_campaign_id(s)
+    before=integration_config(s,cid,include_secret=True)
+    rotated=gm.post('/api/v6/integrations/rotate/foundry',json={})
+    assert rotated.status_code==200,rotated.text
+    after=rotated.json()
+    assert after['rotated']=='foundry'
+    assert after['foundry_bridge_token']!=before['foundry_bridge_token']
+    assert after['calendar_token']==before['calendar_token']
+    assert after['display_token']==before['display_token']

@@ -7,9 +7,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Table App · {{ wiki.title }}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=7401">
-  <link rel="stylesheet" href="/static/v7.css?v=7401">
-  <link rel="stylesheet" href="/static/refinement.css?v=7401">
+  <link rel="stylesheet" href="/static/wiki.css?v=7402">
+  <link rel="stylesheet" href="/static/v7.css?v=7402">
+  <link rel="stylesheet" href="/static/refinement.css?v=7402">
 </head>
 {% set fs = foundry_actor.sheet if foundry_actor else {} %}{% set vitals = fs.vitals or {} %}{% set ident = fs.identity or {} %}
 <body class="v7-player-body" data-v7-player-app data-character-id="{{ character.id if character else '' }}" data-foundry-received-at="{{ foundry_actor.received_at if foundry_actor else 0 }}">
@@ -33,7 +33,7 @@
         <article data-resource-card="hero_points"><small>Hero</small><strong><b data-resource-value="hero_points" data-current="{{ vitals.hero_points.value if vitals.hero_points else 0 }}" data-max="{{ vitals.hero_points.max if vitals.hero_points else 3 }}">{{ vitals.hero_points.value if vitals.hero_points else '—' }}</b><span>/{{ vitals.hero_points.max if vitals.hero_points else '—' }}</span></strong><i class="resource-sync-mark" data-resource-sync="hero_points"></i></article>
         <article data-resource-card="focus"><small>Focus</small><strong><b data-resource-value="focus" data-current="{{ vitals.focus.value if vitals.focus and vitals.focus.value is not none else 0 }}" data-max="{{ vitals.focus.max if vitals.focus and vitals.focus.max is not none else 0 }}">{{ vitals.focus.value if vitals.focus and vitals.focus.value is not none else '—' }}</b><span>/{{ vitals.focus.max if vitals.focus and vitals.focus.max is not none else '—' }}</span></strong><i class="resource-sync-mark" data-resource-sync="focus"></i></article>
       </div>
-      {% if v7_permissions.push_foundry_character %}<section class="v7-phone-controls"><header><div><span class="eyebrow">QUICK ADJUST</span><h2>Table controls</h2></div><small>Safe queued writes</small></header><div class="v7-phone-control-grid"><article><span>HP</span><div><button data-player-resource="hp" data-delta="-5">−5</button><button data-player-resource="hp" data-delta="-1">−1</button><button data-player-resource="hp" data-delta="1">+1</button><button data-player-resource="hp" data-delta="5">+5</button></div></article><article><span>Hero Points</span><div><button data-player-resource="hero_points" data-delta="-1">−1</button><button data-player-resource="hero_points" data-delta="1">+1</button></div></article><article><span>Focus</span><div><button data-player-resource="focus" data-delta="-1">−1</button><button data-player-resource="focus" data-delta="1">+1</button></div></article></div></section>{% endif %}
+      {% if v7_permissions.push_foundry_character %}<section class="v7-phone-controls"><header><div><span class="eyebrow">QUICK ADJUST</span><h2>Table controls</h2></div><small>Live with the character sheet</small></header><div class="v7-phone-control-grid"><article class="v7-phone-hp-control"><span>HP</span><div>{% for delta in [-50,-25,-5,-1,1,5,25,50] %}<button data-player-resource="hp" data-delta="{{ delta }}">{{ '%+d'|format(delta) }}</button>{% endfor %}</div><form data-player-set-resource="hp"><input type="number" min="0" max="999999" step="1" value="{{ vitals.hp.value or 0 }}" aria-label="Set HP directly"><button type="submit">Set</button></form></article><article><span>Hero Points</span><div><button data-player-resource="hero_points" data-delta="-1">−1</button><button data-player-resource="hero_points" data-delta="1">+1</button></div></article><article><span>Focus</span><div><button data-player-resource="focus" data-delta="-1">−1</button><button data-player-resource="focus" data-delta="1">+1</button></div></article></div></section>{% endif %}
 
       <section class="v7-phone-sheet-section"><header><span class="eyebrow">OFFENSE</span><h2>Strikes</h2></header><div class="v7-phone-action-list">{% for a in fs.strikes or [] %}<article>{% if a.img %}<img src="{{ a.img }}" alt="">{% endif %}<div><strong>{{ a.name }}</strong><small>{% if a.mod is not none %}{% if a.mod >= 0 %}+{% endif %}{{ a.mod }} to hit{% endif %}{% if a.damage %} · {{ a.damage }}{% endif %}</small>{% if a.traits %}<p>{{ a.traits|join(' · ') }}</p>{% endif %}</div></article>{% else %}<p class="v7-muted">No strikes synced.</p>{% endfor %}</div></section>
       <section class="v7-phone-sheet-section"><header><span class="eyebrow">ACTIONS</span><h2>Actions & feats</h2></header><div class="v7-phone-action-list">{% for a in (fs.actions or []) + (fs.feats or []) %}<details><summary>{% if a.img %}<img src="{{ a.img }}" alt="">{% endif %}<div><strong>{{ a.name }}</strong><small>{{ a.type|title }}{% if a.action_type %} · {{ a.action_type }}{% endif %}</small></div></summary>{% if a.description %}<p>{{ a.description }}</p>{% endif %}</details>{% else %}<p class="v7-muted">No actions or feats synced.</p>{% endfor %}</div></section>
@@ -73,7 +73,7 @@
     <button data-player-tab="map"><span>⌖</span><small>Map</small></button>
     <button data-player-tab="party"><span>⌘</span><small>Party</small></button>
   </nav>
-  <script src="/static/wiki.js?v=7401"></script>
-  <script src="/static/foundry-live.js?v=7401"></script>
-  <script src="/static/v7-player.js?v=7401"></script>
+  <script src="/static/wiki.js?v=7402"></script>
+  <script src="/static/foundry-live.js?v=7402"></script>
+  <script src="/static/v7-player.js?v=7402"></script>
 </body></html>

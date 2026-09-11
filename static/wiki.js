@@ -130,8 +130,10 @@
   if(accessKey&&storedAccessKey&&accessKey!==storedAccessKey){localStorage.setItem('loreforge.offline.enabled','0');if('serviceWorker' in navigator)navigator.serviceWorker.ready.then(r=>r.active?.postMessage('CLEAR_PRIVATE')).catch(()=>{})}
   if(accessKey)localStorage.setItem('loreforge.playerAccessKey',accessKey);
   const moreBtn=document.querySelector('[data-mobile-more]'),moreSheet=document.getElementById('mobileMoreSheet');
-  moreBtn?.addEventListener('click',()=>{const open=!moreSheet.classList.contains('open');moreSheet.classList.toggle('open',open);moreSheet.setAttribute('aria-hidden',open?'false':'true')});
-  document.addEventListener('click',e=>{if(moreSheet?.classList.contains('open')&&!moreSheet.contains(e.target)&&!moreBtn?.contains(e.target)){moreSheet.classList.remove('open');moreSheet.setAttribute('aria-hidden','true')}});
+  const setMoreSheet=open=>{if(!moreSheet)return;moreSheet.classList.toggle('open',!!open);moreSheet.setAttribute('aria-hidden',open?'false':'true');if(open)moreSheet.scrollTop=0};
+  moreBtn?.addEventListener('click',()=>setMoreSheet(!moreSheet?.classList.contains('open')));
+  document.querySelector('[data-mobile-more-close]')?.addEventListener('click',()=>setMoreSheet(false));
+  document.addEventListener('click',e=>{if(moreSheet?.classList.contains('open')&&!moreSheet.contains(e.target)&&!moreBtn?.contains(e.target))setMoreSheet(false)});
   const installBanner=document.getElementById('installBanner'),installBtn=document.getElementById('installAppBtn'),installHint=document.getElementById('installHint');let installPrompt=null;
   const dismissed=localStorage.getItem('loreforge.install.dismissed')==='1',standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
   const isiOS=/iphone|ipad|ipod/i.test(navigator.userAgent);

@@ -88,7 +88,7 @@ from .v51 import (
     list_random_tables, save_random_table, delete_random_table, roll_random_table, forgotten_items, save_closeout, BUILTIN_TEMPLATES,
 )
 from .v6 import (
-    init_v6_db, integration_config, save_integration_config, discord_post, discord_session_confirmation,
+    init_v6_db, integration_config, save_integration_config, rotate_integration_token, discord_post, discord_session_confirmation,
     foundry_accept, foundry_state, foundry_actors, foundry_link, foundry_link_for_character, foundry_manifest, build_foundry_module_zip,
     list_foundry_prepared_content, save_foundry_prepared_content, delete_foundry_prepared_content,
     queue_foundry_command, claim_foundry_commands, complete_foundry_commands, recent_foundry_commands,
@@ -351,7 +351,7 @@ def ensure_built() -> dict:
             pass
         return wiki
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 7401}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 7402}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -675,7 +675,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 7401
+                    needs_build=int(existing.get("renderer_version") or 0) < 7402
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -3845,7 +3845,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.4.1 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.4.2 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -4087,6 +4087,89 @@ def _homebrew_source_sections(wiki:dict) -> list[dict]:
     return out
 
 
+def _homebrew_feat_category(raw_category:str='', traits:list|tuple|set|str=(), section:str='') -> str:
+    raw=str(raw_category or '').strip().lower()
+    if isinstance(traits,str): trait_set={x.strip().lower() for x in traits.split(',') if x.strip()}
+    else: trait_set={str(x or '').strip().lower() for x in (traits or []) if str(x or '').strip()}
+    section=str(section or '').strip().lower()
+    if section in {'ancestry','archetype','class'}: return section
+    if raw in {'ancestry','archetype','class','general','skill'}: return raw
+    if 'ancestry' in trait_set:return 'ancestry'
+    if 'archetype' in trait_set:return 'archetype'
+    if 'class' in trait_set:return 'class'
+    if 'skill' in trait_set:return 'skill'
+    if 'general' in trait_set:return 'general'
+    return 'other'
+
+
+def _homebrew_library_indexes(source_sections:list[dict], rows:list[dict], *, include_drafts:bool=False) -> tuple[list[dict],list[dict]]:
+    """Build secondary Heritage and Feat indexes without creating duplicate records.
+
+    These are navigation views over the existing source/Forge objects. A heritage or
+    feat still belongs to its ancestry/archetype/source; the index only makes PF2e-style
+    browsing possible from the Homebrew library.
+    """
+    heritages=[];feats=[]
+    def anchor(value:str)->str:
+        slug=re.sub(r'[^a-z0-9]+','-',str(value or '').casefold()).strip('-') or 'entry'
+        return slug[:100]
+    def add_feat(rule:dict, *, parent:str, href:str, section:str='', category:str=''):
+        title=str(rule.get('title') or rule.get('name') or '').strip()
+        if not title:return
+        traits=rule.get('traits') or []
+        cat=_homebrew_feat_category(category or str(rule.get('feat_category') or ''),traits,section)
+        try:level=int(rule.get('level') or 0)
+        except (TypeError,ValueError):level=0
+        feats.append({'title':title,'parent':parent,'href':href,'category':cat,
+                      'category_label':{'general':'General','skill':'Skill','class':'Class','ancestry':'Ancestry','archetype':'Archetype','other':'Other'}[cat],
+                      'level':level,'traits':traits if isinstance(traits,list) else [x.strip() for x in str(traits).split(',') if x.strip()],
+                      'description':str(rule.get('description') or rule.get('plain_text') or ''),'action_cost':str(rule.get('action_cost') or '')})
+    for sec in source_sections:
+        section=str(sec.get('key') or '')
+        for group in sec.get('groups',[]):
+            parent=str(group.get('name') or 'Homebrew');href=f"/homebrew/source/{group.get('owner_slug')}"
+            if section=='ancestry':
+                for h in group.get('heritages') or []:
+                    if not isinstance(h,dict):continue
+                    title=str(h.get('title') or h.get('name') or '').strip()
+                    if not title:continue
+                    traits=h.get('traits') or ''
+                    heritages.append({'title':title,'parent':parent,'href':href,'traits':traits,
+                                      'description':str(h.get('description') or ''),'source':'latex'})
+            for rule in group.get('feat_rules') or []:
+                add_feat(rule,parent=parent,href=href,section=section)
+    for row in rows:
+        if str(row.get('kind') or '').lower() not in NON_MONSTER_KINDS:continue
+        meta=classify_homebrew(row)
+        if not include_drafts and not meta.get('published'):continue
+        p=dict(row.get('payload') or {});doc=str(p.get('homebrew_document') or '').strip().lower();parent=str(row.get('title') or meta.get('group') or 'Homebrew')
+        href=f"/homebrew/entry/{row.get('id')}" if doc in {'ancestry','archetype'} else f"/homebrew#homebrew-entry-{row.get('id')}"
+        if doc=='ancestry':
+            for h in p.get('heritages') or []:
+                if not isinstance(h,dict):continue
+                title=str(h.get('title') or h.get('name') or '').strip()
+                if not title:continue
+                heritages.append({'title':title,'parent':parent,'href':href,'traits':str(h.get('traits') or ''),
+                                  'description':str(h.get('description') or ''),'source':'forge'})
+            for rule in p.get('bundle_feats') or []:
+                if isinstance(rule,dict):add_feat(rule,parent=parent,href=href,section='ancestry')
+        elif doc=='archetype':
+            dedication_title=str(p.get('dedication_title') or f'{parent} Dedication').strip()
+            if dedication_title:
+                add_feat({'title':dedication_title,'level':p.get('dedication_level') or 2,'traits':p.get('dedication_traits') or 'archetype, dedication',
+                          'description':p.get('dedication_description') or '','action_cost':p.get('dedication_action_cost') or ''},parent=parent,href=href,section='archetype')
+            for rule in p.get('bundle_feats') or []:
+                if isinstance(rule,dict):add_feat(rule,parent=parent,href=href,section='archetype')
+        elif str(meta.get('effective_kind') or '')=='feat':
+            rule={'title':row.get('title'),'level':p.get('level'),'traits':p.get('traits') or row.get('tags') or '',
+                  'description':p.get('description') or row.get('summary') or '','action_cost':p.get('action_cost') or '', 'feat_category':p.get('feat_category') or ''}
+            add_feat(rule,parent=str(meta.get('group') or 'Ungrouped'),href=href,section='',category=str(p.get('feat_category') or ''))
+    heritages.sort(key=lambda x:(x['parent'].casefold(),x['title'].casefold()))
+    order={'ancestry':0,'archetype':1,'class':2,'general':3,'skill':4,'other':5}
+    feats.sort(key=lambda x:(order.get(x['category'],9),x['parent'].casefold(),x['level'],x['title'].casefold()))
+    return heritages,feats
+
+
 def _source_rule_index(source_sections:list[dict]) -> set[tuple[str,str,str]]:
     found=set()
     for section in source_sections:
@@ -4138,9 +4221,11 @@ def homebrew_library_page(request:Request):
     cid=_active_campaign_id(request);gm=is_gm(request);wiki=_visible_wiki(request)
     source_sections=_homebrew_source_sections(wiki)
     rows=_dedupe_exported_homebrew_rows(list_foundry_prepared_content(settings,cid),source_sections)
+    heritage_index,feat_index=_homebrew_library_indexes(source_sections,rows,include_drafts=gm)
     return templates.TemplateResponse('homebrew.html',{
         'request':request,'wiki':wiki,'maps':list_maps(settings,public=not gm),'gm_view':gm,
         'homebrew_sections':group_homebrew(rows,include_drafts=gm),'source_sections':source_sections,
+        'heritage_index':heritage_index,'feat_index':feat_index,
         'foundry_actors':foundry_actors(settings,cid) if gm else [],
         'project_tex_files':[f['path'] for f in list_project_files(settings) if f.get('suffix')=='.tex'] if gm else [],
     })
@@ -4408,6 +4493,13 @@ def v6_integrations_get(request: Request):
 @app.put('/api/v6/integrations')
 def v6_integrations_save(request: Request,payload:dict=Body(...)):
     require_gm(request);return save_integration_config(settings,_active_campaign_id(request),payload)
+
+
+@app.post('/api/v6/integrations/rotate/{kind}')
+def v6_integrations_rotate(request: Request,kind:str):
+    require_gm(request)
+    try:return rotate_integration_token(settings,_active_campaign_id(request),kind)
+    except ValueError as exc:raise HTTPException(400,str(exc))
 
 
 @app.post('/api/v6/discord/test')

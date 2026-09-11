@@ -1,3 +1,12 @@
+## 7.4.2 — Mobile, Foundry live sync & Homebrew indexes
+
+- Reworked the phone “More” menu into a compact grouped sheet with the Table App pinned at the top and collapsible Lore/GM groups; fixed the sheet height so its first entries can always be reached and scrolled to.
+- The Table App now refreshes linked Foundry actor state while visible and listens for same-browser character-sheet updates, so HP/hero/focus changes made in Character Sheets appear at the table without a reload. HP quick controls also support ±25/±50 and direct set.
+- Added an atomic integration-token rotation endpoint. Foundry/calendar/display secrets rotate independently without rewriting unrelated integration settings, avoiding the legacy-database 500 seen from the previous broad upsert path.
+- Added a dedicated Homebrew **Heritages** index grouped by ancestry and a PF2e-style **Feats** index with General, Skill, Class, Ancestry, Archetype and Other filters. These are navigation indexes over the existing objects, not duplicate Homebrew records.
+- Added an explicit Other feat category to Forge/library editing. Existing ancestry/archetype Heritage editors remain attached to their complete parent object.
+- Renderer/static/PWA generation is **7402**. Foundry Bridge remains **1.10.1** because this release does not require a module-side protocol change.
+
 ## 7.4.1 — Source parser refinement
 
 - Classified source bundles now take their canonical Homebrew name from the source file's own `\chapter{...}` heading, even when that chapter is only a structural container and the first rendered Codex page is a section.

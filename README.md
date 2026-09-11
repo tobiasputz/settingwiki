@@ -1,4 +1,4 @@
-# Seeker 7.4.1 — Source parser refinement
+# Seeker 7.4.2 — Mobile, Foundry live sync & Homebrew indexes
 
 Seeker's Homebrew Forge can now author a **complete Pathfinder 2e ancestry or archetype as one editable object**. An ancestry includes its player-facing lore, HP/size/speed/reach/vision, languages, traits, ability boosts/flaws, heritages, and an arbitrary ancestry-feat progression. An archetype includes its overview/access rules, a structured dedication feat, and its complete feat progression. Every child feat keeps its action cost, traits, prerequisites, frequency, trigger, requirements, Special text, and rules text as separate PF2e fields. Work can remain unpublished as a draft at any stage.
 
@@ -8,7 +8,7 @@ The same object can be sent to Foundry and LaTeX. Foundry Bridge **1.10.1** crea
 
 Source-authored Homebrew remains first-class: the three-dot menu beside any `.tex` file can classify the entire source as an ancestry, archetype, class, general rules source, actions source, item source, or other Homebrew without moving or rewriting it. Native `\feat` / `\action` commands are still parsed into structured PF2e fields and the source remains exactly where it already participates in PDF compilation.
 
-This release also retains the 7.3 line's handout-template browser improvements and Foundry resource-write fixes. Static/PWA generation is **7401**.
+This release also retains the 7.3 line's handout-template browser improvements and Foundry resource-write fixes. Static/PWA generation is **7402**.
 
 ## Seeker 7.0.4 — Codex & Relay
 

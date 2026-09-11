@@ -13,10 +13,10 @@
   <link rel="icon" href="/static/seeker-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Seeker' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=7401">
-  <link rel="stylesheet" href="/static/tour.css?v=7401">
+  <link rel="stylesheet" href="/static/wiki.css?v=7402">
+  <link rel="stylesheet" href="/static/tour.css?v=7402">
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/refinement.css?v=7401">
+  <link rel="stylesheet" href="/static/refinement.css?v=7402">
 </head>
 {% set campaign_ctx = campaign_context(request) %}
 <body data-campaign-id="{{ campaign_ctx.active_campaign_id }}" data-admin-view="{{ 'true' if request.session.get('admin') or request.session.get('co_gm') else 'false' }}" data-player-access-key="{{ wiki.player_access_key if wiki else '' }}">
@@ -76,8 +76,28 @@
   </nav>
   <div class="mobile-more-sheet" id="mobileMoreSheet" aria-hidden="true">
     <div class="mobile-sheet-handle"></div>
-    {% if request.session.get('admin') or request.session.get('co_gm') or (wiki and wiki.player_label) %}<a href="/app">✦ Table App</a>{% endif %}<a href="/tables">◎ All Tables</a><a href="/characters">♟ Characters</a><a href="/timeline">⌛ Chronicle of Ages</a><a href="/mysteries">◇ Mysteries</a><a href="/network">⌘ Lore Web</a><a href="/structures">♜ Families & Orders</a><a href="/handouts">✉ Letters & Relics</a><a href="/bestiary">♜ Monster Codex</a><a href="/homebrew">✦ Homebrew</a><a href="/updates">✦ Newly Revealed</a><a href="/calendar">☾ Calendar</a>{% if request.session.get('admin') or request.session.get('co_gm') or (wiki and wiki.player_label) %}<a href="/schedule">◷ Session Planner</a>{% endif %}<a href="/recap">↶ Previously on…</a>{% if wiki and wiki.player_label and not request.session.get('admin') and not request.session.get('co_gm') %}<a href="/investigation">⌘ Investigation Board</a>{% endif %}<a href="/#atlas">⌖ Atlas</a><button type="button" class="mobile-sheet-action" data-start-tour>❔ Quick tour</button><button type="button" class="mobile-sheet-action" data-offline-toggle>⇩ Offline cache: off</button>
-    {% if request.session.get('admin') or request.session.get('co_gm') %}<hr><a href="/gm/living-table">✦ Living Table</a><a href="/gm/prep">✎ Session Prep</a><a href="/gm/session">⚙ Session Console</a><a href="/gm/continuity">⌘ Continuity Center</a><a href="/gm/media">▣ Media Board</a><a href="/gm/integrations">∞ Integrations</a><a href="/gm/foundry-workshop">⬡ Foundry Workshop</a><a href="/display" target="_blank">▰ Table Display</a>{% if request.session.get('admin') %}<a href="/admin">✎ Seeker Studio</a>{% endif %}<a href="/admin/campaign">✦ Worldcraft</a><a href="/admin/living">◔ World State</a>{% elif wiki and wiki.player_label %}<hr><button type="button" class="mobile-sheet-action danger" data-player-logout>↪ Sign out of {{ wiki.player_label }}</button>{% endif %}
+    <div class="mobile-sheet-title"><strong>More in Seeker</strong><button type="button" data-mobile-more-close aria-label="Close menu">×</button></div>
+    <div class="mobile-sheet-primary">
+      {% if request.session.get('admin') or request.session.get('co_gm') or (wiki and wiki.player_label) %}<a class="mobile-sheet-feature" href="/app"><span>✦</span><div><strong>Table App</strong><small>Character · inventory · journal · maps</small></div></a>{% endif %}
+      <a href="/characters"><span>♟</span><strong>Characters</strong></a>
+      <a href="/tables"><span>◎</span><strong>Tables</strong></a>
+      {% if request.session.get('admin') or request.session.get('co_gm') or (wiki and wiki.player_label) %}<a href="/schedule"><span>◷</span><strong>Planner</strong></a>{% endif %}
+      <a href="/homebrew"><span>✦</span><strong>Homebrew</strong></a>
+    </div>
+    <details class="mobile-sheet-group">
+      <summary><span>◇</span><strong>World & lore</strong><small>Atlas, timeline, handouts, bestiary…</small></summary>
+      <div><a href="/#atlas">⌖ Atlas</a><a href="/timeline">⌛ Chronicle of Ages</a><a href="/calendar">☾ Calendar</a><a href="/mysteries">◇ Mysteries</a><a href="/network">⌘ Lore Web</a><a href="/structures">♜ Families & Orders</a><a href="/handouts">✉ Letters & Relics</a><a href="/bestiary">♜ Monster Codex</a><a href="/updates">✦ Newly Revealed</a><a href="/recap">↶ Previously on…</a>{% if wiki and wiki.player_label and not request.session.get('admin') and not request.session.get('co_gm') %}<a href="/investigation">⌘ Investigation Board</a>{% endif %}</div>
+    </details>
+    {% if request.session.get('admin') or request.session.get('co_gm') %}
+    <details class="mobile-sheet-group">
+      <summary><span>⚙</span><strong>GM tools</strong><small>Prep, Foundry, Studio & integrations</small></summary>
+      <div><a href="/gm/living-table">✦ Living Table</a><a href="/gm/prep">✎ Session Prep</a><a href="/gm/session">⚙ Session Console</a><a href="/gm/continuity">⌘ Continuity Center</a><a href="/gm/media">▣ Media Board</a><a href="/gm/integrations">∞ Integrations</a><a href="/gm/foundry-workshop">⬡ Foundry Workshop</a><a href="/display" target="_blank">▰ Table Display</a>{% if request.session.get('admin') %}<a href="/admin">✎ Seeker Studio</a>{% endif %}<a href="/admin/campaign">✦ Worldcraft</a><a href="/admin/living">◔ World State</a></div>
+    </details>
+    {% endif %}
+    <details class="mobile-sheet-group compact">
+      <summary><span>⋯</span><strong>App options</strong></summary>
+      <div><button type="button" class="mobile-sheet-action" data-start-tour>❔ Quick tour</button><button type="button" class="mobile-sheet-action" data-offline-toggle>⇩ Offline cache: off</button>{% if wiki and wiki.player_label and not request.session.get('admin') and not request.session.get('co_gm') %}<button type="button" class="mobile-sheet-action danger" data-player-logout>↪ Sign out of {{ wiki.player_label }}</button>{% endif %}</div>
+    </details>
   </div>
 
   {% if request.session.get('admin') or request.session.get('co_gm') %}<nav class="gm-view-switcher" aria-label="GM mode switcher"><span>{{ 'OWNER' if request.session.get('admin') else 'CO-GM' }}</span><a href="/gm/living-table">Living Table</a><a href="/">Player</a><a href="/gm/session">Session</a><a href="/gm/prep">Prep</a><a href="/gm/continuity">Continuity</a><a href="/gm/foundry-workshop">Foundry</a><a href="/homebrew">Homebrew</a>{% if request.session.get('admin') %}<a href="/admin">Studio</a>{% endif %}<a href="/admin/campaign">Worldcraft</a><a href="/admin/living">State</a></nav>{% endif %}
@@ -98,8 +118,8 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=7401"></script>
-  <script src="/static/tour.js?v=7401"></script>
+  <script src="/static/wiki.js?v=7402"></script>
+  <script src="/static/tour.js?v=7402"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

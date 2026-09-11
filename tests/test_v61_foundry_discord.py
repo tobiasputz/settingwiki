@@ -168,7 +168,7 @@ def test_v61_scroll_contract_and_foundry_frontend_assets():
     assert 'data-foundry-manifest' in integrations and 'Automatically announce confirmed session dates' in integrations
     assert '/api/v61/characters/' in chars and 'data-foundry-tab' in chars
     assert 'data-notification-pref="spotlight"' not in base
-    assert 'seeker-static-v7401' in sw
+    assert 'seeker-static-v7402' in sw
 
 
 def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
@@ -245,7 +245,7 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200
     assert 'Homebrew Forge' in workshop.text and 'foundryWorkshopForm' in workshop.text
-    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=7401' in workshop.text
+    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=7402' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})
@@ -515,3 +515,23 @@ def test_v710_live_foundry_frontend_contract_uses_shared_reconciler():
     assert 'beginResource' in table and 'beginResource' in chars
     assert 'commit' in table and 'rollback' in table and 'commit' in chars and 'rollback' in chars
     assert 'live?.refresh()' in table and 'foundryLive?.refresh()' in chars
+
+
+def test_v742_mobile_navigation_and_table_live_refresh_contract():
+    root=Path(__file__).resolve().parents[1]
+    base=(root/'templates/base.html').read_text(encoding='utf-8')
+    css=(root/'static/refinement.css').read_text(encoding='utf-8')
+    table=(root/'static/v7-player.js').read_text(encoding='utf-8')
+    live=(root/'static/foundry-live.js').read_text(encoding='utf-8')
+    # The critical table launcher is pinned before collapsible secondary groups,
+    # rather than being buried at one end of an unbounded mobile menu.
+    assert 'class="mobile-sheet-feature" href="/app"' in base
+    assert base.index('class="mobile-sheet-feature" href="/app"') < base.index('class="mobile-sheet-group"')
+    assert 'data-mobile-more-close' in base and 'mobile-sheet-primary' in base
+    assert 'max-height:calc(100dvh - 88px - env(safe-area-inset-top))' in css
+    # Table App reconciles against the same Foundry snapshot periodically and
+    # cross-tab notifications make same-browser character edits effectively immediate.
+    assert 'setInterval(refreshLive,2500)' in table
+    assert 'visibilitychange' in table and "window.addEventListener('focus',refreshLive)" in table
+    assert 'BroadcastChannel' in live and 'seeker-foundry-live' in live and 'notify()' in live
+    assert 'data-player-set-resource' in table

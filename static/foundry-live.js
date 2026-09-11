@@ -3,8 +3,10 @@
   const int=(v,f=0)=>{const n=Number.parseInt(v,10);return Number.isFinite(n)?n:f};
   class FoundryLiveState{
     constructor(root,characterId){
-      this.root=root||document;this.characterId=characterId;this.resources=new Map();this.items=new Map();this.seq=0;
+      this.root=root||document;this.characterId=String(characterId||'');this.resources=new Map();this.items=new Map();this.seq=0;
       this.scan();
+      this.channel=null;
+      try{if('BroadcastChannel' in window){this.channel=new BroadcastChannel('seeker-foundry-live');this.channel.addEventListener('message',e=>{if(String(e.data?.characterId||'')===this.characterId)this.refresh().catch(()=>{})})}}catch(_){this.channel=null}
     }
     scan(){
       this.root.querySelectorAll('[data-resource-value]').forEach(el=>{
@@ -25,7 +27,8 @@
     _renderItem(id){const row=this.items.get(id);if(!row||!row.el)return;const value=Math.max(0,row.confirmed+[...row.pending.values()].reduce((a,b)=>a+b,0));row.el.dataset.current=String(value);const prefix=row.el.closest('.foundry-item-grid')?'×':'';row.el.textContent=prefix?`${value!==1?`×${value} · `:''}`:String(value);row.el.closest('article,details')?.classList.toggle('is-syncing',row.pending.size>0)}
     beginResource(key,delta){const row=this.resources.get(key);if(!row)return null;const token=`r${++this.seq}`;row.pending.set(token,int(delta));this._renderResource(key);return {kind:'resource',key,token}}
     beginItem(id,delta){const row=this.items.get(String(id));if(!row)return null;const token=`i${++this.seq}`;row.pending.set(token,int(delta));this._renderItem(String(id));return {kind:'item',key:String(id),token}}
-    commit(op,after){if(!op)return;const map=op.kind==='item'?this.items:this.resources,row=map.get(op.key);if(!row)return;row.pending.delete(op.token);if(Number.isFinite(Number(after)))row.confirmed=Math.max(0,int(after));op.kind==='item'?this._renderItem(op.key):this._renderResource(op.key)}
+    commit(op,after){if(!op){this.notify();return}const map=op.kind==='item'?this.items:this.resources,row=map.get(op.key);if(!row){this.notify();return}row.pending.delete(op.token);if(Number.isFinite(Number(after)))row.confirmed=Math.max(0,int(after));op.kind==='item'?this._renderItem(op.key):this._renderResource(op.key);this.notify()}
+    notify(){try{this.channel?.postMessage({characterId:this.characterId,at:Date.now()})}catch(_){}}
     rollback(op){if(!op)return;const map=op.kind==='item'?this.items:this.resources,row=map.get(op.key);if(!row)return;row.pending.delete(op.token);op.kind==='item'?this._renderItem(op.key):this._renderResource(op.key)}
     applySheet(sheet={}){
       const v=sheet.vitals||{};const values={hp:v.hp?.value,temp_hp:v.hp?.temp,hero_points:v.hero_points?.value,focus:v.focus?.value};
