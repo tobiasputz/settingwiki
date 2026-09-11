@@ -7,7 +7,22 @@
   function tab(name){$$('[data-player-tab]').forEach(b=>b.classList.toggle('active',b.dataset.playerTab===name));$$('[data-player-pane]').forEach(p=>p.classList.toggle('active',p.dataset.playerPane===name));history.replaceState(null,'',`#${name}`);scrollTo({top:0,behavior:'instant'})}
   $$('[data-player-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.playerTab));const h=location.hash.slice(1);if($(`[data-player-tab="${CSS.escape(h)}"]`))tab(h);
   $('[data-character-switch]')?.addEventListener('change',e=>location.href=`/app?character_id=${encodeURIComponent(e.currentTarget.value)}${location.hash}`);
-  async function actorAction(payload,button){if(!charId)return;button.disabled=true;try{await send(`/api/v61/characters/${charId}/foundry/action`,payload);toast('Queued for Foundry.');setTimeout(()=>location.reload(),1100)}catch(err){toast(err.message,true)}finally{button.disabled=false}}
+  const live=charId&&window.SeekerFoundryLive?new window.SeekerFoundryLive.FoundryLiveState(root,charId):null;
+  const statusToast=(row,status)=>{const label=row.delivery_label||status;if(status==='failed')toast(label,true);else if(['queued','dispatched','executing'].includes(status))toast(`${label}…`)};
+  async function actorAction(payload,button){
+    if(!charId)return;
+    const delta=Number(payload.delta||0);const op=payload.action==='adjust_resource'?live?.beginResource(payload.resource,delta):payload.action==='adjust_item_quantity'?live?.beginItem(payload.item_id,delta):null;
+    button.dataset.busy='1';button.setAttribute('aria-busy','true');
+    try{
+      const queued=await send(`/api/v61/characters/${charId}/foundry/action`,payload);const id=queued?.command?.id;
+      if(!id)throw Error('Seeker did not create a Foundry delivery record.');
+      const result=await window.SeekerFoundryLive.waitForCommand(id,{onStatus:statusToast,timeout:45000});
+      if(!result){live?.rollback(op);toast('Foundry is not responding yet. The action remains queued; the display will update when it is applied.',true);return}
+      live?.commit(op,result.result?.after);
+      try{await live?.refresh()}catch(_){/* ACK projection already keeps the visible value authoritative. */}
+      toast(result.result?.message||'Applied in Foundry.');
+    }catch(err){live?.rollback(op);toast(err.message,true)}finally{delete button.dataset.busy;button.removeAttribute('aria-busy')}
+  }
   $$('[data-player-resource]').forEach(b=>b.onclick=()=>actorAction({action:'adjust_resource',resource:b.dataset.playerResource,delta:Number(b.dataset.delta)},b));
   $$('[data-player-item]').forEach(b=>b.onclick=()=>actorAction({action:'adjust_item_quantity',item_id:b.dataset.playerItem,delta:Number(b.dataset.delta)},b));
   $$('[data-claim-loot]').forEach(b=>b.onclick=async()=>{if(!charId)return;const old=b.textContent;b.disabled=true;b.textContent='Claiming…';try{await send(`/api/v7/loot/items/${b.dataset.claimLoot}/claim`,{character_id:Number(charId),quantity:1});toast('Claimed. Foundry will receive it if linked.');setTimeout(()=>location.reload(),900)}catch(err){toast(err.message,true);b.disabled=false;b.textContent=old}});

@@ -4,17 +4,42 @@
 <main class="v7-entity-dossier">
   <header class="v7-entity-hero {% if entity.image_ref %}has-art{% endif %}" {% if entity.image_ref %}style="--entity-art:url('{{ entity.image_ref }}')"{% endif %}>
     <div class="v7-entity-hero-shade"></div>
-    <div class="v7-entity-hero-copy"><a href="{{ '/gm/v7#entities' if gm_view else '/app#journal' }}" class="v7-back-link">← {{ 'Living Table' if gm_view else 'Table App' }}</a><span class="eyebrow">{{ entity.kind|upper }} · {{ entity.status|upper }}</span><h1>{{ entity.name }}</h1>{% if entity.subtitle %}<p>{{ entity.subtitle }}</p>{% endif %}<div class="v7-entity-tags">{% for tag in entity.tags %}<span>{{ tag }}</span>{% endfor %}</div></div>
+    <div class="v7-entity-hero-copy"><a href="{{ '/gm/living-table#entities' if gm_view else '/app#journal' }}" class="v7-back-link">← {{ 'Living Table' if gm_view else 'Table App' }}</a><span class="eyebrow">{{ entity.kind|upper }} · {{ entity.status|upper }}</span><h1>{{ entity.name }}</h1>{% if entity.subtitle %}<p>{{ entity.subtitle }}</p>{% endif %}<div class="v7-entity-tags">{% for tag in entity.tags %}<span>{{ tag }}</span>{% endfor %}</div></div>
   </header>
   <section class="v7-entity-dossier-grid">
     <article class="v7-entity-prose"><span class="eyebrow">DOSSIER</span><h2>{{ entity.summary or 'Known information' }}</h2>{% if entity.body %}<div>{{ entity.body|e|replace('\n','<br>')|safe }}</div>{% else %}<p class="v7-muted">No longer-form notes are visible here yet.</p>{% endif %}</article>
-    <aside class="v7-entity-facts-panel"><span class="eyebrow">WHAT YOU KNOW</span><h2>Revealed facts</h2><div class="v7-public-facts">{% for fact in facts %}<article class="{{ fact.tier }}"><small>{{ fact.tier|upper }}</small><strong>{{ fact.title }}</strong><p>{{ fact.body }}</p></article>{% else %}<p class="v7-muted">No structured facts have been revealed yet.</p>{% endfor %}</div></aside>
+    <aside class="v7-entity-facts-panel"><span class="eyebrow">WHAT YOU KNOW</span><h2>Revealed facts</h2><div class="v7-public-facts">{% for fact in facts %}{% set mode=fact.disclosure_mode or 'exact' %}<article class="{{ fact.tier }} disclosure-{{ mode }}"><header><span class="v7-disclosure-chip {{ mode }}">{% if mode == 'exact' %}◆ Exact{% elif mode == 'vague' %}◐ Vague{% else %}⇄ Comparative{% endif %}</span>{% if fact.reveal_source == 'player_share' %}<span>Shared by party</span>{% elif fact.reveal_source == 'gm' %}<span>GM confirmed</span>{% endif %}</header><strong>{{ fact.title }}</strong><p>{{ fact.body }}</p>{% if not gm_view and fact.can_share and v7_permissions.share_player_knowledge %}<button class="v7-share-clue" data-share-fact="{{ fact.id }}">⌘ Share with party</button>{% endif %}</article>{% else %}<p class="v7-muted">No structured facts have been revealed yet.</p>{% endfor %}</div></aside>
   </section>
+
+  <section class="v7-field-intelligence">
+    <header class="v7-field-intelligence-head"><div><span class="eyebrow">FIELD INTELLIGENCE</span><h2>Party deductions</h2><p>Things noticed at the table are kept separate from GM-confirmed facts.</p></div>{% if not gm_view and v7_permissions.create_player_notes %}<button class="v7-intel-add" type="button" data-open-observation>＋ Add deduction</button>{% endif %}</header>
+    <div class="v7-observation-board">{% for obs in observations %}<article class="v7-player-observation {{ obs.status }}" data-observation-id="{{ obs.id }}"><header><div><small>{{ obs.author_label or 'Player' }} · {{ obs.visibility|upper }}</small><strong>{{ obs.title }}</strong></div><span class="status {{ obs.status }}">{% if obs.status == 'confirmed' %}✓ CONFIRMED{% elif obs.status == 'rejected' %}× REJECTED{% else %}◇ INFERRED{% endif %}</span></header>{% if obs.kind == 'range' %}<div class="v7-observation-range"><b>{{ obs.lower_bound|int if obs.lower_bound is not none and obs.lower_bound == obs.lower_bound|int else (obs.lower_bound if obs.lower_bound is not none else '?') }}</b><i>—</i><b>{{ obs.upper_bound|int if obs.upper_bound is not none and obs.upper_bound == obs.upper_bound|int else (obs.upper_bound if obs.upper_bound is not none else '?') }}</b></div>{% endif %}{% if obs.body %}<p>{{ obs.body }}</p>{% endif %}<footer>{% if not gm_view and viewer_invite_id and obs.invite_id == viewer_invite_id %}{% if v7_permissions.share_player_knowledge %}<button data-observation-visibility="{{ obs.id }}" data-visibility="{{ 'private' if obs.visibility == 'party' else 'party' }}">{{ 'Keep private' if obs.visibility == 'party' else 'Share with party' }}</button>{% endif %}<button data-delete-observation="{{ obs.id }}">Delete</button>{% elif gm_view %}<button data-review-observation="{{ obs.id }}" data-status="confirmed">✓ Confirm</button><button data-review-observation="{{ obs.id }}" data-status="rejected">× Reject</button>{% endif %}</footer></article>{% else %}<div class="v7-field-empty"><span>⌁</span><strong>No field deductions yet</strong><p>Players can track ranges, theories and combat observations here.</p></div>{% endfor %}</div>
+  </section>
+
+  {% if not gm_view and v7_permissions.create_player_notes %}
+  <dialog class="v7-observation-dialog" data-observation-dialog>
+    <form method="dialog" class="v7-observation-sheet" id="v7ObservationForm">
+      <header><div><span class="eyebrow">ADD FIELD DEDUCTION</span><h2>What did you learn?</h2></div><button value="cancel" class="v7-dialog-close">×</button></header>
+      <div class="v7-observation-kind-tabs"><button type="button" class="active" data-observation-kind="range">Number range</button><button type="button" data-observation-kind="comparative">Comparison</button><button type="button" data-observation-kind="hypothesis">Hypothesis</button><button type="button" data-observation-kind="note">Note</button></div>
+      <input type="hidden" name="kind" value="range">
+      <div data-observation-range-fields>
+        <label>Statistic<select name="metric"><option value="ac">Armor Class</option><option value="fortitude">Fortitude</option><option value="reflex">Reflex</option><option value="will">Will</option><option value="perception">Perception</option><option value="spell_dc">Spell DC</option><option value="custom">Custom</option></select></label>
+        <div class="v7-range-inputs"><label>Minimum<input name="lower_bound" type="number" step="1" placeholder="20"></label><span>to</span><label>Maximum<input name="upper_bound" type="number" step="1" placeholder="22"></label></div>
+        <div class="v7-ac-evidence" data-ac-evidence><span>Quick AC evidence</span><label>Missed at<input name="miss_total" type="number" step="1" placeholder="19"></label><label>Hit at<input name="hit_total" type="number" step="1" placeholder="22"></label><small>Use normal attack rolls only; natural 1/20 can change the degree and should not be used to infer AC.</small></div>
+      </div>
+      <label>Title <input name="title" placeholder="Optional — Seeker can generate one"></label>
+      <label>Notes <textarea name="body" rows="4" placeholder="Why you think this, what happened, or any uncertainty."></textarea></label>
+      <label class="v7-party-share-toggle"><input type="checkbox" name="share_party"><span><b>Share immediately with the party</b><small>Otherwise only you and the GM can see it.</small></span></label>
+      <footer><button value="cancel" class="v7-button ghost">Cancel</button><button type="submit" value="default" class="v7-button">Save deduction</button></footer>
+    </form>
+  </dialog>
+  {% endif %}
+
   {% if can_view_statblock and entity.kind in ['monster','creature','npc'] %}
   {% set d=entity.data or {} %}<section class="v7-public-statblock"><header><div><span class="eyebrow">MECHANICS</span><h2>Statblock</h2></div><span>LEVEL {{ d.level or '—' }}</span></header><div class="v7-stat-ribbon"><div><small>AC</small><strong>{{ d.ac or '—' }}</strong></div><div><small>HP</small><strong>{{ d.hp or '—' }}</strong></div><div><small>PERCEPTION</small><strong>{% if d.perception is not none and d.perception != '' %}+{{ d.perception }}{% else %}—{% endif %}</strong></div><div><small>SPEED</small><strong>{{ d.speed or '—' }}</strong></div></div>{% if d.description %}<div class="v7-stat-body">{{ d.description }}</div>{% endif %}</section>
   {% elif entity.kind in ['monster','creature','npc'] %}<section class="v7-field-notes-lock"><span>◉</span><div><strong>Field Notes view</strong><p>Exact combat statistics remain GM-only. Discoveries can reveal individual weaknesses, abilities or facts without exposing the whole statblock.</p></div></section>{% endif %}
-  {% if gm_view and entity.sync %}<section class="v7-entity-sync-footer"><span class="eyebrow">FOUNDRY</span><strong>{{ entity.sync.status }}</strong><small>{{ entity.sync.foundry_uuid or 'Not linked yet' }}</small><a href="/gm/v7#sync">Open managed sync →</a></section>{% endif %}
+  {% if gm_view and entity.sync %}<section class="v7-entity-sync-footer"><span class="eyebrow">FOUNDRY</span><strong>{{ entity.sync.status }}</strong><small>{{ entity.sync.foundry_uuid or 'Not linked yet' }}</small><a href="/gm/living-table#sync">Open managed sync →</a></section>{% endif %}
 </main>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7000">{% endblock %}
-{% block scripts %}<script src="/static/v7-entity.js?v=7000"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v7.css?v=7200">{% endblock %}
+{% block scripts %}<script src="/static/v7-entity.js?v=7200"></script>{% endblock %}

@@ -16,19 +16,25 @@
       this.last=performance.now(); this.nextLightning=this.last+4000+Math.random()*7000; this.flashUntil=0;
       this.nextShooting=this.last+2500+Math.random()*6000; this.shootingUntil=0; this.shootingSeed=null;
       this.nextDragon=this.last+9000+Math.random()*18000; this.dragonUntil=0; this.dragonSeed=null;
-      this.reducedMotion=window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches||false;
-      this.resize=this.resize.bind(this);this.refreshPresenceBoost=this.refreshPresenceBoost.bind(this);this.mapImage=this.root?.querySelector?.('#atlasImage,#mapAuthorImage')||null;this.mapImage?.addEventListener('load',this.refreshPresenceBoost,{passive:true});addEventListener('resize',this.resize,{passive:true}); this.resize(); this.applyStaticEffects();
+      this.motionQuery=window.matchMedia?.('(prefers-reduced-motion: reduce)')||null;this.reducedMotion=!!this.motionQuery?.matches;this.lastReducedDraw=0;this.resizeFrame=0;
+      this.onMotionChange=e=>{this.reducedMotion=!!e.matches;this.last=performance.now()};this.motionQuery?.addEventListener?.('change',this.onMotionChange);
+      this.resize=this.resize.bind(this);this.requestResize=()=>{if(this.resizeFrame)return;this.resizeFrame=requestAnimationFrame(()=>{this.resizeFrame=0;this.resize()})};this.refreshPresenceBoost=this.refreshPresenceBoost.bind(this);this.mapImage=this.root?.querySelector?.('#atlasImage,#mapAuthorImage')||null;this.mapImage?.addEventListener('load',this.refreshPresenceBoost,{passive:true});addEventListener('resize',this.requestResize,{passive:true}); this.resize(); this.applyStaticEffects();
       if(this.ctx)this.frame=requestAnimationFrame(t=>this.tick(t));
     }
     setSettings(settings){this.settings={...defaults,...(settings||{})};this.applyStaticEffects()}
-    destroy(){if(this.frame)cancelAnimationFrame(this.frame);removeEventListener('resize',this.resize);this.mapImage?.removeEventListener('load',this.refreshPresenceBoost)}
+    destroy(){if(this.frame)cancelAnimationFrame(this.frame);if(this.resizeFrame)cancelAnimationFrame(this.resizeFrame);removeEventListener('resize',this.requestResize);this.motionQuery?.removeEventListener?.('change',this.onMotionChange);this.mapImage?.removeEventListener('load',this.refreshPresenceBoost)}
     resize(){if(!this.canvas||!this.ctx)return;const d=Math.min(1.6,devicePixelRatio||1),w=Math.max(1,this.canvas.clientWidth),h=Math.max(1,this.canvas.clientHeight);this.canvas.width=Math.round(w*d);this.canvas.height=Math.round(h*d);this.ctx.setTransform(d,0,0,d,0,0);this.w=w;this.h=h;this.refreshPresenceBoost()}
     applyStaticEffects(){if(!this.root)return;['vignette','parchment','moonlight','blood_moon','edge_fog','grid'].forEach(k=>this.root.classList.toggle('map-effect-'+k.replace('_','-'),!!this.settings[k]));const compass=this.root.querySelector?.('[data-map-compass]');if(compass)compass.hidden=!this.settings.compass}
     refreshPresenceBoost(){const img=this.mapImage||this.root?.querySelector?.('#atlasImage,#mapAuthorImage'),nw=Number(img?.naturalWidth||0),nh=Number(img?.naturalHeight||0),megapixels=nw&&nh?(nw*nh)/(1920*1080):1;this.sourceBoost=clamp(Math.sqrt(megapixels),1,1.7);this.root?.style?.setProperty('--map-effect-source-boost',String(this.sourceBoost))}
     particles(name,count,factory){let arr=this.groups.get(name);if(!arr||arr.length!==count){arr=Array.from({length:count},(_,i)=>factory(i));this.groups.set(name,arr)}return arr}
     tick(now){
-      if(!this.ctx)return;const dt=Math.min(50,Math.max(0,now-this.last));this.last=now;const ctx=this.ctx,w=this.w||1,h=this.h||1;ctx.clearRect(0,0,w,h);
-      const presence=clamp(Math.max(w,h)/1200,1,1.45)*(this.sourceBoost||1),intensity=clamp(clamp(this.settings.effect_intensity,.05,1.6)*presence,.05,2.35),speed=(this.reducedMotion?.08:1)*clamp(this.settings.motion_speed,.05,2);
+      if(!this.ctx)return;
+      // Canvas weather is decorative: never spend a frame budget on a hidden tab.
+      if(document.hidden){this.last=now;this.frame=requestAnimationFrame(t=>this.tick(t));return}
+      // Reduced-motion users get a mostly static atmospheric layer rather than constant drift.
+      if(this.reducedMotion&&now-this.lastReducedDraw<500){this.frame=requestAnimationFrame(t=>this.tick(t));return}this.lastReducedDraw=now;
+      const dt=Math.min(50,Math.max(0,now-this.last));this.last=now;const ctx=this.ctx,w=this.w||1,h=this.h||1;ctx.clearRect(0,0,w,h);
+      const presence=clamp(Math.max(w,h)/1200,1,1.45)*(this.sourceBoost||1),intensity=clamp(clamp(this.settings.effect_intensity,.05,1.6)*presence,.05,2.35),speed=(this.reducedMotion?0:1)*clamp(this.settings.motion_speed,.05,2);
       if(this.settings.sun_rays)this.drawSunRays(ctx,w,h,now,intensity,speed);
       if(this.settings.cloud_shadows)this.drawClouds(ctx,w,h,dt,intensity*.75,speed,true);
       if(this.settings.clouds)this.drawClouds(ctx,w,h,dt,intensity,speed,false);

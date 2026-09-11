@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Handout workshop · Seeker{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/handout-creator.css?v=7300">{% endblock %}
+{% block body %}
+<main class="hc-workshop">
+<header class="hc-top"><div><span class="eyebrow">THE SCRIBE’S DESK</span><h1>Handout workshop</h1><p>Letters worth stealing. Decrees worth defying. Clues worth keeping.</p></div><a href="/handouts">Party handouts →</a></header>
+<div class="hc-layout">
+<aside class="hc-panel"><h2>Your documents</h2><input id="hc-search" type="search" placeholder="Search title, text, folder…" aria-label="Search handouts"><select id="hc-filter" aria-label="Filter visibility"><option value="">All documents</option><option value="gm">GM drafts</option><option value="players">Shared with players</option></select><button id="hc-new" type="button">＋ New handout</button><div id="hc-library"></div></aside>
+<section class="hc-panel hc-editor"><div id="hc-presets"><h2>Choose a starting point</h2><p>Every word can be changed. New documents stay private until you share them.</p><input id="hc-preset-search" type="search" placeholder="Find a preset…" aria-label="Search presets"><div class="hc-preset-grid">{% for p in presets %}<button type="button" data-preset="{{ p.id }}"><small>{{ p.category }}</small><strong>{{ p.name }}</strong></button>{% endfor %}</div></div>
+<form id="hc-form" hidden>
+<div class="hc-actions"><button type="submit" id="hc-save">Save handout</button><button type="button" id="hc-copy">Duplicate</button><button type="button" id="hc-delete">Delete</button></div>
+<p id="hc-status" role="status" aria-live="polite"></p>
+<label>Document title<input name="title" maxlength="300" required></label>
+<div class="hc-pair"><label>Folder<input name="folder" maxlength="120" placeholder="e.g. Act I / Moon Court"></label><label>Paper style<select name="theme"><option value="parchment">Warm parchment</option><option value="ivory">Royal ivory</option><option value="weathered">Weathered scrap</option><option value="midnight">Midnight grimoire</option><option value="ink">Printer friendly</option><option value="crimson">Crimson proclamation</option></select></label></div>
+<label>Heading<input name="heading" maxlength="300"></label><label>Subtitle / date / location<input name="subtitle" maxlength="500"></label>
+<label>Document text<textarea name="body" rows="14" maxlength="100000" placeholder="Write your document. Blank lines separate paragraphs."></textarea></label>
+<label>Signature / closing<textarea name="signature" rows="2" maxlength="1000"></textarea></label><label>Seal or motto<input name="seal" maxlength="60" placeholder="✦ House of the Silver Star"></label>
+<label>Illustration / map<input name="artwork" type="file" accept="image/png,image/jpeg,image/webp,image/gif"><small>PNG, JPEG, WebP or GIF · up to 10 MB. Artwork uses Seeker’s asset storage.</small></label><label>Artwork reference<input name="image_ref" placeholder="upload:handouts/… or project:Images/map.png"></label><details><summary>Sharing & GM notes</summary><label>Visibility<select name="visibility"><option value="gm">GM only — private draft</option><option value="players">Share with this campaign’s players</option></select></label><label>Hide from players after (optional)<input name="expires" type="datetime-local"></label><label>Related codex slug<input name="page_slug" placeholder="e.g. moon-court"></label><label>GM notes — never included in previews or exports<textarea name="gm_notes" rows="4" maxlength="30000"></textarea></label></details>
+<div class="hc-actions"><button type="button" id="hc-print">Print / Save PDF</button><button type="button" id="hc-html">Download HTML</button><button type="button" id="hc-text">Download text</button><a id="hc-open" hidden>Open saved handout ↗</a></div>
+</form></section>
+<section class="hc-preview"><div class="hc-preview-heading"><span class="eyebrow">PLAYER DOCUMENT PREVIEW</span><small id="hc-preview-state">Choose a preset to begin</small></div><iframe id="hc-preview" title="Handout preview" sandbox="allow-same-origin allow-modals"></iframe></section>
+</div></main>
+<script id="hc-preset-data" type="application/json">{{ presets|tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="/static/handout-creator.js?v=7300"></script>{% endblock %}

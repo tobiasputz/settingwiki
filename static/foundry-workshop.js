@@ -16,9 +16,10 @@
   const slugList=s=>String(s||'').split(',').map(v=>v.trim()).filter(Boolean);
   const num=(v,f='—')=>String(v??'').trim()===''?f:String(v);
   const signed=v=>{const s=String(v??'').trim();if(!s)return '—';const n=Number(s);return Number.isFinite(n)?`${n>=0?'+':''}${n}`:esc(s)};
-  const kindName=k=>({monster:'Creature',npc:'NPC',item:'Item',feat:'Feat',homebrew:'Freeform'}[k]||'Homebrew');
-  const kindIcon=k=>({monster:'♜',npc:'♟',item:'◇',feat:'✦',homebrew:'⌘'}[k]||'◇');
+  const kindName=k=>({monster:'Creature',npc:'NPC',item:'Item',feat:'Feat',action:'Action',homebrew:'Freeform'}[k]||'Homebrew');
+  const kindIcon=k=>({monster:'♜',npc:'♟',item:'◇',feat:'✦',action:'◆',homebrew:'⌘'}[k]||'◇');
   const creatureKind=k=>k==='monster'||k==='npc';
+  const relativeTime=epoch=>{const sec=Math.max(0,Math.round(Date.now()/1000-Number(epoch||0)));if(!epoch)return 'unknown time';if(sec<8)return 'just now';if(sec<60)return `${sec}s ago`;if(sec<3600)return `${Math.floor(sec/60)}m ago`;if(sec<86400)return `${Math.floor(sec/3600)}h ago`;return `${Math.floor(sec/86400)}d ago`};
   const jsonFetch=async(url,opts={})=>{const r=await fetch(url,opts),b=await r.json().catch(()=>({}));if(!r.ok)throw Error(b.detail||'Request failed');return b};
   const send=(url,method,data)=>jsonFetch(url,{method,headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});
   const toast=(msg,bad=false)=>{const n=document.createElement('div');n.className=`v6-toast${bad?' bad':''}`;n.textContent=msg;document.body.appendChild(n);requestAnimationFrame(()=>n.classList.add('show'));setTimeout(()=>{n.classList.remove('show');setTimeout(()=>n.remove(),240)},2400)};
@@ -35,15 +36,18 @@
     try{localStorage.setItem('seeker-foundry-workshop-draft',snapshot)}catch{}
   }
   function setKind(kind,{resetCollections=false}={}){
-    const k=['monster','npc','item','feat','homebrew'].includes(kind)?kind:'monster';
+    const k=['monster','npc','item','feat','action','homebrew'].includes(kind)?kind:'monster';
     setField('kind',k);
     $$('[data-fw-kind]').forEach(b=>b.classList.toggle('active',b.dataset.fwKind===k));
-    $$('[data-fw-show]').forEach(el=>{const token=el.dataset.fwShow;const visible=token==='creature'?creatureKind(k):token===k;el.classList.toggle('fw-hidden',!visible)});
-    $$('[data-fw-section]').forEach(el=>{const token=el.dataset.fwSection;const visible=token==='creature'?creatureKind(k):token===k;el.classList.toggle('fw-hidden',!visible)});
+    const tokenVisible=token=>String(token||'').split(/\s+/).some(t=>t==='creature'?creatureKind(k):t==='noncreature'?!creatureKind(k):t===k);
+    $$('[data-fw-show]').forEach(el=>el.classList.toggle('fw-hidden',!tokenVisible(el.dataset.fwShow)));
+    $$('[data-fw-section]').forEach(el=>el.classList.toggle('fw-hidden',!tokenVisible(el.dataset.fwSection)));
     const give=$('[data-fw-push-actor]'), target=$('.fw-actor-target');
-    const canGive=!creatureKind(k) && (k==='item'||k==='feat'||k==='homebrew');
-    if(give){give.disabled=!canGive;give.title=canGive?'Save and add this item/feat to the selected actor':'Creatures and NPCs are created in the Foundry world directory'}
+    const canGive=!creatureKind(k) && (k==='item'||k==='feat'||k==='action'||k==='homebrew');
+    if(give){give.disabled=!canGive;give.title=canGive?'Save and add this item/feat/action to the selected actor':'Creatures and NPCs are created in the Foundry world directory'}
     target?.classList.toggle('fw-disabled',!canGive);
+    const worldPush=$('[data-fw-push-world]');if(worldPush)worldPush.textContent=creatureKind(k)?'Save & push to Foundry Actors':'Save & add to Foundry Items';
+    const latexBtn=$('[data-fw-latex]');if(latexBtn)latexBtn.disabled=creatureKind(k);
     $$('[data-fw-template]').forEach(b=>b.classList.toggle('visible',b.dataset.fwTemplateKind===k));
     if(resetCollections){state.attacks=[];state.abilities=[];renderRepeaters()}
     editingLabel.textContent=`${state.currentId?'EDITING':'NEW'} ${kindName(k).toUpperCase()}`;
@@ -155,19 +159,51 @@
     $$('[data-spell-index]').forEach(row=>{const i=+row.dataset.spellIndex;state.spells[i] ||= {};$$('[data-rkey]',row).forEach(el=>state.spells[i][el.dataset.rkey]=el.type==='checkbox'?el.checked:el.value)});
   }
 
-  const payloadFields=['img','token_img','level','rarity','size','actor_role','traits','item_type','feat_category','homebrew_document','price','bulk','usage','hands','quantity','item_category','action_cost','frequency','prerequisites','trigger','requirements','activation_actions','activation_frequency','activation_trigger','activation_requirements','homebrew_actions','homebrew_frequency','homebrew_trigger','perception','speed','senses','languages','skills','ac','fortitude','reflex','will','hp','immunities','weaknesses','resistances','str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod','description','spellcasting','spell_tradition','spell_mode','spell_dc','spell_attack','gm_notes','codex_visibility','codex_category','codex_blurb','weapon_category','weapon_group','weapon_damage_dice','weapon_damage_die','weapon_damage_type','weapon_damage_modifier','weapon_bonus','weapon_usage','weapon_range','weapon_reload','weapon_potency','weapon_striking','weapon_base'];
+  const payloadFields=['img','token_img','level','rarity','size','actor_role','traits','item_type','feat_category','homebrew_document','price','bulk','usage','hands','quantity','item_category','action_cost','frequency','prerequisites','trigger','requirements','activation_actions','activation_frequency','activation_trigger','activation_requirements','homebrew_actions','homebrew_frequency','homebrew_trigger','perception','speed','senses','languages','skills','ac','fortitude','reflex','will','hp','immunities','weaknesses','resistances','str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod','description','spellcasting','spell_tradition','spell_mode','spell_dc','spell_attack','gm_notes','codex_visibility','codex_category','codex_blurb','weapon_category','weapon_group','weapon_damage_dice','weapon_damage_die','weapon_damage_type','weapon_damage_modifier','weapon_bonus','weapon_usage','weapon_range','weapon_reload','weapon_potency','weapon_striking','weapon_base','library_section','library_group','ancestry_trait','archetype_name','class_name'];
   function collectData(sync=true){
     if(sync)syncRepeaters();
     const kind=fieldValue('kind')||'monster';
-    const payload={};payloadFields.forEach(k=>payload[k]=fieldValue(k));payload.codex_publish=!!field('codex_publish')?.checked;payload.attacks=state.attacks;payload.abilities=state.abilities;payload.spells=state.spells;
+    const payload={};payloadFields.forEach(k=>payload[k]=fieldValue(k));payload.codex_publish=!!field('codex_publish')?.checked;payload.homebrew_publish=!!field('homebrew_publish')?.checked;payload.attacks=state.attacks;payload.abilities=state.abilities;payload.spells=state.spells;
     return {id:fieldValue('id')||undefined,kind,target_type:'world',title:fieldValue('title').trim(),subtitle:fieldValue('subtitle').trim(),summary:fieldValue('summary'),tags:fieldValue('traits'),payload};
+  }
+
+  function clearValidation(){
+    $$('.fw-validation',form).forEach(el=>el.remove());
+    $$('.has-validation-error',form).forEach(el=>el.classList.remove('has-validation-error'));
+    $$('.fw-field-error',form).forEach(el=>el.remove());
+    const title=field('title');if(title)title.setCustomValidity('');
+  }
+  function addRowProblem(row,message){
+    if(!row)return;row.classList.add('has-validation-error');
+    let box=$('.fw-validation',row);if(!box){box=document.createElement('div');box.className='fw-validation';row.appendChild(box)}
+    const line=document.createElement('div');line.textContent=message;box.appendChild(line);
+  }
+  function validateData(data,{announce=false}={}){
+    clearValidation();const problems=[];const p=data?.payload||{};
+    if(!String(data?.title||'').trim()){
+      problems.push('Give this entry a name.');const title=field('title');
+      if(title){title.setCustomValidity('Give this entry a name.');const note=document.createElement('small');note.className='fw-field-error';note.textContent='A name is required before saving or sending to Foundry.';title.insertAdjacentElement('afterend',note)}
+    }
+    const numberProblem=(name,label,min=null,max=null)=>{const raw=String(fieldValue(name)||'').trim();if(!raw)return;const n=Number(raw);if(!Number.isFinite(n)||(min!==null&&n<min)||(max!==null&&n>max)){problems.push(`${label} has an invalid value.`);const el=field(name);el?.closest('label')?.classList.add('has-validation-error')}};
+    if(creatureKind(data?.kind)){
+      numberProblem('level','Level',-1,30);numberProblem('ac','AC',0,80);numberProblem('hp','HP',0,99999);numberProblem('spell_dc','Spell DC',0,80);numberProblem('spell_attack','Spell attack modifier',-20,80);
+      (p.attacks||[]).forEach((a,i)=>{const row=$(`[data-attack-index="${i}"]`);const has=Object.values(a||{}).some(v=>String(v??'').trim());if(!has)return;if(!String(a.name||'').trim()){problems.push(`Strike ${i+1} needs a name.`);addRowProblem(row,'Add a name to this strike.')}if(String(a.bonus??'').trim()&&!Number.isFinite(Number(a.bonus))){problems.push(`Strike ${i+1} attack bonus is invalid.`);addRowProblem(row,'Attack bonus must be a whole number.')}const dmg=String(a.damage||'').trim();if(dmg&&!(/^[-+]?\d+$/.test(dmg)||/\d+d\d+/i.test(dmg))){problems.push(`Strike ${i+1} damage looks malformed.`);addRowProblem(row,'Damage should contain a PF2e roll such as 2d8+4 (or a flat number).')}});
+      (p.abilities||[]).forEach((a,i)=>{const row=$(`[data-ability-index="${i}"]`);const has=Object.values(a||{}).some(v=>String(v??'').trim());if(!has)return;if(!String(a.name||'').trim()){problems.push(`Ability ${i+1} needs a name.`);addRowProblem(row,'Add an ability name before saving.')}if(a.dc_type&&!String(a.dc??'').trim()){problems.push(`Ability ${i+1} has a check but no DC.`);addRowProblem(row,'This check shortcut needs a DC, or choose No check.')}if(String(a.dc??'').trim()&&!Number.isFinite(Number(a.dc))){problems.push(`Ability ${i+1} DC is invalid.`);addRowProblem(row,'DC must be a number.')}});
+      (p.spells||[]).forEach((sp,i)=>{const row=$(`[data-spell-index="${i}"]`);const has=Object.values(sp||{}).some(v=>String(v??'').trim());if(!has)return;if(!String(sp.name||'').trim()){problems.push(`Spell ${i+1} needs a name.`);addRowProblem(row,'Add a spell name or remove this row.')}const rank=String(sp.rank??'').trim();if(rank&&(!Number.isInteger(Number(rank))||Number(rank)<0||Number(rank)>10)){problems.push(`Spell ${i+1} rank is invalid.`);addRowProblem(row,'Spell rank must be a whole number from 0 to 10.')}const dmg=String(sp.damage||'').trim();if(dmg&&!(/^[-+]?\d+$/.test(dmg)||/\d+d\d+/i.test(dmg))){problems.push(`Spell ${i+1} damage looks malformed.`);addRowProblem(row,'Damage should contain a roll such as 6d6, or leave it blank for an official compendium spell.')}});
+    }
+    if(data?.kind==='item'&&String(p.item_type||'')==='weapon'){
+      numberProblem('weapon_damage_dice','Damage dice',0,8);numberProblem('weapon_damage_modifier','Damage modifier',-99,99);numberProblem('weapon_bonus','Item bonus',-20,20);numberProblem('weapon_range','Range',1,10000);numberProblem('weapon_reload','Reload',0,20);
+      const die=String(p.weapon_damage_die||'');if(die&&!['d4','d6','d8','d10','d12'].includes(die)){problems.push('Weapon damage die is not a normal PF2e die.');field('weapon_damage_die')?.closest('label')?.classList.add('has-validation-error')}
+    }
+    if(announce&&problems.length)toast(`Fix ${problems.length} highlighted field${problems.length===1?'':'s'} before saving.`,true);
+    return problems;
   }
   function fillForm(entry=null){
     form.reset();state.currentId=entry?.id||null;state.attacks=[];state.abilities=[];state.spells=[];
     setField('id',entry?.id||'');setField('title',entry?.title||'');setField('subtitle',entry?.subtitle||'');setField('summary',entry?.summary||'');
     const p=entry?.payload||{};payloadFields.forEach(k=>setField(k,p[k]??''));
     if(!entry){setField('level','1');setField('rarity','common');setField('size','med');setField('quantity','1');setField('weapon_category','simple');setField('weapon_damage_dice','1');setField('weapon_damage_die','d6');setField('weapon_damage_type','slashing');setField('weapon_damage_modifier','0');setField('weapon_bonus','0');setField('weapon_usage','held-in-one-hand');setField('weapon_potency','0');setField('weapon_striking','0');['str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod'].forEach(k=>setField(k,'0'))}
-    if(field('codex_publish'))field('codex_publish').checked=!!p.codex_publish;
+    if(field('codex_publish'))field('codex_publish').checked=!!p.codex_publish;if(field('homebrew_publish'))field('homebrew_publish').checked=!!p.homebrew_publish;
     state.attacks=Array.isArray(p.attacks)?structuredClone(p.attacks):[];state.abilities=Array.isArray(p.abilities)?structuredClone(p.abilities):[];state.spells=Array.isArray(p.spells)?structuredClone(p.spells):[];
     setKind(entry?.kind||'monster');renderRepeaters();updateItemSubtype();updateArtStatus();updateToolbar();renderPreview();
     state.savedSnapshot=JSON.stringify(collectData());
@@ -185,7 +221,7 @@
   }
   function renderLog(){
     const rows=state.commands||[];
-    log.innerHTML=rows.length?rows.slice(0,15).map(r=>`<article class="command-log-item"><span class="status ${esc(r.status||'queued')}">${esc(r.status||'queued')}</span><strong>${esc(String(r.command_type||'action').replaceAll('_',' '))}</strong><small>${esc(r.requested_by||'GM')} · ${esc(r.actor_id||'world')}</small>${r.result?.message?`<div>${esc(r.result.message)}</div>`:''}</article>`).join(''):'<p class="muted">No bridge actions yet.</p>';
+    log.innerHTML=rows.length?rows.slice(0,25).map(r=>{const status=String(r.status||'queued'),target=r.target_label||r.actor_id||'Foundry world',attempt=Number(r.attempt_count||0),step=Math.max(0,Math.min(3,Number(r.progress_step??({queued:0,dispatched:1,executing:2,done:3,failed:3}[status]??0))));return `<article class="command-log-item command-${esc(status)}" data-command-row="${esc(r.id)}"><div class="command-log-head"><span class="status ${esc(status)}">${esc(r.delivery_label||status)}</span><small>${esc(relativeTime(r.last_activity_at||r.updated_at||r.created_at))}</small></div><strong>${esc(String(r.command_type||'action').replaceAll('_',' '))}</strong><small>→ ${esc(target)} · ${esc(r.requested_by||'GM')} · attempt ${attempt}</small><div class="command-mini-progress" aria-label="Delivery progress">${[0,1,2,3].map(i=>`<i class="${i<=step?'active':''}"></i>`).join('')}</div>${r.last_error?`<div class="command-error">${esc(r.last_error)}</div>`:(r.result?.message?`<div class="command-result">${esc(r.result.message)}</div>`:'')}${r.can_retry?`<button class="quiet-btn command-retry" type="button" data-retry-command="${esc(r.id)}">Retry delivery</button>`:''}</article>`}).join(''):'<p class="muted">No Foundry deliveries yet. Successful pushes will appear here while you work.</p>';
   }
 
   function traitHtml(kind,p){const rarity=String(p.rarity||'common');const raw=[rarity!=='common'?rarity:'',creatureKind(kind)?p.size:'',...slugList(p.traits)].filter(Boolean);return raw.length?`<div class="fw-preview-traits ${kind==='item'?'fw-item-traits':kind==='feat'?'fw-feat-traits':kind==='homebrew'?'fw-free-traits':''}">${raw.map((t,i)=>`<span class="${i===0&&rarity!=='common'?`rarity-${esc(rarity)}`:''}">${esc(t)}</span>`).join('')}</div>`:''}
@@ -219,12 +255,13 @@
   function renderPreview(){
     syncRepeaters();const d=collectData(false);updateToolbar();
     if(!d.title && !d.summary && !(d.payload.description||'').trim() && !state.attacks.length && !state.abilities.length){preview.innerHTML='<div class="fw-statblock-empty"><span>✦</span><h3>Start with a name</h3><p>Your Pathfinder-style preview updates while you type.</p></div>';return}
-    preview.innerHTML=creatureKind(d.kind)?creaturePreview(d):d.kind==='item'?itemPreview(d):d.kind==='feat'?featPreview(d):homebrewPreview(d);
+    preview.innerHTML=creatureKind(d.kind)?creaturePreview(d):d.kind==='item'?itemPreview(d):d.kind==='feat'?featPreview(d):d.kind==='action'?homebrewPreview({...d,payload:{...d.payload,homebrew_document:'action',homebrew_actions:d.payload?.action_cost}}):homebrewPreview(d);
   }
 
   async function refresh(){const data=await jsonFetch('/api/v61/foundry/workshop');state.actors=data.actors||[];state.entries=data.prepared_content||[];state.commands=data.commands||[];renderLibrary();renderLog()}
+  log?.addEventListener('click',async e=>{const b=e.target.closest('[data-retry-command]');if(!b)return;b.disabled=true;try{await send(`/api/v6/foundry/commands/${b.dataset.retryCommand}/retry`,'POST',{});toast('Foundry delivery queued again.');await refresh()}catch(err){toast(err.message||'Could not retry delivery.',true)}finally{b.disabled=false}});
   async function saveCurrent({silent=false}={}){
-    const data=collectData();if(!data.title)throw Error('Give this entry a name first.');
+    const data=collectData();const problems=validateData(data,{announce:true});if(problems.length){field('title')?.reportValidity?.();throw Error('Fix the highlighted PF2e fields before saving.');}
     const saved=await send('/api/v61/foundry/content','POST',data);state.currentId=saved.id;setField('id',saved.id);state.savedSnapshot=JSON.stringify(collectData());setDirty();$('[data-fw-duplicate]').disabled=false;if(!silent)toast('Homebrew saved.');await refresh();return saved
   }
   async function pushCurrent(target='world'){
@@ -255,8 +292,10 @@
     }catch(e){toast(e.message||'Could not queue the Foundry push.',true)}
   }
 
-  form.addEventListener('submit',async e=>{e.preventDefault();try{await saveCurrent()}catch(err){toast(err.message||'Could not save.',true)}});
-  form.addEventListener('input',()=>{renderPreview();setDirty()});form.addEventListener('change',e=>{if(e.target?.name==='item_type')updateItemSubtype();renderPreview();setDirty()});
+  form.addEventListener('submit',async e=>{e.preventDefault();try{await saveCurrent()}catch(err){if(!String(err.message||'').startsWith('Fix the highlighted'))toast(err.message||'Could not save.',true)}});
+  let validationTimer=null;
+  const onWorkshopEdit=()=>{renderPreview();setDirty();clearTimeout(validationTimer);validationTimer=setTimeout(()=>validateData(collectData(),{announce:false}),180)};
+  form.addEventListener('input',onWorkshopEdit);form.addEventListener('change',e=>{if(e.target?.name==='item_type')updateItemSubtype();onWorkshopEdit()});
   $$('[data-fw-kind]').forEach(b=>b.addEventListener('click',()=>setKind(b.dataset.fwKind)));
   $$('[data-fw-template]').forEach(b=>b.addEventListener('click',()=>{
     const key=b.dataset.fwTemplate;
@@ -272,7 +311,7 @@
       'passive-feat':{feat_category:'general',action_cost:'',summary:'A passive feat that changes how the character approaches a recurring situation.'},
       'action-feat':{feat_category:'class',action_cost:'1',summary:'A one-action feat with a clear tactical purpose.'},
       'reaction-feat':{feat_category:'class',action_cost:'reaction',summary:'A reaction feat built around a precise trigger.'},
-      'free-action':{homebrew_document:'action',homebrew_actions:'1',summary:'A custom rules element or action that does not fit another template.'},
+      'free-action':{action_cost:'1',summary:'A custom action or activity with structured action economy and rules text.'},
       'free-item':{homebrew_document:'equipment',summary:'A custom item or rules object that does not fit another template.'},
     };
     const preset=presets[key]||{};Object.entries(preset).forEach(([k,v])=>setField(k,v));
@@ -299,6 +338,14 @@
   $('[data-fw-new]')?.addEventListener('click',()=>{fillForm();switchMobile('editor')});
   $('[data-fw-duplicate]')?.addEventListener('click',()=>{const data=collectData();const copy={...data,id:null,title:`${data.title||'Untitled'} Copy`,payload:structuredClone(data.payload)};fillForm(copy);setField('id','');state.currentId=null;state.savedSnapshot='';setDirty();toast('Duplicated as a new unsaved entry.')});
   $('[data-fw-copy-json]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(JSON.stringify(collectData(),null,2));toast('Homebrew JSON copied.')}catch{toast('Could not access the clipboard.',true)}});
+  const latexModal=$('[data-fw-latex-modal]'),latexText=$('[data-fw-latex-text]'),latexPath=$('[data-fw-latex-path]');
+  async function openLatex(){
+    if(creatureKind(fieldValue('kind')))return toast('LaTeX export is for feats, actions and items.',true);
+    try{const saved=await saveCurrent({silent:true});const out=await jsonFetch(`/api/homebrew/${saved.id}/latex`);latexText.value=out.snippet||'';if(out.suggested_path&&!$$('option',latexPath).some(o=>o.value===out.suggested_path)){const o=document.createElement('option');o.value=out.suggested_path;o.textContent=`${out.suggested_path} · new`;latexPath.prepend(o)}latexPath.value=out.suggested_path||latexPath.value;latexModal?.classList.remove('hidden');latexModal?.setAttribute('aria-hidden','false')}catch(err){toast(err.message||'Could not generate LaTeX.',true)}
+  }
+  $('[data-fw-latex]')?.addEventListener('click',openLatex);$('[data-fw-latex-close]')?.addEventListener('click',()=>{latexModal?.classList.add('hidden');latexModal?.setAttribute('aria-hidden','true')});
+  $('[data-fw-latex-copy]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(latexText?.value||'');toast('LaTeX copied.')}catch{toast('Clipboard permission was denied.',true)}});
+  $('[data-fw-latex-write]')?.addEventListener('click',async e=>{if(!state.currentId)return;const path=latexPath?.value?.trim();if(!path)return toast('Choose a .tex path first.',true);e.currentTarget.disabled=true;try{const out=await send(`/api/homebrew/${state.currentId}/latex/write`,'POST',{path,snippet:latexText.value});latexModal?.classList.add('hidden');latexModal?.setAttribute('aria-hidden','true');toast(out.wiki_warning?'LaTeX written; Codex rebuild has a warning.':'LaTeX written and Codex rebuilt.')}catch(err){toast(err.message||'Could not write LaTeX.',true)}finally{e.currentTarget.disabled=false}});
   $('[data-fw-preview-refresh]')?.addEventListener('click',renderPreview);
   $('[data-fw-push-world]')?.addEventListener('click',()=>pushCurrent('world'));
   $('[data-fw-push-actor]')?.addEventListener('click',()=>pushCurrent('actor'));

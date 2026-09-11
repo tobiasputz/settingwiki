@@ -14,6 +14,7 @@
         <strong>{{ foundry.world_name or 'Foundry offline' }}</strong>
         <small>{% if foundry.received_at %}{{ foundry_actors|length }} actors synced{% else %}queued pushes wait safely{% endif %}</small>
       </div>
+      <a class="quiet-btn" href="/homebrew">Homebrew Library</a><a class="quiet-btn" href="/gm/living-table#creatures">Creature Vault</a>
       <a class="quiet-btn" href="/gm/integrations">Bridge settings</a>
     </div>
   </header>
@@ -36,7 +37,7 @@
         <button type="button" data-fw-filter="monster">Creatures</button>
         <button type="button" data-fw-filter="npc">NPCs</button>
         <button type="button" data-fw-filter="item">Items</button>
-        <button type="button" data-fw-filter="feat">Feats</button>
+        <button type="button" data-fw-filter="feat">Feats</button><button type="button" data-fw-filter="action">Actions</button>
       </div>
       <div id="foundryPrepList" class="fw-library-list"></div>
       <div class="fw-library-footer">
@@ -57,7 +58,7 @@
           </div>
           <div class="fw-editor-actions">
             <button class="quiet-btn" type="button" data-fw-duplicate disabled>Duplicate</button>
-            <button class="quiet-btn" type="button" data-fw-copy-json>Copy JSON</button>
+            <button class="quiet-btn" type="button" data-fw-copy-json>Copy JSON</button><button class="quiet-btn" type="button" data-fw-latex>LaTeX</button>
             <button class="primary-button" type="submit">Save</button>
           </div>
         </header>
@@ -67,6 +68,7 @@
           <button type="button" data-fw-kind="npc"><span>♟</span><strong>NPC</strong><small>People & allies</small></button>
           <button type="button" data-fw-kind="item"><span>◇</span><strong>Item</strong><small>Gear & treasure</small></button>
           <button type="button" data-fw-kind="feat"><span>✦</span><strong>Feat</strong><small>Feats & abilities</small></button>
+          <button type="button" data-fw-kind="action"><span>◆</span><strong>Action</strong><small>Actions & activities</small></button>
           <button type="button" data-fw-kind="homebrew"><span>⌘</span><strong>Freeform</strong><small>Anything else</small></button>
         </section>
 
@@ -84,7 +86,7 @@
             <button type="button" data-fw-template="passive-feat" data-fw-template-kind="feat">Passive feat</button>
             <button type="button" data-fw-template="action-feat" data-fw-template-kind="feat">Action feat</button>
             <button type="button" data-fw-template="reaction-feat" data-fw-template-kind="feat">Reaction</button>
-            <button type="button" data-fw-template="free-action" data-fw-template-kind="homebrew">Custom action</button>
+            <button type="button" data-fw-template="free-action" data-fw-template-kind="action">Custom action</button>
             <button type="button" data-fw-template="free-item" data-fw-template-kind="homebrew">Custom item</button>
           </div>
         </div>
@@ -182,8 +184,8 @@
             </div>
           </section>
 
-          <section class="fw-form-section" data-fw-section="feat">
-            <div class="fw-section-heading"><span>02</span><div><h2>Feat details</h2><p>Requirements and action economy at a glance.</p></div></div>
+          <section class="fw-form-section" data-fw-section="feat action">
+            <div class="fw-section-heading"><span>02</span><div><h2>Feat / action details</h2><p>Requirements and action economy at a glance. Action entries become PF2e Action documents; feats remain PF2e Feats.</p></div></div>
             <div class="fw-field-grid">
               <label><span>Action cost</span><select name="action_cost"><option value="">Passive</option><option value="1">◆ One action</option><option value="2">◆◆ Two actions</option><option value="3">◆◆◆ Three actions</option><option value="reaction">↺ Reaction</option><option value="free">◇ Free action</option></select></label>
               <label><span>Frequency</span><input name="frequency" placeholder="once per hour"></label>
@@ -209,6 +211,18 @@
               <label><span>Action cost</span><select name="homebrew_actions"><option value="">Passive / none</option><option value="1">◆ One action</option><option value="2">◆◆ Two actions</option><option value="3">◆◆◆ Three actions</option><option value="reaction">↺ Reaction</option><option value="free">◇ Free action</option></select></label>
               <label><span>Frequency</span><input name="homebrew_frequency" placeholder="once per day"></label>
               <label class="span-2"><span>Trigger / context</span><input name="homebrew_trigger" placeholder="When the moon is full…"></label>
+            </div>
+          </section>
+
+          <section class="fw-form-section fw-library-placement" data-fw-section="noncreature">
+            <div class="fw-section-heading"><span>03</span><div><h2>Homebrew Library</h2><p>Publish this non-monster entry to Seeker and choose where it is grouped. Automatic grouping is a best effort and can always be overridden.</p></div></div>
+            <label class="fw-toggle-line"><input type="checkbox" name="homebrew_publish" value="1"><span><strong>Publish in Homebrew</strong><small>Players can browse it in the Homebrew section.</small></span></label>
+            <div class="fw-field-grid">
+              <label><span>Library section</span><select name="library_section"><option value="auto">Automatic</option><option value="ancestry">Ancestry feats</option><option value="archetype">Archetype feats</option><option value="class">Class feats</option><option value="general">General & skill feats</option><option value="actions">Actions & activities</option><option value="items">Items & equipment</option><option value="other">Other homebrew</option></select></label>
+              <label><span>Group / heading</span><input name="library_group" placeholder="Elf, Medic, Fighter…"></label>
+              <label><span>Ancestry trait</span><input name="ancestry_trait" placeholder="elf"></label>
+              <label><span>Archetype</span><input name="archetype_name" placeholder="Medic"></label>
+              <label><span>Class</span><input name="class_name" placeholder="Fighter"></label>
             </div>
           </section>
 
@@ -256,7 +270,7 @@
         <footer class="fw-push-bar">
           <div class="fw-save-state" data-fw-save-state><span></span><strong>Not saved yet</strong><small>Draft is also kept locally in this browser.</small></div>
           <div class="fw-push-actions">
-            <button class="quiet-btn" type="button" data-fw-push-world>Save & push to world</button>
+            <button class="quiet-btn" type="button" data-fw-push-world>Save & add to Foundry Items</button>
             <label class="fw-actor-target"><span>Give to</span><select data-fw-actor-target><option value="">Choose actor…</option>{% for actor in foundry_actors %}<option value="{{ actor.actor_id }}">{{ actor.name }}</option>{% endfor %}</select></label>
             <button class="primary-button" type="button" data-fw-push-actor>Save & give</button>
           </div>
@@ -315,30 +329,36 @@
           <button type="button" data-token-preset="minimal">Minimal</button><button type="button" data-token-preset="portrait">Portrait</button><button type="button" data-token-preset="badge">Badge</button><button type="button" data-token-preset="borderless">Borderless</button>
         </div></section>
         <section class="fw-token-recipe-bar"><small>CAMPAIGN RECIPES</small><div><select data-token-recipe-select><option value="">Choose saved recipe…</option></select><button type="button" class="quiet-btn" data-token-recipe-apply>Apply</button><input data-token-recipe-name maxlength="160" placeholder="New recipe name"><button type="button" class="quiet-btn" data-token-recipe-save>Save current</button><button type="button" class="quiet-btn" data-token-recipe-delete>Delete</button></div></section>
-        <section class="fw-token-control-grid">
-          <label><span>Shape</span><select data-token-shape><option value="circle">Circle</option><option value="roundsquare">Rounded square</option><option value="square">Square</option><option value="hex">Hex</option><option value="octagon">Octagon</option><option value="diamond">Diamond</option><option value="shield">Shield</option></select></label>
-          <label><span>Frame pattern</span><select data-token-pattern><option value="clean">Clean</option><option value="ticks">Ticks</option><option value="runes">Runes</option><option value="rivets">Rivets</option><option value="cardinal">Cardinal marks</option><option value="segmented">Segmented ring</option></select></label>
-          <label><span>Ring color</span><input type="color" value="#b79661" data-token-ring></label>
-          <label><span>Background</span><input type="color" value="#171513" data-token-bg></label>
-          <label><span>Inner accent</span><input type="color" value="#e3c68f" data-token-accent></label>
-          <label><span>Line style</span><select data-token-line-style><option value="solid">Solid</option><option value="dash">Dashed</option><option value="dot">Dotted</option></select></label>
-        </section>
-        <section class="fw-token-sliders">
-          <label><span>Artwork scale</span><input type="range" min="0.55" max="2.4" step="0.01" value="1" data-token-scale><output data-token-scale-out>100%</output></label>
-          <label><span>Horizontal</span><input type="range" min="-240" max="240" step="1" value="0" data-token-x><output data-token-x-out>0</output></label>
-          <label><span>Vertical</span><input type="range" min="-240" max="240" step="1" value="0" data-token-y><output data-token-y-out>0</output></label>
-          <label><span>Ring width</span><input type="range" min="0" max="70" step="1" value="30" data-token-width><output data-token-width-out>30</output></label>
-          <label><span>Vignette</span><input type="range" min="0" max="100" step="1" value="18" data-token-vignette><output data-token-vignette-out>18</output></label>
-          <label><span>Brightness</span><input type="range" min="60" max="140" step="1" value="100" data-token-brightness><output data-token-brightness-out>100%</output></label>
-          <label><span>Saturation</span><input type="range" min="0" max="180" step="1" value="100" data-token-saturation><output data-token-saturation-out>100%</output></label>
-        </section>
-        <div class="fw-token-options"><label><input type="checkbox" data-token-shadow checked> Drop shadow</label><label><input type="checkbox" data-token-double checked> Double ring</label><label><input type="checkbox" data-token-glow> Accent glow</label><label><input type="checkbox" data-token-inner-ring> Inner hairline</label></div>
+        <details class="fw-fine-tune">
+          <summary><span>Fine tune frame & artwork</span><small>Shape, colors, framing and finishing controls</small></summary>
+          <div class="fw-fine-tune-body">
+            <section class="fw-token-control-grid">
+              <label><span>Shape</span><select data-token-shape><option value="circle">Circle</option><option value="roundsquare">Rounded square</option><option value="square">Square</option><option value="hex">Hex</option><option value="octagon">Octagon</option><option value="diamond">Diamond</option><option value="shield">Shield</option></select></label>
+              <label><span>Frame pattern</span><select data-token-pattern><option value="clean">Clean</option><option value="ticks">Ticks</option><option value="runes">Runes</option><option value="rivets">Rivets</option><option value="cardinal">Cardinal marks</option><option value="segmented">Segmented ring</option></select></label>
+              <label><span>Ring color</span><input type="color" value="#b79661" data-token-ring></label>
+              <label><span>Background</span><input type="color" value="#171513" data-token-bg></label>
+              <label><span>Inner accent</span><input type="color" value="#e3c68f" data-token-accent></label>
+              <label><span>Line style</span><select data-token-line-style><option value="solid">Solid</option><option value="dash">Dashed</option><option value="dot">Dotted</option></select></label>
+            </section>
+            <section class="fw-token-sliders">
+              <label><span>Artwork scale</span><input type="range" min="0.55" max="2.4" step="0.01" value="1" data-token-scale><output data-token-scale-out>100%</output></label>
+              <label><span>Horizontal</span><input type="range" min="-240" max="240" step="1" value="0" data-token-x><output data-token-x-out>0</output></label>
+              <label><span>Vertical</span><input type="range" min="-240" max="240" step="1" value="0" data-token-y><output data-token-y-out>0</output></label>
+              <label><span>Ring width</span><input type="range" min="0" max="70" step="1" value="30" data-token-width><output data-token-width-out>30</output></label>
+              <label><span>Vignette</span><input type="range" min="0" max="100" step="1" value="18" data-token-vignette><output data-token-vignette-out>18</output></label>
+              <label><span>Brightness</span><input type="range" min="60" max="140" step="1" value="100" data-token-brightness><output data-token-brightness-out>100%</output></label>
+              <label><span>Saturation</span><input type="range" min="0" max="180" step="1" value="100" data-token-saturation><output data-token-saturation-out>100%</output></label>
+            </section>
+            <div class="fw-token-options"><label><input type="checkbox" data-token-shadow checked> Drop shadow</label><label><input type="checkbox" data-token-double checked> Double ring</label><label><input type="checkbox" data-token-glow> Accent glow</label><label><input type="checkbox" data-token-inner-ring> Inner hairline</label></div>
+          </div>
+        </details>
         <div class="fw-token-modal-actions"><label class="quiet-btn fw-upload-button">Use another image<input type="file" accept="image/png,image/jpeg,image/webp" data-token-source-file hidden></label><button type="button" class="quiet-btn" data-token-reset>Reset</button><button type="button" class="primary-button" data-token-save>Save token to Seeker</button></div>
       </div>
     </div>
   </div>
 </div>
+<div class="fw-token-modal hidden" data-fw-latex-modal aria-hidden="true"><div class="fw-token-card fw-latex-card"><header><div><span class="eyebrow">LATEX EXPORT</span><h2>Seeker source block</h2><p>Generate the same feat/action/item as a native Seeker LaTeX command.</p></div><button class="fw-token-close" type="button" data-fw-latex-close>×</button></header><div class="fw-token-workspace"><section class="fw-token-controls"><label><span>Project .tex file</span><select data-fw-latex-path>{% for f in project_tex_files %}<option value="{{ f|e }}">{{ f }}</option>{% endfor %}</select></label><p class="fw-field-help">Writing uses stable markers, so exporting this entry again updates the same block instead of duplicating it.</p><div class="fw-token-actions"><button class="quiet-btn" type="button" data-fw-latex-copy>Copy</button><button class="primary-button" type="button" data-fw-latex-write>Write to source</button></div></section><section class="fw-token-preview"><textarea data-fw-latex-text rows="18" style="width:100%;height:100%;min-height:340px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></section></div></div></div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7000">{% endblock %}
-{% block scripts %}<script src="/static/foundry-workshop.js?v=7000"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7200">{% endblock %}
+{% block scripts %}<script src="/static/foundry-workshop.js?v=7200"></script>{% endblock %}

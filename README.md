@@ -1,10 +1,42 @@
-# Seeker 7.0.0
+# Seeker 7.2.0 — Compendium
 
-**Seeker 7 — The Living Table** turns the existing campaign wiki, session tools, Foundry Workshop, maps and world-state systems into one campaign operating layer. The primary GM workspace is `/gm/v7`; the phone-oriented player surface is `/app`. Existing Seeker data is migrated additively and a pre-V7 SQLite backup is created automatically on first schema initialization.
 
-For the current Railway deployment the canonical public origin is `https://seeker.up.railway.app`. Foundry Bridge 1.5.0 is installed/updated from `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
+Compendium separates campaign lore from custom rules. The Monster Codex now uses a clean Seeker-native dossier with GM-controlled section disclosure, while custom feats, actions/activities, and items live in a dedicated Homebrew Library grouped by ancestry, archetype, class, category, and level. The Workshop can publish those entries to Foundry's world Items directory or give them to actors, and can export the same entry as native Seeker LaTeX. Studio can now create folders and safely move/rename project files and folders, rewriting ordinary project-local `\input`, `\include`, and `\subfile` references.
 
-This build includes Foundry Bridge 1.5.0 with hardened PF2e creature strikes/spellcasting/spell imports, structured special-ability authoring, expanded Token Forge, forced post-push refresh, and Discord mention fixes.
+**Tempered** is a finish-and-flow release: it does not add another subsystem, but makes the existing Seeker surfaces faster, clearer and more trustworthy in daily play. Living Table, Monster Codex, Foundry Workshop, Encounter Builder, Knowledge, Table App, Asset Library, maps, permissions and campaign search now share a more consistent interaction language, clearer state feedback and stronger mobile ergonomics.
+
+The most important reliability change is **live Foundry reconciliation**. HP, temporary HP, Hero Points, Focus and item quantities update optimistically in Seeker, follow the exact queued Foundry command through acknowledgement, and reconcile against the confirmed value without a full-page reload. The Foundry ACK also projects confirmed resource/quantity changes into Seeker's cached character snapshot immediately, closing the race where Foundry had already changed but Seeker still showed stale values until another refresh. Multiple rapid taps are tracked independently and failed writes roll back visibly.
+
+Tempered also tightens PF2e Workshop validation before push, simplifies Token Forge through progressive disclosure, improves Encounter Builder budget legibility, makes Knowledge fidelity/certainty and effective permissions easier to scan, strengthens Foundry delivery-state presentation, improves Codex browsing and AoN batch confidence, makes relationship/front/change history easier to read, and reduces unnecessary work in hidden/reduced-motion maps. Compendium extends the Foundry protocol for first-class Action documents; Foundry Bridge **1.8.0** is required for the new world-Items/action workflow. Static/PWA cache generation is **7200**.
+
+For the current Railway deployment the canonical public origin remains `https://seeker.up.railway.app`, with the Foundry module manifest at `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
+
+## Seeker 7.0.4 — Codex & Relay
+
+**Living Table** turns the existing campaign wiki, session tools, Foundry Workshop, maps and world-state systems into one campaign operating layer. The canonical GM workspace is `/gm/living-table`; the phone-oriented player surface is `/app`. Existing Seeker data migrates additively and a pre-major-release SQLite backup is created automatically on first schema initialization.
+
+For the current Railway deployment the canonical public origin is `https://seeker.up.railway.app`. Foundry Bridge is installed/updated from `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
+
+This release focuses on trustworthy table operations: editable/removable Monster Codex entries, clean AoN imports, Discord mention verification, and persistent/observable Foundry delivery for HP, resources, item quantities and actor item grants.
+
+
+## Seeker 7.0.3: Layered Knowledge & Party Deductions
+
+Recall Knowledge and combat discovery now support **Exact**, **Vague**, and **Comparative** disclosure. A GM can keep the real statistic private while revealing qualitative or relative information such as “it is extremely vulnerable to fire” or “Fortitude is its highest save.” Disclosure is enforced server-side: player APIs receive only the chosen wording and never the hidden exact mechanics stored on the same knowledge fact. The Living Table knowledge panel lets the GM choose disclosure fidelity per fact both for direct reveals and for Recall Knowledge results, including an entire-party reveal target.
+
+Players can now add **Field Deductions** to any visible entity. Notes may be private or party-shared, can represent freeform hypotheses/comparisons, or can track a numeric range such as an estimated AC. The AC helper can infer a range from a normal missed attack total and a normal hit total. Players can later share a private deduction with the party, and can also share a GM-revealed fact with everyone while preserving its original disclosure fidelity. Player deductions remain visibly marked as inference until a GM confirms or rejects them; they never silently become canonical monster mechanics.
+
+The Table App and entity dossiers use the same player-safe projection, preventing exact creature summaries or knowledge metadata from bypassing Field Notes visibility. Static/PWA cache generation moves to **7030**. Foundry Bridge remains **1.6.0**; this release does not require a module update.
+
+## Seeker 7.0.2: Archives of Nethys Creature Vault
+
+The **Creature Vault** turns Archives of Nethys creature and NPC pages into normal Seeker monster entries. Paste one link or a batch of links, optionally publish them to the Monster Codex, attach them directly to an encounter, or organize them in reusable campaign collections. Seeker retains the canonical source link and stores the parsed creature fields rather than archiving the fetched webpage, keeping Railway storage small. Re-importing the same canonical AoN URL reuses the existing creature by default; **Refresh existing** deliberately refreshes mechanics while preserving Seeker artwork/token choices, GM notes and Codex visibility.
+
+Encounter preparation and Creature Vault collections can now be pushed as a **single Foundry bundle**. Seeker Bridge 1.6.0 creates a real Actor folder for the encounter/collection, updates existing Seeker-managed actors when a UUID is already linked, creates missing actors, and reports failures per creature without discarding the rest of the folder. Imported AoN strikes support multiple damage components and imported statblocks may contain multiple spellcasting entries.
+
+## Seeker 7.0.1: Proficiency Without Level encounters
+
+The Living Table Encounter Builder supports both **Standard PF2e** and the official **Proficiency Without Level** encounter math. The rules mode is stored per encounter so old and new encounters remain reproducible. PWL uses the GM Core creature-XP table from party level −7 through +7 while retaining the normal encounter threat budgets and party-size scaling. Each creature row shows its calculated XP contribution, and an optional manual XP override is available for creatures outside the published PWL range instead of Seeker inventing values.
 
 # Seeker — interactive setting & session companion
 
@@ -19,7 +51,7 @@ It is designed for long-running Pathfinder 2e / TTRPG campaigns where the LaTeX 
 
 V6.1 turns the optional Foundry connection into a normal installable Foundry module. On the active campaign's **GM → Integrations** page, copy the manifest URL and paste it into Foundry's **Install Module → Manifest URL** field. Enable the module in the world, then paste Seeker's private bridge endpoint into the module settings. Only a GM Foundry client pushes data, and the bridge is read-only: Seeker never changes Foundry actors or scenes. The bridge now repairs reverse-proxy HTTP/HTTPS mismatches automatically and shows an in-Foundry success/failure notification after its first heartbeat, so a failed connection no longer leaves the GM with only an unexplained “Waiting for Foundry” state.
 
-For the current Railway deployment, the canonical public origin is `https://seeker.up.railway.app`. Seeker normally derives this from the public request host (rather than blindly trusting a secondary Railway domain). You can still pin it explicitly with `SEEKER_PUBLIC_URL=https://seeker.up.railway.app`. Foundry Bridge 1.5.0 also repairs an old saved Seeker hostname after the module is updated from the current manifest.
+For the current Railway deployment, the canonical public origin is `https://seeker.up.railway.app`. Seeker normally derives this from the public request host (rather than blindly trusting a secondary Railway domain). You can still pin it explicitly with `SEEKER_PUBLIC_URL=https://seeker.up.railway.app`. Foundry Bridge 1.6.0 also repairs an old saved Seeker hostname after the module is updated from the current manifest.
 
 Player characters can be linked to synced Foundry actors from the Seeker character editor. The owning player then gets a polished read-only PF2e sheet on Seeker with identity, vitals, defenses, skills, attacks, feats, actions, inventory, spells, conditions and a deep link back to the real Foundry actor. Foundry remains the source of truth; Seeker stores a bounded snapshot for display. Other players do not receive that private mechanical snapshot.
 
@@ -557,3 +589,14 @@ When `latexmk -xelatex` runs, XeLaTeX deliberately typesets to an intermediate `
 Seeker now handles that pipeline explicitly. Large projects receive an adaptive build allowance, AUTO-selected XeLaTeX no longer clears auxiliary files on every compile, and a fresh `.xdv` can be converted to PDF in a separate recovery stage if the outer `latexmk` process stops before conversion. If `xdvipdfmx` fails, its own diagnostic is promoted to **FIRST BLOCKING ERROR**.
 
 `LATEX_TIMEOUT` is now treated as the minimum per-stage allowance. Large XeLaTeX/LuaLaTeX projects may automatically receive 180–300 seconds so a long illustrated campaign book is not killed by the historical 60-second default.
+
+
+## Handout workshop (7.3)
+
+Open **Handouts → Open handout workshop** as a GM. Choose a preset, write the text, select paper, and optionally attach an illustration. Blank lines separate paragraphs. Save creates a private draft by default. Under **Sharing & GM notes**, select **Share with this campaign’s players** and save to reveal it. An optional expiry hides it again. GM notes are stored separately and never appear in the player document or exports.
+
+Use folders and search to organize your collection. Duplicate keeps the current editor content and creates a private copy when saved. Delete requires confirmation and is permanent. Unsaved changes trigger a navigation warning. You can link a handout to a codex entry by its slug.
+
+**Print / Save PDF** opens the browser print dialog; choose Save as PDF. **Download HTML** creates an offline document with its illustration embedded. **Download text** exports the player-facing words only. The player handout has a print view accessible through the same campaign access rules. Artwork follows Seeker’s existing asset-serving model; avoid putting separate GM secrets inside an illustration intended for sharing.
+
+Existing handouts can be edited. Legacy HTML formatting is converted to plain paragraphs in the workshop; the saved version then uses the selected preset layout. Existing session links and artwork references are preserved. There are no new runtime dependencies or environment variables. Deploy the updated code using your existing Railway volume and settings; the new design metadata table is created automatically.

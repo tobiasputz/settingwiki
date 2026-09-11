@@ -1,8 +1,89 @@
+## 7.3.0 — Handout workshop
+
+- Added a dedicated GM handout workshop at `/gm/handouts`, linked from Handouts.
+- 32 editable fantasy presets across correspondence, authority, commerce, notices, adventures, lore and magic.
+- Six paper styles, live player previews, artwork uploads, folders/search, duplication, private drafts, expiration, and private GM notes.
+- Print / Save PDF through the browser; standalone HTML with embedded artwork and plain-text downloads.
+- Existing handouts remain available. Opening legacy HTML in the workshop converts its body to editable plain text; saving uses the new document layout.
+- Enforced campaign ownership on handout updates and deletion; generated unique, stable document links; sanitized legacy handout HTML.
+- Design metadata is added automatically on startup without altering existing handout records.
+
+# Seeker 7.2.0 — Compendium
+
+- Rebuilt Monster Codex detail pages as clean Seeker-native dossiers instead of stacking LaTeX/PF2e presentation styles. GM disclosure is granular by identity, awareness, defenses, movement, strikes, abilities, spellcasting, and descriptive rules.
+- Added the dedicated **Homebrew Library** for non-monster custom rules. Feats, actions/activities, and items are grouped by ancestry, archetype, class/category, and level, with GM editing, manual reclassification, Foundry publishing, actor delivery, LaTeX export, and deletion.
+- Added first-class **Action / Activity** authoring to the Workshop and Foundry bridge. Feats/actions/items can be sent to Foundry's world **Items** directory or directly to actors.
+- Added native LaTeX export for `\feat`, `\action`, and `\itemtemplate`, including stable marker-based source updates rather than duplicate blocks.
+- Added Studio folder creation plus safe file/folder move and rename. Ordinary project-local `\input`, `\include`, and `\subfile` references are rewritten after moves, and moved `homebrew/` source pages leave the main setting Codex automatically.
+- Foundry Bridge is now **1.8.0**. Static/PWA cache generation is **7200**.
+
+# Seeker 7.1.0 — Tempered
+
+- Adds a shared **finish-and-flow design layer** across Living Table, Studio, Session Console, Monster Codex, Workshop, Table App and player-facing surfaces: consistent focus states, 44–48 px touch targets, busy states, state chips, motion behavior and denser responsive hierarchy without flattening Seeker's visual identity.
+- Fixes the Foundry resource-sync race. Successful resource/item-quantity ACKs immediately project the confirmed value into Seeker's cached character snapshot, while the normal Foundry heartbeat remains the authoritative later reconciliation.
+- Character Sheet and Table App resource controls now update optimistically, track multiple rapid taps independently, wait for the exact Foundry command result, reconcile from the fresh Seeker snapshot without a page reload, and visibly roll back on failure.
+- Makes the **Foundry Delivery Center** easier to trust at a glance with clearer target/error/attempt metadata and progress-state treatment; no delivery disappears merely because the originating page changed.
+- Adds pre-push structured PF2e validation in Foundry Workshop and moves advanced Token Forge controls behind a polished **Fine tune** disclosure so common authoring stays compact without removing power.
+- Improves Encounter Builder readability with visible XP threshold markers, contribution/status treatment and clearer Standard/PWL state without changing encounter math.
+- Improves Knowledge and Recall Knowledge scanning with distinct Exact/Vague/Comparative and Inferred/Confirmed/Rejected visual states; improves permissions editing by showing effective access alongside overrides.
+- Refines Monster Codex browsing, AoN batch-import confidence, relationship history, fronts/session-change presentation, Asset Library usage safety, campaign-search relevance wording and one-handed Table App ergonomics.
+- Reduces decorative map work when the page is hidden and honors reduced-motion preferences more aggressively.
+- Adds query-path cleanup for Living Table Foundry-link lookups and creature bundle preparation to reduce repeated database work and redundant object loading.
+- Includes the refinement stylesheet in the offline/PWA shell so installed clients retain the same interaction polish offline.
+- Static/PWA cache generation moves to **7100**. Foundry Bridge remains **1.7.0**; no module update is required.
+
+# Seeker 7.0.4 — Codex & Relay
+
+- Adds full in-place **Monster Codex editing** for monster/NPC names, descriptions, visibility and structured PF2e mechanics, plus a safe **Remove from Codex** action that preserves the underlying Workshop/Creature Vault source.
+- Sanitizes malformed Archives of Nethys summaries so AoN navigation/menu chrome can never become a creature description; existing imported entries are cleaned at presentation time as well as future imports.
+- Reworks Discord mention delivery to send explicit `allowed_mentions`, use webhook `wait=true`, and inspect Discord's returned Message object so Seeker distinguishes a posted `@everyone`/role string from a notification Discord actually activated.
+- Replaces ambiguous Foundry queue feedback with persistent delivery states: **Waiting for Foundry → Delivered → Applying → Applied / Failed**, including attempt counts, concrete errors, automatic stale-delivery retries and GM retry controls.
+- Foundry Bridge **1.7.0** polls the lightweight command queue even when the Foundry tab is in the background, resolves actors by ID/UUID/name fallback, verifies resource and item-quantity writes by reading them back, and forces a fresh state sync after command execution.
+- Actor item grants now use Foundry's actor embedded-document API (`createEmbeddedDocuments`) and verify the created item is present before acknowledging success. Command IDs are stored on granted items so a retry cannot duplicate an already-delivered item.
+- Character and phone Table App controls now follow the actual Foundry command result instead of blindly reloading after a fixed delay.
+- Command-start telemetry is best-effort: a transient status-ack failure can no longer prevent the actual Foundry write from executing.
+- Visible product naming uses **Seeker / Living Table** rather than presenting the feature family as “V7”.
+- Static/PWA cache generation moves to **7040**.
+
+# Seeker 7.0.3 — Layered Knowledge & Party Deductions
+
+- Adds three Recall Knowledge disclosure fidelities: **Exact**, **Vague**, and **Comparative**. The GM can reveal a qualitative weakness or relative save ranking without exposing the stored number.
+- Makes disclosure privacy server-side rather than cosmetic. A vague/comparative player projection strips the exact body and private mechanics JSON before leaving the server.
+- Adds per-fact disclosure selection to both direct reveals and Recall Knowledge resolution, plus an **Entire party** target.
+- Lets players share an already-revealed fact with the rest of the party while preserving the disclosure mode they actually learned. Party sharing never downgrades a party member who already knows an exact version.
+- Adds player-authored **Field Deductions** with private/party visibility, inference/confirmed/rejected state, freeform notes, hypotheses, comparisons and numeric ranges.
+- Adds AC evidence shortcuts: a normal miss establishes a lower bound and a normal hit establishes an upper bound. Seeker refuses contradictory ranges and explicitly warns that natural 1/20 results should not be used for this inference.
+- Lets a player share or privatize their own deduction later. GMs can confirm or reject player deductions without silently converting them into canonical mechanics.
+- Hardens the phone Table App journal to use the same player-safe entity projection as the entity dossier.
+- Static/PWA cache generation moves to **7030**. Foundry Bridge remains **1.6.0**; no module update is needed.
+
+# Seeker 7.0.2 — Archives of Nethys Creature Vault & Foundry folders
+
+- Adds a polished **Creature Vault** to the Living Table. Paste one or many Archives of Nethys creature/NPC links and Seeker turns them into normal editable monster entries while retaining the canonical AoN source link.
+- AoN import is duplicate-safe and intentionally lean: Seeker stores parsed creature data and source metadata, not copies of the fetched HTML. Existing imports are reused unless **Refresh existing AoN entries** is selected.
+- Imports can be sent directly into the Monster Codex, an encounter, or a reusable Creature Vault collection. Refreshing an AoN entry preserves Seeker artwork/token choices, GM notes and Codex visibility settings.
+- Adds campaign-scoped **Creature Vault collections**. Deleting a collection removes only the grouping, never its creatures or Foundry actors.
+- Encounter **Prepare in Foundry** and Creature Vault **Push folder** now queue one bundle command. Foundry Bridge 1.6.0 creates a real Actor folder and creates/updates every Seeker-managed creature inside it, reporting per-creature failures without aborting the rest of the bundle.
+- AoN-created strikes support multiple damage components and imported creatures support multiple spellcasting blocks.
+- Hardens the server-side AoN fetcher with an exact host/path allowlist, bounded response size/batch size, and redirect validation so redirects cannot escape the AoN creature endpoints.
+- Static/PWA cache generation moves to **7020**. Foundry Bridge moves to **1.6.0** and must be updated for folder/bundle import support.
+
+# Seeker 7.0.1 — Proficiency Without Level encounters
+
+- Adds a polished **Rules math** selector to every Living Table encounter: Standard PF2e or Proficiency without Level.
+- Implements the official GM Core PWL creature-XP table from party level −7 through +7 (9/12/14/18/21/26/32/40/48/60/72/90/108/135/160 XP).
+- Keeps the normal PF2e encounter threat budgets and existing party-size adjustment under PWL, as specified by the variant rules.
+- Shows the rules variant, per-creature XP, total XP contribution, and incomplete-budget warnings directly in the encounter UI.
+- Adds an optional per-creature XP override. PWL creatures outside the published ±7 table are explicitly marked as needing an override rather than receiving invented math.
+- Rejects negative/non-integer XP overrides.
+- Static cache generation moves to **7010** so existing browsers/PWA installs receive the updated encounter builder immediately.
+- Foundry Bridge remains **1.5.0**; no Foundry module update is required for this encounter-math-only release.
+
 # Seeker 7.0.0 — The Living Table
 
 - Adds the **Living Table** campaign operating surface built around Prepare → Run → Resolve → Remember.
 - Adds a universal, campaign-scoped entity registry linking lore, characters, monsters, NPCs, factions, places, items, sessions, maps, relationships, knowledge and Foundry documents.
-- Adds versioned entity history with restore, an audit trail, additive V7 schema migration, and automatic pre-V7 SQLite backup.
+- Adds versioned entity history with restore, an audit trail, additive major-release schema migration, and automatic pre-V7 SQLite backup.
 - Adds managed Foundry synchronization with Seeker-owned document flags, UUID tracking, field-level comparison, conflict states and safe directional resolution.
 - Adds PF2e encounter budgeting, reusable encounters, Foundry preparation, live loot pools and player claims.
 - Adds layered per-player knowledge facts, Recall Knowledge records and selective reveals without exposing full statblocks.

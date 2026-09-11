@@ -65,6 +65,11 @@ from .scheduling import (
     init_schedule_db, list_player_availability, save_player_availability, player_campaigns, campaign_schedule,
 )
 from .semantic_search import semantic_search
+from .aon import sanitize_aon_summary
+from .homebrew import (
+    NON_MONSTER_KINDS, HOME_BREW_SECTIONS, classify_homebrew, group_homebrew, homebrew_latex_snippet,
+    is_homebrew_source_path, source_homebrew_bucket, truthy, upsert_latex_block,
+)
 
 from .v5 import (
     init_v5_db, list_follows, set_follow, followers_for_target, list_party_notes, save_party_note, delete_party_note,
@@ -84,6 +89,7 @@ from .v6 import (
     foundry_accept, foundry_state, foundry_actors, foundry_link, foundry_link_for_character, foundry_manifest, build_foundry_module_zip,
     list_foundry_prepared_content, save_foundry_prepared_content, delete_foundry_prepared_content,
     queue_foundry_command, claim_foundry_commands, complete_foundry_commands, recent_foundry_commands,
+    get_foundry_command, start_foundry_commands, retry_foundry_command,
     calendar_feed, session_ics,
     sync_lore_revisions, lore_revisions, lore_revision_diff, restore_lore_source_revision, page_update_status, knowledge_matrix, converge_campaigns,
     changes_since_last_session, continuity_v6, player_dashboard, command_rows, save_map_annotation, list_map_annotations, delete_map_annotation,
@@ -613,7 +619,7 @@ def _visible_wiki_cached(admin: bool, invite_id: int | None, player_label: str, 
         category["presentation"]=dict(source_category.get("presentation",{}))
         # Reuse the already filtered/mutated visible page objects so teaser
         # state and player-specific excerpts are consistent in sidebars/home.
-        category["pages"]=[by_slug[p.get("slug")] for p in source_category.get("pages",[]) if p.get("slug") in by_slug]
+        category["pages"]=[by_slug[p.get("slug")] for p in source_category.get("pages",[]) if p.get("slug") in by_slug and not is_homebrew_source_path(by_slug[p.get("slug")].get("source_file"))]
         if category["pages"]:
             clean_categories.append(category)
     wiki["categories"] = clean_categories
@@ -1065,7 +1071,7 @@ def public_search(request: Request, q: str = ""):
     qn = q.strip()
     if not qn: return []
     wiki = _visible_wiki(request)
-    pages=wiki.get("pages",[])
+    pages=[p for p in wiki.get("pages",[]) if not is_homebrew_source_path(p.get("source_file"))]
     ranked=[]
     # Local semantic retrieval runs only over the already spoiler-filtered Codex.
     for hit in semantic_search(pages,qn,limit=18):
@@ -1357,6 +1363,8 @@ def handout_page(request: Request, slug: str):
     if not player_allowed(request): return player_gate_redirect(request)
     cid=_active_campaign_id(request); row=next((x for x in list_handouts(settings,admin=is_gm(request),campaign_id=cid) if x["slug"]==slug),None)
     if not row: raise HTTPException(404,"Handout not found")
+    from .handout_creator import metadata, clean_html
+    row["body"]=clean_html(row["body"]); row["theme"]=(metadata(settings,row["id"]) or {}).get("theme","parchment")
     row["image_url"]=_asset_ref_url(row.get("image_ref","")); wiki=_visible_wiki(request); maps=list_maps(settings,public=True)
     if not is_admin(request) and row.get("page_slug") not in {p.get("slug") for p in wiki.get("pages",[])}: row["page_slug"]=None
     return templates.TemplateResponse("handout.html", {"request":request,"wiki":wiki,"maps":maps,"handout":row,"admin_view":is_gm(request)})
@@ -1837,6 +1845,17 @@ def admin_invitation_delete(request: Request, invite_id: int):
 def admin_files(request: Request): require_admin(request); return list_project_files(settings)
 
 
+@app.get("/api/admin/folders")
+def admin_folders(request:Request):
+    require_admin(request);root=settings.project_dir.resolve();rows=[]
+    for path in sorted(settings.project_dir.rglob('*')):
+        if not path.is_dir():continue
+        rel=path.relative_to(root).as_posix()
+        if not rel or any(part.startswith('.') for part in Path(rel).parts):continue
+        rows.append({'path':rel,'type':'folder'})
+    return rows
+
+
 @app.get("/api/admin/wiki-pages")
 def admin_wiki_pages(request: Request):
     require_admin(request)
@@ -1879,6 +1898,78 @@ def admin_delete_file(request: Request, path: str):
     if p.is_dir(): shutil.rmtree(p)
     else: p.unlink()
     return {"ok":True}
+
+
+def _rewrite_moved_tex_references(old_rel:str,new_rel:str,is_dir:bool) -> list[str]:
+    r"""Update ordinary \input/\include/\subfile references after a Studio move.
+
+    Seeker keeps this deliberately narrow: only literal project-local include paths
+    are rewritten. Macro-generated includes are left untouched and Build Doctor can
+    report them if the move makes them invalid.
+    """
+    root=settings.project_dir.resolve();old_rel=old_rel.replace('\\','/').strip('/');new_rel=new_rel.replace('\\','/').strip('/')
+    old_path=(root/old_rel).resolve();new_path=(root/new_rel).resolve();changed=[]
+    command_re=re.compile(r"\\(input|include|subfile)\s*\{([^}]+)\}")
+    for src in settings.project_dir.rglob('*'):
+        if not src.is_file() or src.suffix.lower() not in {'.tex','.sty','.cls'}:continue
+        try:text=src.read_text(encoding='utf-8',errors='replace')
+        except OSError:continue
+        def repl(match):
+            raw=match.group(2).strip();raw_norm=raw.replace('\\','/').lstrip('./')
+            candidates=[]
+            for base in (root,src.parent):
+                target=(base/raw_norm).resolve();candidates.append(target)
+                if not Path(raw_norm).suffix:candidates.append(target.with_suffix('.tex'))
+            hit=next((x for x in candidates if (x==old_path or (is_dir and old_path in x.parents))),None)
+            if hit is None:return match.group(0)
+            suffix=hit.relative_to(old_path) if is_dir and hit!=old_path else Path('')
+            mapped=(new_path/suffix).resolve() if is_dir else new_path
+            # Project-root paths are the least surprising in a multi-file Overleaf workflow.
+            replacement=mapped.relative_to(root).as_posix()
+            if not Path(raw).suffix and replacement.endswith('.tex'):replacement=replacement[:-4]
+            return f"\\{match.group(1)}{{{replacement}}}"
+        updated=command_re.sub(repl,text)
+        if updated!=text:
+            rel=src.relative_to(root).as_posix();save_text_file(settings,rel,updated);changed.append(rel)
+    return changed
+
+
+@app.post('/api/admin/folder/new')
+def admin_new_folder(request:Request,payload:dict=Body(...)):
+    require_admin(request);rel=str(payload.get('path') or '').replace('\\','/').strip('/')
+    if not rel:raise HTTPException(400,'Missing folder path.')
+    target=safe_project_path(settings,rel)
+    if target.exists():raise HTTPException(409,'A file or folder already exists there.')
+    target.mkdir(parents=True,exist_ok=False)
+    return {'ok':True,'path':rel}
+
+
+@app.post('/api/admin/file/move')
+def admin_move_file(request:Request,payload:dict=Body(...)):
+    require_admin(request)
+    old_rel=str(payload.get('source') or '').replace('\\','/').strip('/')
+    new_rel=str(payload.get('destination') or '').replace('\\','/').strip('/')
+    if not old_rel or not new_rel or old_rel==new_rel:raise HTTPException(400,'Choose a source and a different destination.')
+    source=safe_project_path(settings,old_rel);dest=safe_project_path(settings,new_rel)
+    if not source.exists():raise HTTPException(404,'Source file or folder was not found.')
+    if dest.exists():raise HTTPException(409,'A file or folder already exists at the destination.')
+    if source==settings.project_dir.resolve():raise HTTPException(400,'The project root cannot be moved.')
+    if source.is_dir() and (dest==source or source in dest.parents):raise HTTPException(400,'A folder cannot be moved inside itself.')
+    was_dir=source.is_dir();dest.parent.mkdir(parents=True,exist_ok=True)
+    shutil.move(str(source),str(dest))
+    rewritten=[]
+    if bool(payload.get('rewrite_includes',True)):
+        rewritten=_rewrite_moved_tex_references(old_rel,new_rel,was_dir)
+    configured=get_setting(settings,'main_file','')
+    if configured:
+        cfg=configured.replace('\\','/').strip('/')
+        if cfg==old_rel or (was_dir and cfg.startswith(old_rel.rstrip('/')+'/')):
+            suffix=cfg[len(old_rel):].lstrip('/')
+            set_setting(settings,'main_file',new_rel.rstrip('/')+('/'+suffix if suffix else ''))
+    if old_rel.lower().endswith('.tex') or new_rel.lower().endswith('.tex') or was_dir:
+        try:build_wiki(settings)
+        except Exception as exc:return {'ok':True,'source':old_rel,'destination':new_rel,'rewritten':rewritten,'wiki_warning':str(exc)}
+    return {'ok':True,'source':old_rel,'destination':new_rel,'rewritten':rewritten}
 
 
 def _source_fix_edits(fix: dict) -> list[dict]:
@@ -2358,18 +2449,87 @@ def admin_mystery_delete(request:Request,mystery_id:int):
 
 @app.post("/api/admin/handouts")
 def admin_handout_save(request:Request,payload:dict=Body(...)):
-    require_gm(request);row=save_handout(settings,_campaign_payload(request,payload))
-    if str(row.get("visibility") or "players")!="gm":
-        create_notification(settings,{"campaign_id":_active_campaign_id(request),"title":"New handout · "+str(row.get("title") or "Handout"),"body":"A new letter, relic, or handout is available.","target_type":"handout","target_key":str(row.get("id") or ""),"kind":"handout","audience":[]})
+    require_gm(request)
+    from .handout_creator import normalize, render_body, clean_html, save_metadata
+    cid=_active_campaign_id(request); payload=dict(payload); payload['campaign_id']=cid
+    previous=_creator_handout(request,payload['id']) if payload.get('id') else None
+    design=normalize(payload.pop('design')) if 'design' in payload else None
+    if not str(payload.get('title','')).strip(): raise HTTPException(400,"A title is required")
+    if len(str(payload['title']))>300: raise HTTPException(400,"Title is too long")
+    if payload.get('visibility','gm') not in {'gm','players'}: raise HTTPException(400,"Invalid visibility")
+    payload.setdefault('visibility','gm')
+    if payload.get('session_id'):
+        with connect(settings) as conn: parent=conn.execute("SELECT id FROM campaign_sessions WHERE id=? AND campaign_id=?",(payload['session_id'],cid)).fetchone()
+        if not parent: raise HTTPException(400,"Session does not belong to this campaign")
+    if payload.get('expires_at') is not None:
+        import math
+        try: expiry=float(payload['expires_at'])
+        except (ValueError,TypeError): raise HTTPException(400,"Invalid expiry")
+        if not math.isfinite(expiry): raise HTTPException(400,"Invalid expiry")
+        payload['expires_at']=expiry
+    if design: payload.update(body=render_body(design),kind=design['preset'])
+    else: payload['body']=clean_html(payload.get('body',''))
+    # Keep published links stable, and make new slugs collision-free across campaigns.
+    if previous: payload['slug']=previous['slug']
+    else:
+        import uuid
+        payload['slug']=str(payload.get('slug') or payload['title'])+'-'+uuid.uuid4().hex[:10]
+    row=save_handout(settings,payload)
+    if design: save_metadata(settings,row['id'],design)
+    if row['visibility']=='players' and (not previous or previous['visibility']=='gm'):
+        create_notification(settings,{"campaign_id":cid,"title":"New handout · "+row['title'],"body":"A new handout is available.","target_type":"handout","target_key":str(row['id']),"kind":"handout","audience":[]})
     return row
+
+
+def _creator_handout(request,handout_id):
+    try: hid=int(handout_id)
+    except (TypeError,ValueError): raise HTTPException(400,"Invalid handout ID")
+    with connect(settings) as conn: row=conn.execute("SELECT * FROM handouts WHERE id=? AND campaign_id=?",(hid,_active_campaign_id(request))).fetchone()
+    if not row: raise HTTPException(404,"Handout not found")
+    return dict(row)
 
 
 @app.delete("/api/admin/handouts/{handout_id}")
 def admin_handout_delete(request:Request,handout_id:int):
-    require_gm(request)
-    from .storage import connect
-    with connect(settings) as conn:conn.execute("DELETE FROM handouts WHERE id=?",(handout_id,))
+    require_gm(request);_creator_handout(request,handout_id)
+    with connect(settings) as conn:
+        conn.execute("DELETE FROM handout_designs WHERE handout_id=?",(handout_id,))
+        conn.execute("DELETE FROM handouts WHERE id=? AND campaign_id=?",(handout_id,_active_campaign_id(request)))
     return {"ok":True}
+
+
+@app.get('/gm/handouts',response_class=HTMLResponse)
+def handout_creator_page(request:Request):
+    require_gm(request)
+    from .handout_creator import PRESETS
+    return templates.TemplateResponse('handout_creator.html',{'request':request,'wiki':_visible_wiki(request),'maps':list_maps(settings,public=True),'presets':PRESETS})
+
+
+@app.get('/api/admin/handout-creator')
+def handout_creator_list(request:Request):
+    require_gm(request)
+    with connect(settings) as conn:
+        rows=[dict(r) for r in conn.execute('SELECT h.*, d.data AS design_data FROM handouts h LEFT JOIN handout_designs d ON d.handout_id=h.id WHERE h.campaign_id=? ORDER BY h.updated_at DESC',(_active_campaign_id(request),))]
+    for row in rows: row['design']=json.loads(row.pop('design_data') or 'null')
+    return {'handouts':rows}
+
+
+@app.post('/api/admin/handout-creator/preview',response_class=HTMLResponse)
+def handout_creator_preview(request:Request,payload:dict=Body(...)):
+    require_gm(request)
+    from .handout_creator import normalize,render_body
+    d=normalize(payload.get('design',{}))
+    return templates.TemplateResponse('handout_print.html',{'request':request,'handout':{'title':str(payload.get('title',''))[:300],'body':render_body(d),'kind':d['preset'],'image_url':_asset_ref_url(payload.get('image_ref',''))},'theme':d['theme']})
+
+
+@app.get('/handout/{slug}/export',response_class=HTMLResponse)
+def handout_export(request:Request,slug:str):
+    if not player_allowed(request): return player_gate_redirect(request)
+    from .handout_creator import metadata,clean_html
+    row=next((r for r in list_handouts(settings,admin=is_gm(request),campaign_id=_active_campaign_id(request)) if r['slug']==slug),None)
+    if not row: raise HTTPException(404,'Handout not found')
+    design=metadata(settings,row['id']);row['body']=clean_html(row['body']);row['image_url']=_asset_ref_url(row.get('image_ref',''))
+    return templates.TemplateResponse('handout_print.html',{'request':request,'handout':row,'theme':(design or {}).get('theme','parchment')})
 
 
 @app.post("/api/admin/maps/{map_id}/layers")
@@ -3525,7 +3685,11 @@ def v6_integrations_page(request: Request):
     cfg['foundry_push_url']=f"{base}/api/v6/foundry/push/{cid}?token={quote(str(cfg.get('foundry_bridge_token') or ''))}"
     cfg['foundry_manifest_url']=f"{base}/foundry/seeker-bridge/module.json"
     cfg['display_url']=f"{base}/display?campaign_id={cid}&token={quote(str(cfg.get('display_token') or ''))}"
-    return templates.TemplateResponse('gm_integrations.html', {'request':request,'wiki':_visible_wiki(request),'maps':list_maps(settings,public=True),'integration':cfg,'campaign':camp,'foundry':foundry_state(settings,cid),'foundry_actors':foundry_actors(settings,cid)})
+    return templates.TemplateResponse('gm_integrations.html', {
+        'request':request,'wiki':_visible_wiki(request),'maps':list_maps(settings,public=True),
+        'integration':cfg,'campaign':camp,'foundry':foundry_state(settings,cid),
+        'foundry_actors':foundry_actors(settings,cid),'foundry_commands':recent_foundry_commands(settings,cid,50),
+    })
 
 
 @app.get('/gm/foundry-workshop', response_class=HTMLResponse)
@@ -3539,7 +3703,8 @@ def v61_foundry_workshop_page(request: Request):
         'foundry':foundry_state(settings,cid),
         'foundry_actors':foundry_actors(settings,cid),
         'prepared_content':list_foundry_prepared_content(settings,cid),
-        'command_log':recent_foundry_commands(settings,cid),
+        'command_log':recent_foundry_commands(settings,cid,50),
+        'project_tex_files':[f['path'] for f in list_project_files(settings) if f.get('suffix')=='.tex'],
     })
 
 
@@ -3651,7 +3816,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.0.0 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.2.0 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -3709,6 +3874,15 @@ def _published_bestiary_rows(campaign_id:int) -> list[dict]:
         if isinstance(publish,str):publish=publish.strip().lower() in {'1','true','yes','on'}
         if not bool(publish):
             continue
+        # Old AoN imports could accidentally capture responsive site navigation
+        # as their meta description. Clean at presentation time as well as in the
+        # importer so existing campaign databases heal immediately after update.
+        if payload.get('aon_url'):
+            row['summary']=sanitize_aon_summary(str(row.get('summary') or ''),title=str(row.get('title') or ''))
+            payload=dict(payload)
+            payload['description']=sanitize_aon_summary(str(payload.get('description') or ''),title=str(row.get('title') or ''))
+            payload['codex_blurb']=sanitize_aon_summary(str(payload.get('codex_blurb') or ''),title=str(row.get('title') or ''))
+            row['payload']=payload
         rows.append(row)
     return rows
 
@@ -3740,6 +3914,16 @@ def v613_foundry_asset(campaign_id:int,asset_path:str,sig:str=''):
     return FileResponse(path,headers={'Cache-Control':'private, max-age=86400','Access-Control-Allow-Origin':'*'})
 
 
+CODEX_SECTION_KEYS=('identity','awareness','defenses','movement','strikes','abilities','spellcasting','description')
+
+def _codex_section_visibility(payload:dict, *, gm:bool=False) -> dict[str,bool]:
+    raw=payload.get('codex_sections') if isinstance(payload.get('codex_sections'),dict) else {}
+    broad=str(payload.get('codex_visibility') or 'field_notes').lower()=='full'
+    # Existing full-statblock entries predate granular controls, so missing keys
+    # default to visible. Field-note entries stay mechanically private.
+    return {key:(True if gm else bool(broad and raw.get(key,True))) for key in CODEX_SECTION_KEYS}
+
+
 @app.get('/bestiary', response_class=HTMLResponse)
 def v613_bestiary_page(request:Request):
     if not player_allowed(request):return player_gate_redirect(request)
@@ -3756,12 +3940,137 @@ def v613_bestiary_entry(request:Request,entry_id:int):
     cid=_active_campaign_id(request);wiki=_visible_wiki(request)
     entry=next((r for r in _published_bestiary_rows(cid) if int(r.get('id') or 0)==int(entry_id)),None)
     if not entry:raise HTTPException(404,'Bestiary entry not found.')
-    payload=entry.get('payload') or {}
-    full=is_gm(request) or str(payload.get('codex_visibility') or 'rough').lower()=='full'
+    payload=entry.get('payload') or {};gm=is_gm(request)
+    full=gm or str(payload.get('codex_visibility') or 'field_notes').lower()=='full'
     return templates.TemplateResponse('bestiary_entry.html',{
-        'request':request,'wiki':wiki,'maps':list_maps(settings,public=not is_gm(request)),
-        'entry':entry,'monster':payload,'show_statblock':full,'gm_view':is_gm(request),
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=not gm),
+        'entry':entry,'monster':payload,'show_statblock':full,'gm_view':gm,
+        'codex_sections':_codex_section_visibility(payload,gm=gm),
+        'player_codex_sections':_codex_section_visibility(payload,gm=False),
     })
+
+
+@app.put('/api/bestiary/{entry_id}')
+def v704_bestiary_update(request:Request,entry_id:int,payload:dict=Body(...)):
+    require_gm(request);cid=_active_campaign_id(request)
+    current=next((x for x in list_foundry_prepared_content(settings,cid) if int(x.get('id') or 0)==int(entry_id)),None)
+    if not current or str(current.get('kind') or '') not in {'monster','npc'}:
+        raise HTTPException(404,'Monster Codex entry not found.')
+    data=dict(current.get('payload') or {})
+    incoming=payload.get('payload') if isinstance(payload.get('payload'),dict) else {}
+    data.update(incoming)
+    data['codex_publish']=True
+    visibility=str(data.get('codex_visibility') or 'field_notes').lower()
+    data['codex_visibility']='full' if visibility=='full' else 'field_notes'
+    section_raw=data.get('codex_sections') if isinstance(data.get('codex_sections'),dict) else {}
+    data['codex_sections']={key:bool(section_raw.get(key,True)) for key in CODEX_SECTION_KEYS}
+    if data.get('aon_url'):
+        data['description']=sanitize_aon_summary(str(data.get('description') or ''),title=str(payload.get('title') or current.get('title') or ''))
+        data['codex_blurb']=sanitize_aon_summary(str(data.get('codex_blurb') or ''),title=str(payload.get('title') or current.get('title') or ''))
+    try:
+        return save_foundry_prepared_content(settings,cid,{
+            'id':int(entry_id),'kind':current.get('kind'),'title':payload.get('title',current.get('title')),
+            'subtitle':payload.get('subtitle',current.get('subtitle')),'target_type':current.get('target_type') or 'world',
+            'summary':payload.get('summary',current.get('summary')),'tags':payload.get('tags',current.get('tags')),
+            'payload':data,
+        })
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/bestiary/{entry_id}')
+def v704_bestiary_remove(request:Request,entry_id:int):
+    """Remove an entry from the Codex without destroying its Workshop source."""
+    require_gm(request);cid=_active_campaign_id(request)
+    current=next((x for x in list_foundry_prepared_content(settings,cid) if int(x.get('id') or 0)==int(entry_id)),None)
+    if not current or str(current.get('kind') or '') not in {'monster','npc'}:
+        raise HTTPException(404,'Monster Codex entry not found.')
+    data=dict(current.get('payload') or {});data['codex_publish']=False;data['publish_codex']=False
+    save_foundry_prepared_content(settings,cid,{**current,'payload':data})
+    return {'ok':True,'removed':True,'source_preserved':True}
+
+
+def _homebrew_source_sections(wiki:dict) -> list[dict]:
+    grouped={}
+    for page in wiki.get('pages',[]):
+        if not is_homebrew_source_path(page.get('source_file')):continue
+        section,group=source_homebrew_bucket(page.get('source_file'))
+        grouped.setdefault(section,{}).setdefault(group,[]).append(page)
+    order=['ancestry','archetype','class','general','actions','items','other'];out=[]
+    for section in order:
+        groups=grouped.get(section,{})
+        if not groups:continue
+        out.append({'key':section,'title':HOME_BREW_SECTIONS.get(section,'Other Homebrew'),'groups':[{'name':name,'pages':sorted(rows,key=lambda x:str(x.get('title') or '').casefold())} for name,rows in sorted(groups.items(),key=lambda kv:kv[0].casefold())]})
+    return out
+
+
+@app.get('/homebrew', response_class=HTMLResponse)
+def homebrew_library_page(request:Request):
+    if not player_allowed(request):return player_gate_redirect(request)
+    cid=_active_campaign_id(request);gm=is_gm(request);wiki=_visible_wiki(request)
+    rows=list_foundry_prepared_content(settings,cid)
+    return templates.TemplateResponse('homebrew.html',{
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=not gm),'gm_view':gm,
+        'homebrew_sections':group_homebrew(rows,include_drafts=gm),'source_sections':_homebrew_source_sections(wiki),
+        'foundry_actors':foundry_actors(settings,cid) if gm else [],
+        'project_tex_files':[f['path'] for f in list_project_files(settings) if f.get('suffix')=='.tex'] if gm else [],
+    })
+
+
+def _homebrew_entry_or_404(campaign_id:int,entry_id:int) -> dict:
+    row=next((x for x in list_foundry_prepared_content(settings,campaign_id) if int(x.get('id') or 0)==int(entry_id)),None)
+    if not row or str(row.get('kind') or '').lower() not in NON_MONSTER_KINDS:raise HTTPException(404,'Homebrew entry not found.')
+    return row
+
+
+@app.put('/api/homebrew/{entry_id}')
+def homebrew_update(request:Request,entry_id:int,payload:dict=Body(...)):
+    require_gm(request);cid=_active_campaign_id(request);current=_homebrew_entry_or_404(cid,entry_id)
+    data=dict(current.get('payload') or {});incoming=payload.get('payload') if isinstance(payload.get('payload'),dict) else {};data.update(incoming)
+    if 'homebrew_publish' in incoming:data['homebrew_publish']=truthy(incoming.get('homebrew_publish'))
+    section=str(data.get('library_section') or 'auto').strip().lower()
+    if section not in {'auto',*HOME_BREW_SECTIONS.keys()}:data['library_section']='auto'
+    requested_kind=str(payload.get('kind') or current.get('kind') or 'homebrew').strip().lower()
+    if requested_kind not in NON_MONSTER_KINDS:
+        raise HTTPException(400,'Homebrew entries can only be feats, actions, items, or freeform homebrew.')
+    try:
+        return save_foundry_prepared_content(settings,cid,{
+            'id':entry_id,'kind':requested_kind,
+            'title':payload.get('title',current.get('title')),'subtitle':payload.get('subtitle',current.get('subtitle')),
+            'target_type':current.get('target_type') or 'world','summary':payload.get('summary',current.get('summary')),
+            'tags':payload.get('tags',current.get('tags')),'payload':data,
+        })
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
+@app.delete('/api/homebrew/{entry_id}')
+def homebrew_delete(request:Request,entry_id:int):
+    require_gm(request);cid=_active_campaign_id(request);_homebrew_entry_or_404(cid,entry_id);delete_foundry_prepared_content(settings,cid,entry_id);return {'ok':True}
+
+
+@app.get('/api/homebrew/{entry_id}/latex')
+def homebrew_latex(request:Request,entry_id:int):
+    require_gm(request);row=_homebrew_entry_or_404(_active_campaign_id(request),entry_id)
+    return {'id':entry_id,'snippet':homebrew_latex_snippet(row),'suggested_path':_suggest_homebrew_tex_path(row)}
+
+
+def _suggest_homebrew_tex_path(row:dict) -> str:
+    meta=classify_homebrew(row);group=re.sub(r'[^a-z0-9]+','-',str(meta.get('group') or 'misc').lower()).strip('-') or 'misc'
+    folder={'ancestry':'ancestries','archetype':'archetypes','class':'classes','general':'feats','actions':'actions','items':'items','other':'misc'}.get(meta['section'],'misc')
+    return f'homebrew/{folder}/{group}.tex'
+
+
+@app.post('/api/homebrew/{entry_id}/latex/write')
+def homebrew_latex_write(request:Request,entry_id:int,payload:dict=Body(...)):
+    require_admin(request);row=_homebrew_entry_or_404(_active_campaign_id(request),entry_id)
+    rel=str(payload.get('path') or _suggest_homebrew_tex_path(row)).replace('\\','/').strip('/')
+    if not rel.lower().endswith('.tex'):raise HTTPException(400,'Homebrew LaTeX must be written to a .tex file.')
+    target=safe_project_path(settings,rel);existing=target.read_text(encoding='utf-8',errors='replace') if target.exists() else '% Seeker homebrew\n'
+    snippet=str(payload.get('snippet') or homebrew_latex_snippet(row))
+    result=save_text_file(settings,rel,upsert_latex_block(existing,entry_id,snippet))
+    try:build_wiki(settings)
+    except Exception as exc:result['wiki_warning']=str(exc)
+    result.update({'ok':True,'snippet':snippet});return result
+
 
 
 @app.get('/gm/media', response_class=HTMLResponse)
@@ -3818,6 +4127,7 @@ def v6_discord_test(request: Request):
     mention=str(cfg.get('discord_mention') or '').strip()
     if mention.lower().replace(' ','') in {'everyone','@everyone'}: mention='@everyone'
     elif mention.lower().replace(' ','') in {'here','@here'}: mention='@here'
+    elif re.fullmatch(r'\d{2,24}',mention): mention=f'<@&{mention}>'
     message=f"✦ Seeker is connected to **{camp.get('name','this campaign')}**."
     if mention: message=f"{mention}\n{message}"
     try:return discord_post(settings,cid,message)
@@ -3846,6 +4156,11 @@ def v61_foundry_push_ack_options(campaign_id:int):
 
 @app.options('/api/v6/foundry/push/{campaign_id}/commands')
 def v614_foundry_commands_options(campaign_id:int):
+    return Response(status_code=204,headers=_FOUNDRY_CORS)
+
+
+@app.options('/api/v6/foundry/push/{campaign_id}/commands/start')
+def v704_foundry_commands_start_options(campaign_id:int):
     return Response(status_code=204,headers=_FOUNDRY_CORS)
 
 
@@ -3896,6 +4211,43 @@ def v614_foundry_commands(campaign_id:int,token:str=''):
         return JSONResponse({'detail':'Seeker could not read the Foundry action queue.'},status_code=500,headers=_FOUNDRY_CORS)
 
 
+@app.post('/api/v6/foundry/push/{campaign_id}/commands/start')
+def v704_foundry_commands_start(campaign_id:int,token:str='',payload:dict=Body(...)):
+    try:
+        ids=payload.get('ids') if isinstance(payload.get('ids'),list) else []
+        return JSONResponse(start_foundry_commands(settings,campaign_id,token,ids),headers=_FOUNDRY_CORS)
+    except PermissionError as exc:
+        return JSONResponse({'detail':str(exc)},status_code=403,headers=_FOUNDRY_CORS)
+    except Exception:
+        return JSONResponse({'detail':'Seeker could not mark Foundry actions as executing.'},status_code=500,headers=_FOUNDRY_CORS)
+
+
+@app.get('/api/v6/foundry/commands')
+def v704_foundry_command_list(request:Request):
+    require_gm(request)
+    return {'commands':recent_foundry_commands(settings,_active_campaign_id(request),50)}
+
+
+@app.get('/api/v6/foundry/commands/{command_id}')
+def v704_foundry_command_status(request:Request,command_id:int):
+    if not player_allowed(request): raise HTTPException(401)
+    cid=_active_campaign_id(request)
+    row=get_foundry_command(settings,cid,command_id)
+    if not row: raise HTTPException(404,'Foundry action not found.')
+    if not is_gm(request):
+        label=requester_label(request)
+        if str(row.get('requested_by') or '') != str(label):
+            raise HTTPException(403,'You can only view your own Foundry actions.')
+    return row
+
+
+@app.post('/api/v6/foundry/commands/{command_id}/retry')
+def v704_foundry_command_retry(request:Request,command_id:int):
+    require_gm(request)
+    try:return {'ok':True,'command':retry_foundry_command(settings,_active_campaign_id(request),command_id)}
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
+
 @app.get('/api/v6/foundry/state')
 def v6_foundry_state(request:Request):
     require_gm(request);return foundry_state(settings,_active_campaign_id(request))
@@ -3911,7 +4263,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.5.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.8.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -3919,7 +4271,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.5.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.8.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 
@@ -3973,6 +4325,9 @@ def v61_foundry_content_push(request:Request,item_id:int,payload:dict=Body(...))
     actor_id=str(payload.get('actor_id') or '').strip()
     if target_type not in {'world','actor'}: raise HTTPException(400,'target_type must be world or actor.')
     if target_type=='actor' and not actor_id: raise HTTPException(400,'Choose a target actor.')
+    actor_uuid=''
+    if target_type=='actor':
+        actor_uuid=str(next((x.get('actor_uuid') for x in foundry_actors(settings,cid) if str(x.get('actor_id'))==actor_id),'') or '')
     content_data=json.loads(json.dumps(item.get('payload') or {}))
     for image_key in ('img','token_img'):
         if content_data.get(image_key):content_data[image_key]=_foundry_push_asset_url(request,cid,str(content_data.get(image_key)))
@@ -3984,9 +4339,23 @@ def v61_foundry_content_push(request:Request,item_id:int,payload:dict=Body(...))
         'summary':item.get('summary'),
         'tags':item.get('tags'),
         'target_type':target_type,
+        'actor_uuid':actor_uuid,
         'data':content_data,
     },actor_id=actor_id,scope=target_type,requested_by=requester_label(request))
     return {'ok':True,'command':command}
+
+
+@app.get('/api/v61/characters/{character_id}/foundry-state')
+def v71_character_foundry_state(request:Request,character_id:int):
+    if not player_allowed(request): raise HTTPException(401)
+    _character_owned(request,character_id)
+    link=foundry_link_for_character(settings,character_id)
+    if not link or not link.get('actor_id'): raise HTTPException(404,'This character is not linked to a Foundry actor.')
+    return {
+        'ok':True,'actor_id':link.get('actor_id'),'actor_uuid':link.get('actor_uuid') or '',
+        'name':link.get('name') or '','received_at':link.get('received_at'),
+        'sheet':link.get('sheet') or {},
+    }
 
 
 @app.post('/api/v61/characters/{character_id}/foundry/action')
@@ -4002,14 +4371,14 @@ def v61_character_foundry_action(request:Request,character_id:int,payload:dict=B
         try: delta=max(-999,min(999,int(payload.get('delta') or 0)))
         except Exception: raise HTTPException(400,'delta must be an integer.')
         if delta==0: raise HTTPException(400,'delta cannot be zero.')
-        command=queue_foundry_command(settings,int(link['campaign_id']),'adjust_resource',{'resource':resource,'delta':delta,'character_id':int(character_id),'character_name':char.get('name')},actor_id=str(link['actor_id']),requested_by=requester_label(request))
+        command=queue_foundry_command(settings,int(link['campaign_id']),'adjust_resource',{'resource':resource,'delta':delta,'character_id':int(character_id),'character_name':char.get('name'),'actor_uuid':str(link.get('actor_uuid') or '')},actor_id=str(link['actor_id']),requested_by=requester_label(request))
     elif action=='adjust_item_quantity':
         item_id=str(payload.get('item_id') or '').strip();
         if not item_id: raise HTTPException(400,'item_id is required.')
         try: delta=max(-99,min(99,int(payload.get('delta') or 0)))
         except Exception: raise HTTPException(400,'delta must be an integer.')
         if delta==0: raise HTTPException(400,'delta cannot be zero.')
-        command=queue_foundry_command(settings,int(link['campaign_id']),'adjust_item_quantity',{'item_id':item_id,'delta':delta,'character_id':int(character_id),'character_name':char.get('name')},actor_id=str(link['actor_id']),requested_by=requester_label(request))
+        command=queue_foundry_command(settings,int(link['campaign_id']),'adjust_item_quantity',{'item_id':item_id,'delta':delta,'character_id':int(character_id),'character_name':char.get('name'),'actor_uuid':str(link.get('actor_uuid') or '')},actor_id=str(link['actor_id']),requested_by=requester_label(request))
     else:
         raise HTTPException(400,'Unsupported Foundry action.')
     return {'ok':True,'command':command}
@@ -4276,3 +4645,19 @@ register_v7_routes(app,settings,templates,{
     'require_permission':require_v7_permission,
     'is_admin':is_admin,
 })
+
+@app.post('/api/admin/handout-creator/artwork')
+async def handout_creator_artwork(request:Request,image:UploadFile=File(...)):
+    require_gm(request)
+    from PIL import Image, UnidentifiedImageError
+    folder=settings.uploads_dir/'handouts';folder.mkdir(parents=True,exist_ok=True)
+    token=secrets.token_hex(16);temp=folder/(token+'.tmp')
+    try:
+        await _stream_upload(image,temp,10*1024*1024,'Artwork exceeds 10 MB')
+        with Image.open(temp) as picture:
+            if picture.width*picture.height>25000000: raise HTTPException(400,'Artwork is limited to 25 megapixels')
+            picture.load();picture.convert('RGBA').save(folder/(token+'.png'))
+    except (UnidentifiedImageError,OSError,Image.DecompressionBombError):
+        raise HTTPException(400,'Choose a valid PNG, JPEG, WebP, or GIF image')
+    finally: temp.unlink(missing_ok=True)
+    return {'ref':'upload:handouts/'+token+'.png'}

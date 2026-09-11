@@ -154,6 +154,29 @@ CREATE TABLE IF NOT EXISTS v7_encounter_creatures (
 );
 CREATE INDEX IF NOT EXISTS idx_v7_encounter_creatures_enc ON v7_encounter_creatures(encounter_id,id);
 
+CREATE TABLE IF NOT EXISTS v7_creature_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    UNIQUE(campaign_id,name)
+);
+CREATE INDEX IF NOT EXISTS idx_v7_creature_folders_campaign ON v7_creature_folders(campaign_id,lower(name),id);
+
+CREATE TABLE IF NOT EXISTS v7_creature_folder_members (
+    folder_id INTEGER NOT NULL,
+    entity_id INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    PRIMARY KEY(folder_id,entity_id),
+    FOREIGN KEY(folder_id) REFERENCES v7_creature_folders(id) ON DELETE CASCADE,
+    FOREIGN KEY(entity_id) REFERENCES v7_entities(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_v7_creature_folder_members_entity ON v7_creature_folder_members(entity_id,folder_id);
+
 CREATE TABLE IF NOT EXISTS v7_loot_pools (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     campaign_id INTEGER NOT NULL,
@@ -221,13 +244,39 @@ CREATE TABLE IF NOT EXISTS v7_fact_reveals (
     fact_id INTEGER NOT NULL,
     invite_id INTEGER NOT NULL,
     state TEXT NOT NULL DEFAULT 'revealed',
+    disclosure_mode TEXT NOT NULL DEFAULT 'exact',
+    reveal_source TEXT NOT NULL DEFAULT 'gm',
+    shared_by_invite_id INTEGER,
     session_id INTEGER,
     revealed_at REAL NOT NULL,
     PRIMARY KEY(fact_id,invite_id),
     FOREIGN KEY(fact_id) REFERENCES v7_knowledge_facts(id) ON DELETE CASCADE,
     FOREIGN KEY(invite_id) REFERENCES player_invites(id) ON DELETE CASCADE,
+    FOREIGN KEY(shared_by_invite_id) REFERENCES player_invites(id) ON DELETE SET NULL,
     FOREIGN KEY(session_id) REFERENCES campaign_sessions(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS v7_player_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL,
+    entity_id INTEGER NOT NULL,
+    invite_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'note',
+    metric TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    lower_bound REAL,
+    upper_bound REAL,
+    visibility TEXT NOT NULL DEFAULT 'private',
+    status TEXT NOT NULL DEFAULT 'inferred',
+    data_json TEXT NOT NULL DEFAULT '{}',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY(entity_id) REFERENCES v7_entities(id) ON DELETE CASCADE,
+    FOREIGN KEY(invite_id) REFERENCES player_invites(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_v7_observations_entity ON v7_player_observations(campaign_id,entity_id,visibility,updated_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_v7_observations_invite ON v7_player_observations(campaign_id,invite_id,updated_at DESC,id DESC);
 
 CREATE TABLE IF NOT EXISTS v7_recall_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -358,21 +407,25 @@ CREATE INDEX IF NOT EXISTS idx_v7_audit_campaign ON v7_audit_log(campaign_id,cre
 
 DEFAULT_PERMISSIONS = {
     'owner': {
-        'view_statblocks','create_player_notes','manage_own_inventory','push_foundry_character','reveal_lore','edit_entities',
+        'view_statblocks','create_player_notes','share_player_knowledge','manage_own_inventory','push_foundry_character','reveal_lore','edit_entities',
         'edit_monsters','manage_sessions','edit_canon','manage_encounters','manage_loot','manage_permissions','manage_integrations'
     },
     'co-gm': {
-        'view_statblocks','create_player_notes','manage_own_inventory','push_foundry_character','reveal_lore','edit_entities',
+        'view_statblocks','create_player_notes','share_player_knowledge','manage_own_inventory','push_foundry_character','reveal_lore','edit_entities',
         'edit_monsters','manage_sessions','manage_encounters','manage_loot'
     },
-    'player': {'create_player_notes','manage_own_inventory','push_foundry_character'},
+    'player': {'create_player_notes','share_player_knowledge','manage_own_inventory','push_foundry_character'},
     'spectator': set(),
 }
 ALL_PERMISSIONS = sorted(set().union(*DEFAULT_PERMISSIONS.values()))
 
 XP_BY_DELTA = {-4:10,-3:15,-2:20,-1:30,0:40,1:60,2:80,3:120,4:160}
+PWL_XP_BY_DELTA = {-7:9,-6:12,-5:14,-4:18,-3:21,-2:26,-1:32,0:40,1:48,2:60,3:72,4:90,5:108,6:135,7:160}
 DIFFICULTY_BUDGETS = [('Trivial',40),('Low',60),('Moderate',80),('Severe',120),('Extreme',160)]
 TIER_ORDER = {'unknown':0,'rumored':1,'known':2,'full':3}
+DISCLOSURE_MODES = {'exact','vague','comparative'}
+DISCLOSURE_RANK = {'vague':1,'comparative':1,'exact':2}
+OBSERVATION_KINDS = {'note','range','comparative','hypothesis'}
 CREATURE_KINDS = {'monster','creature','npc'}
 
 
@@ -458,6 +511,15 @@ def init_v7_db(settings: Settings) -> None:
                             FROM v7_invite_permissions_legacy p
                             JOIN campaign_memberships cm ON cm.invite_id=p.invite_id''')
             conn.execute('DROP TABLE v7_invite_permissions_legacy')
+        # V7.0.3 adds disclosure fidelity and party-sharing metadata without
+        # rebuilding the reveal table, preserving every existing knowledge reveal.
+        reveal_cols={r['name'] for r in conn.execute('PRAGMA table_info(v7_fact_reveals)').fetchall()}
+        if 'disclosure_mode' not in reveal_cols:
+            conn.execute("ALTER TABLE v7_fact_reveals ADD COLUMN disclosure_mode TEXT NOT NULL DEFAULT 'exact'")
+        if 'reveal_source' not in reveal_cols:
+            conn.execute("ALTER TABLE v7_fact_reveals ADD COLUMN reveal_source TEXT NOT NULL DEFAULT 'gm'")
+        if 'shared_by_invite_id' not in reveal_cols:
+            conn.execute('ALTER TABLE v7_fact_reveals ADD COLUMN shared_by_invite_id INTEGER')
         now=time.time()
         for role, allowed in DEFAULT_PERMISSIONS.items():
             for permission in ALL_PERMISSIONS:
@@ -542,6 +604,7 @@ def get_entity(settings: Settings,campaign_id:int,entity_id:int)->dict|None:
     if not row:return None
     out=entity_payload(row)
     out['relations']=entity_relations(settings,campaign_id,int(entity_id))
+    out['relationship_states']=relationship_states_for_entity(settings,campaign_id,int(entity_id))
     out['facts']=knowledge_facts(settings,int(entity_id))
     out['locations']=_rows(settings,'SELECT * FROM v7_entity_locations WHERE entity_id=? ORDER BY is_current DESC,created_at DESC,id DESC',(int(entity_id),))
     out['sessions']=_rows(settings,'''SELECT es.*,s.title AS session_title,s.session_number,s.session_date FROM v7_entity_sessions es
@@ -694,17 +757,65 @@ def relationship_timeline(settings: Settings,campaign_id:int,source_entity_id:in
                  (int(campaign_id),int(source_entity_id),int(target_entity_id),int(target_entity_id),int(source_entity_id)))
 
 
+def relationship_states_for_entity(settings: Settings,campaign_id:int,entity_id:int)->list[dict]:
+    return _rows(settings,'''SELECT rs.*,se.name AS source_name,te.name AS target_name,cs.title AS session_title
+                             FROM v7_relationship_states rs
+                             JOIN v7_entities se ON se.id=rs.source_entity_id
+                             JOIN v7_entities te ON te.id=rs.target_entity_id
+                             LEFT JOIN campaign_sessions cs ON cs.id=rs.session_id
+                             WHERE rs.campaign_id=? AND (rs.source_entity_id=? OR rs.target_entity_id=?)
+                             ORDER BY rs.sort_key DESC,rs.created_at DESC,rs.id DESC''',
+                 (int(campaign_id),int(entity_id),int(entity_id)))
+
+
 def knowledge_facts(settings: Settings,entity_id:int)->list[dict]:
     rows=_rows(settings,'SELECT * FROM v7_knowledge_facts WHERE entity_id=? ORDER BY sort_order,id',(int(entity_id),))
     for r in rows:r['mechanics']=_json(r.pop('mechanics_json','{}'),{})
     return rows
 
 
+def _disclosure_payload(fact:dict,mode:str='exact')->dict:
+    # Project one GM-authored fact to one disclosure fidelity. Never send the
+    # complete mechanics JSON to players because it can contain exact data.
+    mode=str(mode or 'exact').strip().lower()
+    if mode not in DISCLOSURE_MODES:mode='exact'
+    mechanics=fact.get('mechanics') if isinstance(fact.get('mechanics'),dict) else {}
+    disclosures=mechanics.get('disclosures') if isinstance(mechanics.get('disclosures'),dict) else {}
+    variant=disclosures.get(mode) if isinstance(disclosures.get(mode),dict) else {}
+    if mode=='exact':
+        title=str(variant.get('title') or fact.get('title') or '')
+        body=str(variant.get('body') or fact.get('body') or '')
+    else:
+        title=str(variant.get('title') or fact.get('title') or '')
+        body=str(variant.get('body') or '')
+    out={k:v for k,v in fact.items() if k!='mechanics'}
+    out['title']=title;out['body']=body;out['disclosure_mode']=mode
+    out['display']={'mode':mode,'category':str(mechanics.get('category') or '')[:80],'metric':str(mechanics.get('metric') or '')[:80]}
+    return out
+
+
+def fact_disclosure_modes(fact:dict)->list[str]:
+    mechanics=fact.get('mechanics') if isinstance(fact.get('mechanics'),dict) else {}
+    disclosures=mechanics.get('disclosures') if isinstance(mechanics.get('disclosures'),dict) else {}
+    modes=['exact']
+    for mode in ('vague','comparative'):
+        row=disclosures.get(mode) if isinstance(disclosures.get(mode),dict) else {}
+        if str(row.get('title') or '').strip() or str(row.get('body') or '').strip():modes.append(mode)
+    return modes
+
+
 def save_knowledge_fact(settings: Settings,entity_id:int,payload:dict,campaign_id:int|None=None)->dict:
     if campaign_id is not None and not _entity_in_campaign(settings,campaign_id,entity_id):raise ValueError('Entity does not belong to this campaign.')
     fid=int(payload.get('id') or 0);now=time.time();tier=str(payload.get('tier') or 'known').lower()
     if tier not in TIER_ORDER:raise ValueError('Unknown knowledge tier.')
-    vals=(str(payload.get('title') or '').strip()[:240],str(payload.get('body') or '')[:10000],tier,json.dumps(payload.get('mechanics') if isinstance(payload.get('mechanics'),dict) else {},ensure_ascii=False),int(payload.get('sort_order') or 0),now)
+    mechanics=payload.get('mechanics') if isinstance(payload.get('mechanics'),dict) else {}
+    disclosures=mechanics.get('disclosures') if isinstance(mechanics.get('disclosures'),dict) else {}
+    for mode in ('vague','comparative'):
+        title=str(payload.get(f'{mode}_title') or '').strip()[:240]
+        body=str(payload.get(f'{mode}_body') or '')[:10000]
+        if title or body:disclosures[mode]={'title':title,'body':body}
+    if disclosures:mechanics={**mechanics,'disclosures':disclosures}
+    vals=(str(payload.get('title') or '').strip()[:240],str(payload.get('body') or '')[:10000],tier,json.dumps(mechanics,ensure_ascii=False),int(payload.get('sort_order') or 0),now)
     if not vals[0]:raise ValueError('Fact title is required.')
     with connect(settings) as conn:
         if fid:
@@ -715,25 +826,70 @@ def save_knowledge_fact(settings: Settings,entity_id:int,payload:dict,campaign_i
     return next((x for x in knowledge_facts(settings,entity_id) if int(x['id'])==fid),{})
 
 
-def reveal_fact(settings: Settings,fact_id:int,invite_id:int,session_id:int|None=None,state:str='revealed',campaign_id:int|None=None)->dict:
-    if campaign_id is not None:
-        fact=_row(settings,'SELECT e.campaign_id FROM v7_knowledge_facts f JOIN v7_entities e ON e.id=f.entity_id WHERE f.id=?',(int(fact_id),))
-        if not fact or int(fact['campaign_id'])!=int(campaign_id):raise ValueError('Fact does not belong to this campaign.')
-        if not _invite_in_campaign(settings,campaign_id,invite_id):raise ValueError('Player does not belong to this campaign.')
-        if session_id is not None and not _session_in_campaign(settings,campaign_id,session_id):raise ValueError('Session does not belong to this campaign.')
+def reveal_fact(settings: Settings,fact_id:int,invite_id:int,session_id:int|None=None,state:str='revealed',campaign_id:int|None=None,disclosure_mode:str='exact',reveal_source:str='gm',shared_by_invite_id:int|None=None)->dict:
+    fact_row=_row(settings,'SELECT f.*,e.campaign_id FROM v7_knowledge_facts f JOIN v7_entities e ON e.id=f.entity_id WHERE f.id=?',(int(fact_id),))
+    if not fact_row:raise ValueError('Knowledge fact not found.')
+    fact=dict(fact_row);fact['mechanics']=_json(fact.pop('mechanics_json','{}'),{})
+    actual_campaign=int(fact['campaign_id'])
+    if campaign_id is not None and actual_campaign!=int(campaign_id):raise ValueError('Fact does not belong to this campaign.')
+    if not _invite_in_campaign(settings,actual_campaign,invite_id):raise ValueError('Player does not belong to this campaign.')
+    if session_id is not None and not _session_in_campaign(settings,actual_campaign,session_id):raise ValueError('Session does not belong to this campaign.')
+    mode=str(disclosure_mode or 'exact').lower()
+    if mode not in DISCLOSURE_MODES:raise ValueError('Choose exact, vague, or comparative disclosure.')
+    if mode not in fact_disclosure_modes(fact):raise ValueError(f'This fact has no {mode} disclosure written yet.')
+    if shared_by_invite_id is not None and not _invite_in_campaign(settings,actual_campaign,shared_by_invite_id):raise ValueError('Sharing player does not belong to this campaign.')
     now=time.time()
     with connect(settings) as conn:
-        conn.execute('''INSERT INTO v7_fact_reveals(fact_id,invite_id,state,session_id,revealed_at) VALUES(?,?,?,?,?)
-                        ON CONFLICT(fact_id,invite_id) DO UPDATE SET state=excluded.state,session_id=excluded.session_id,revealed_at=excluded.revealed_at''',(int(fact_id),int(invite_id),str(state)[:40],session_id,now))
+        existing=conn.execute('SELECT disclosure_mode FROM v7_fact_reveals WHERE fact_id=? AND invite_id=?',(int(fact_id),int(invite_id))).fetchone()
+        if existing and str(reveal_source)=='player_share':
+            old=str(existing['disclosure_mode'] or 'exact')
+            if DISCLOSURE_RANK.get(old,0)>=DISCLOSURE_RANK.get(mode,0):
+                row=conn.execute('SELECT * FROM v7_fact_reveals WHERE fact_id=? AND invite_id=?',(int(fact_id),int(invite_id))).fetchone()
+                return dict(row) if row else {}
+        conn.execute('''INSERT INTO v7_fact_reveals(fact_id,invite_id,state,disclosure_mode,reveal_source,shared_by_invite_id,session_id,revealed_at) VALUES(?,?,?,?,?,?,?,?)
+                        ON CONFLICT(fact_id,invite_id) DO UPDATE SET state=excluded.state,disclosure_mode=excluded.disclosure_mode,reveal_source=excluded.reveal_source,shared_by_invite_id=excluded.shared_by_invite_id,session_id=excluded.session_id,revealed_at=excluded.revealed_at''',
+                     (int(fact_id),int(invite_id),str(state)[:40],mode,str(reveal_source or 'gm')[:40],shared_by_invite_id,session_id,now))
     return _row(settings,'SELECT * FROM v7_fact_reveals WHERE fact_id=? AND invite_id=?',(int(fact_id),int(invite_id))) or {}
+
+
+def reveal_fact_to_party(settings: Settings,campaign_id:int,fact_id:int,disclosure_mode:str='exact',session_id:int|None=None,reveal_source:str='gm',shared_by_invite_id:int|None=None)->list[dict]:
+    rows=_rows(settings,'SELECT invite_id FROM campaign_memberships WHERE campaign_id=? AND invite_id IS NOT NULL',(int(campaign_id),))
+    out=[]
+    for row in rows:
+        out.append(reveal_fact(settings,fact_id,int(row['invite_id']),session_id,campaign_id=campaign_id,disclosure_mode=disclosure_mode,reveal_source=reveal_source,shared_by_invite_id=shared_by_invite_id))
+    return out
+
+
+def share_revealed_fact(settings: Settings,campaign_id:int,fact_id:int,source_invite_id:int,session_id:int|None=None)->dict:
+    if not _invite_in_campaign(settings,campaign_id,source_invite_id):raise ValueError('Player does not belong to this campaign.')
+    source=_row(settings,'''SELECT r.* FROM v7_fact_reveals r JOIN v7_knowledge_facts f ON f.id=r.fact_id JOIN v7_entities e ON e.id=f.entity_id
+                            WHERE r.fact_id=? AND r.invite_id=? AND e.campaign_id=? AND r.state='revealed' ''',(int(fact_id),int(source_invite_id),int(campaign_id)))
+    if not source:raise ValueError('You can only share information that has been revealed to you.')
+    rows=reveal_fact_to_party(settings,campaign_id,fact_id,str(source.get('disclosure_mode') or 'exact'),session_id,reveal_source='player_share',shared_by_invite_id=int(source_invite_id))
+    return {'ok':True,'count':len(rows),'fact_id':int(fact_id),'disclosure_mode':str(source.get('disclosure_mode') or 'exact')}
 
 
 def visible_entity_facts(settings: Settings,entity_id:int,invite_id:int|None,*,gm:bool=False)->list[dict]:
     facts=knowledge_facts(settings,entity_id)
-    if gm:return facts
-    if invite_id is None:return [f for f in facts if f.get('tier')=='rumored']
-    revealed={int(r['fact_id']) for r in _rows(settings,"SELECT fact_id FROM v7_fact_reveals WHERE invite_id=? AND state='revealed'",(int(invite_id),))}
-    return [f for f in facts if f.get('tier')=='rumored' or int(f['id']) in revealed]
+    if gm:
+        for fact in facts:fact['available_disclosures']=fact_disclosure_modes(fact)
+        return facts
+    if invite_id is None:return [_disclosure_payload(f,'exact') for f in facts if f.get('tier')=='rumored']
+    reveals={int(r['fact_id']):r for r in _rows(settings,"SELECT * FROM v7_fact_reveals WHERE invite_id=? AND state='revealed'",(int(invite_id),))}
+    out=[]
+    for fact in facts:
+        row=reveals.get(int(fact['id']))
+        if not row and fact.get('tier')!='rumored':continue
+        mode=str((row or {}).get('disclosure_mode') or 'exact')
+        projected=_disclosure_payload(fact,mode)
+        if row:
+            projected['reveal_source']=str(row.get('reveal_source') or 'gm')
+            projected['shared_by_invite_id']=row.get('shared_by_invite_id')
+            projected['can_share']=True
+        else:
+            projected['reveal_source']='public';projected['can_share']=False
+        out.append(projected)
+    return out
 
 
 def record_recall(settings: Settings,campaign_id:int,entity_id:int,payload:dict)->dict:
@@ -748,19 +904,135 @@ def record_recall(settings: Settings,campaign_id:int,entity_id:int,payload:dict)
     degree=str(payload.get('degree') or '').lower()
     if not degree and result is not None and dc is not None:
         margin=result-dc;degree='critical success' if margin>=10 else 'success' if margin>=0 else 'critical failure' if margin<=-10 else 'failure'
-    valid_fact_ids={int(f['id']) for f in knowledge_facts(settings,entity_id)}
-    fact_ids=[int(x) for x in payload.get('reveal_fact_ids',[]) if str(x).isdigit() and int(x) in valid_fact_ids]
-    for fid in fact_ids:
-        if payload.get('invite_id'):reveal_fact(settings,fid,int(payload['invite_id']),payload.get('session_id'),campaign_id=campaign_id)
-    now=time.time()
+    facts={int(f['id']):f for f in knowledge_facts(settings,entity_id)}
+    reveal_specs=[]
+    structured=payload.get('reveal_facts') if isinstance(payload.get('reveal_facts'),list) else []
+    for spec in structured:
+        if not isinstance(spec,dict):continue
+        try:fid=int(spec.get('fact_id'))
+        except Exception:continue
+        if fid not in facts:continue
+        mode=str(spec.get('mode') or 'exact').lower()
+        if mode not in DISCLOSURE_MODES:continue
+        reveal_specs.append({'fact_id':fid,'mode':mode})
+    for x in payload.get('reveal_fact_ids',[]):
+        if str(x).isdigit() and int(x) in facts and not any(r['fact_id']==int(x) for r in reveal_specs):reveal_specs.append({'fact_id':int(x),'mode':'exact'})
+    invite=payload.get('invite_id')
+    if invite:
+        for spec in reveal_specs:reveal_fact(settings,spec['fact_id'],int(invite),payload.get('session_id'),campaign_id=campaign_id,disclosure_mode=spec['mode'])
+    now=time.time();fact_ids=[r['fact_id'] for r in reveal_specs]
     with connect(settings) as conn:
         cur=conn.execute('''INSERT INTO v7_recall_checks(campaign_id,entity_id,invite_id,character_id,skill,result,dc,degree,revealed_fact_ids_json,session_id,created_at)
-                            VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(int(campaign_id),int(entity_id),payload.get('invite_id'),payload.get('character_id'),str(payload.get('skill') or '')[:80],result,dc,degree,json.dumps(fact_ids),payload.get('session_id'),now));rid=int(cur.lastrowid or 0)
-    out=_row(settings,'SELECT * FROM v7_recall_checks WHERE id=?',(rid,)) or {};out['revealed_fact_ids']=_json(out.pop('revealed_fact_ids_json','[]'),[]);return out
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(int(campaign_id),int(entity_id),invite,payload.get('character_id'),str(payload.get('skill') or '')[:80],result,dc,degree,json.dumps(reveal_specs),payload.get('session_id'),now));rid=int(cur.lastrowid or 0)
+    out=_row(settings,'SELECT * FROM v7_recall_checks WHERE id=?',(rid,)) or {};raw=_json(out.pop('revealed_fact_ids_json','[]'),[]);out['revealed_facts']=raw;out['revealed_fact_ids']=[x.get('fact_id') if isinstance(x,dict) else x for x in raw];return out
 
 
-def encounter_xp_for_level(creature_level:int,party_level:int)->int:
+def _observation_payload(row:dict)->dict:
+    out=dict(row);out['data']=_json(out.pop('data_json','{}'),{})
+    return out
+
+
+def list_player_observations(settings: Settings,campaign_id:int,entity_id:int,viewer_invite_id:int|None=None,*,gm:bool=False)->list[dict]:
+    sql='''SELECT o.*,p.label AS author_label FROM v7_player_observations o LEFT JOIN player_invites p ON p.id=o.invite_id
+           WHERE o.campaign_id=? AND o.entity_id=?''';args=[int(campaign_id),int(entity_id)]
+    if not gm:
+        if viewer_invite_id is None:return []
+        sql+=" AND (o.invite_id=? OR o.visibility='party')";args.append(int(viewer_invite_id))
+    sql+=" ORDER BY CASE o.status WHEN 'confirmed' THEN 0 WHEN 'inferred' THEN 1 ELSE 2 END,o.updated_at DESC,o.id DESC"
+    return [_observation_payload(r) for r in _rows(settings,sql,tuple(args))]
+
+
+def save_player_observation(settings: Settings,campaign_id:int,entity_id:int,invite_id:int,payload:dict)->dict:
+    if not _entity_in_campaign(settings,campaign_id,entity_id):raise ValueError('Entity does not belong to this campaign.')
+    if not _invite_in_campaign(settings,campaign_id,invite_id):raise ValueError('Player does not belong to this campaign.')
+    oid=int(payload.get('id') or 0);kind=str(payload.get('kind') or 'note').strip().lower()
+    if kind not in OBSERVATION_KINDS:raise ValueError('Unknown observation type.')
+    visibility=str(payload.get('visibility') or 'private').strip().lower()
+    if visibility not in {'private','party'}:raise ValueError('Observation visibility must be private or party.')
+    metric=str(payload.get('metric') or '').strip().lower()[:80]
+    data=payload.get('data') if isinstance(payload.get('data'),dict) else {}
+    def bound(name):
+        val=payload.get(name)
+        if val in (None,''):return None
+        try:return float(val)
+        except Exception:raise ValueError('Range bounds must be numbers.')
+    lower=bound('lower_bound');upper=bound('upper_bound')
+    if kind=='range' and metric=='ac':
+        miss=payload.get('miss_total');hit=payload.get('hit_total')
+        if miss not in (None,''):
+            try:lower=max(lower if lower is not None else float('-inf'),float(miss)+1)
+            except Exception:raise ValueError('Miss total must be a number.')
+            data['miss_total']=float(miss)
+        if hit not in (None,''):
+            try:upper=min(upper if upper is not None else float('inf'),float(hit))
+            except Exception:raise ValueError('Hit total must be a number.')
+            data['hit_total']=float(hit)
+    if lower is not None and upper is not None and lower>upper:raise ValueError('Those observations produce an impossible range. Check the hit/miss totals or enter the range manually.')
+    title=str(payload.get('title') or '').strip()[:240]
+    if not title:
+        label={'ac':'AC','fortitude':'Fortitude','reflex':'Reflex','will':'Will','perception':'Perception','spell_dc':'Spell DC'}.get(metric,metric.replace('_',' ').title() or 'Observation')
+        if kind=='range' and (lower is not None or upper is not None):
+            lo='?' if lower is None else str(int(lower) if float(lower).is_integer() else lower);hi='?' if upper is None else str(int(upper) if float(upper).is_integer() else upper)
+            title=f'{label} range: {lo}–{hi}'
+        else:title=label
+    body=str(payload.get('body') or '')[:10000]
+    now=time.time();vals=(kind,metric,title,body,lower,upper,visibility,json.dumps(data,ensure_ascii=False),now)
+    with connect(settings) as conn:
+        if oid:
+            cur=conn.execute('''UPDATE v7_player_observations SET kind=?,metric=?,title=?,body=?,lower_bound=?,upper_bound=?,visibility=?,data_json=?,updated_at=?
+                                WHERE id=? AND campaign_id=? AND entity_id=? AND invite_id=?''',vals+(oid,int(campaign_id),int(entity_id),int(invite_id)))
+            if not cur.rowcount:raise ValueError('Observation not found or does not belong to you.')
+        else:
+            cur=conn.execute('''INSERT INTO v7_player_observations(campaign_id,entity_id,invite_id,kind,metric,title,body,lower_bound,upper_bound,visibility,status,data_json,created_at,updated_at)
+                                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(int(campaign_id),int(entity_id),int(invite_id),kind,metric,title,body,lower,upper,visibility,'inferred',json.dumps(data,ensure_ascii=False),now,now));oid=int(cur.lastrowid or 0)
+    rows=list_player_observations(settings,campaign_id,entity_id,invite_id,gm=True)
+    return next((r for r in rows if int(r['id'])==oid),{})
+
+
+def set_player_observation_visibility(settings: Settings,campaign_id:int,observation_id:int,invite_id:int,visibility:str)->dict:
+    visibility=str(visibility or '').lower()
+    if visibility not in {'private','party'}:raise ValueError('Choose private or party visibility.')
+    with connect(settings) as conn:
+        cur=conn.execute('UPDATE v7_player_observations SET visibility=?,updated_at=? WHERE id=? AND campaign_id=? AND invite_id=?',(visibility,time.time(),int(observation_id),int(campaign_id),int(invite_id)))
+        if not cur.rowcount:raise ValueError('Observation not found or does not belong to you.')
+    row=_row(settings,'SELECT * FROM v7_player_observations WHERE id=?',(int(observation_id),)) or {};return _observation_payload(row)
+
+
+def delete_player_observation(settings: Settings,campaign_id:int,observation_id:int,invite_id:int|None=None,*,gm:bool=False)->None:
+    with connect(settings) as conn:
+        if gm:cur=conn.execute('DELETE FROM v7_player_observations WHERE id=? AND campaign_id=?',(int(observation_id),int(campaign_id)))
+        else:cur=conn.execute('DELETE FROM v7_player_observations WHERE id=? AND campaign_id=? AND invite_id=?',(int(observation_id),int(campaign_id),int(invite_id or 0)))
+        if not cur.rowcount:raise ValueError('Observation not found or you cannot delete it.')
+
+
+def review_player_observation(settings: Settings,campaign_id:int,observation_id:int,status:str)->dict:
+    status=str(status or '').lower()
+    if status not in {'inferred','confirmed','rejected'}:raise ValueError('Choose inferred, confirmed, or rejected.')
+    with connect(settings) as conn:
+        cur=conn.execute('UPDATE v7_player_observations SET status=?,updated_at=? WHERE id=? AND campaign_id=?',(status,time.time(),int(observation_id),int(campaign_id)))
+        if not cur.rowcount:raise ValueError('Observation not found.')
+    row=_row(settings,'SELECT * FROM v7_player_observations WHERE id=?',(int(observation_id),)) or {};return _observation_payload(row)
+
+
+def normalize_encounter_rules_variant(value:Any)->str:
+    raw=str(value or '').strip().lower().replace('-', '_').replace(' ', '_')
+    if raw in {'pwl','proficiency_without_level','proficiencywithoutlevel','no_level','without_level'}:
+        return 'proficiency_without_level'
+    return 'standard'
+
+
+def encounter_xp_for_level(creature_level:int,party_level:int,rules_variant:str='standard')->int|None:
+    """Return the creature XP cost for an encounter.
+
+    Standard PF2e retains Seeker's existing behaviour.  Proficiency Without
+    Level uses GM Core Table 4-18 exactly; the published table only defines
+    party level -7 through +7, so values outside that range deliberately
+    return None and the encounter builder asks the GM for an XP override.
+    """
     delta=int(creature_level)-int(party_level)
+    variant=normalize_encounter_rules_variant(rules_variant)
+    if variant == 'proficiency_without_level':
+        return PWL_XP_BY_DELTA.get(delta)
     if delta < -4:return 0
     if delta > 4:return 160 + (delta-4)*80
     return XP_BY_DELTA.get(delta,0)
@@ -773,18 +1045,30 @@ def encounter_budget(party_size:int,difficulty:str)->int:
 
 def encounter_summary(encounter:dict,creatures:list[dict])->dict:
     size=max(1,int(encounter.get('party_size') or 4));level=int(encounter.get('party_level') or 1)
-    xp=0
+    data=encounter.get('data') if isinstance(encounter.get('data'),dict) else _json(encounter.get('data_json','{}'),{})
+    variant=normalize_encounter_rules_variant((data or {}).get('rules_variant'))
+    xp=0;warnings=[];breakdown=[]
     for c in creatures:
-        per=int(c['xp_override']) if c.get('xp_override') is not None else encounter_xp_for_level(int(c.get('level') or 0),level)
-        xp += per*max(1,int(c.get('quantity') or 1))
+        qty=max(1,int(c.get('quantity') or 1));override=c.get('xp_override')
+        if override is not None and str(override).strip()!='':
+            per=int(override);source='override'
+        else:
+            per=encounter_xp_for_level(int(c.get('level') or 0),level,variant);source=variant
+        if per is None:
+            warnings.append(f"{c.get('name') or 'Creature'} is outside the official PWL XP table (party level ±7). Set an XP override for this row.")
+            breakdown.append({'row_id':int(c.get('id') or 0),'per_xp':None,'total_xp':None,'source':'manual_required'})
+            continue
+        total=int(per)*qty;xp+=total
+        breakdown.append({'row_id':int(c.get('id') or 0),'per_xp':int(per),'total_xp':total,'source':source})
     scaled={name:round(budget*size/4) for name,budget in DIFFICULTY_BUDGETS}
-    if xp < scaled['Trivial']:difficulty='Below trivial'
+    if warnings:difficulty='Needs XP override'
+    elif xp < scaled['Trivial']:difficulty='Below trivial'
     elif xp < scaled['Low']:difficulty='Trivial'
     elif xp < scaled['Moderate']:difficulty='Low'
     elif xp < scaled['Severe']:difficulty='Moderate'
     elif xp < scaled['Extreme']:difficulty='Severe'
     else:difficulty='Extreme+'
-    return {'xp':xp,'difficulty':difficulty,'budgets':scaled,'party_level':level,'party_size':size}
+    return {'xp':xp,'difficulty':difficulty,'budgets':scaled,'party_level':level,'party_size':size,'rules_variant':variant,'rules_label':'Proficiency without Level' if variant=='proficiency_without_level' else 'Standard PF2e','complete':not warnings,'warnings':warnings,'breakdown':breakdown}
 
 
 def save_encounter(settings: Settings,campaign_id:int,payload:dict,*,actor_label:str='')->dict:
@@ -822,7 +1106,12 @@ def save_encounter_creature(settings: Settings,campaign_id:int,encounter_id:int,
     if not name:raise ValueError('Creature name is required.')
     if payload.get('entity_id') is not None and not _entity_in_campaign(settings,campaign_id,payload.get('entity_id')):raise ValueError('Creature entity does not belong to this campaign.')
     if not _prepared_in_campaign(settings,campaign_id,payload.get('prepared_content_id')):raise ValueError('Prepared creature does not belong to this campaign.')
-    vals=(payload.get('entity_id'),payload.get('prepared_content_id'),name,int(payload.get('level') or 0),max(1,int(payload.get('quantity') or 1)),str(payload.get('disposition') or 'enemy')[:40],payload.get('xp_override'),str(payload.get('note') or '')[:3000])
+    raw_override=payload.get('xp_override');xp_override=None
+    if raw_override is not None and str(raw_override).strip()!='':
+        try:xp_override=int(raw_override)
+        except Exception:raise ValueError('XP override must be a whole number.')
+        if xp_override < 0:raise ValueError('XP override cannot be negative.')
+    vals=(payload.get('entity_id'),payload.get('prepared_content_id'),name,int(payload.get('level') or 0),max(1,int(payload.get('quantity') or 1)),str(payload.get('disposition') or 'enemy')[:40],xp_override,str(payload.get('note') or '')[:3000])
     with connect(settings) as conn:
         if rid:
             cur=conn.execute('UPDATE v7_encounter_creatures SET entity_id=?,prepared_content_id=?,name=?,level=?,quantity=?,disposition=?,xp_override=?,note=? WHERE id=? AND encounter_id=?',vals+(rid,int(encounter_id)))
@@ -835,6 +1124,61 @@ def save_encounter_creature(settings: Settings,campaign_id:int,encounter_id:int,
 def delete_encounter_creature(settings: Settings,campaign_id:int,encounter_id:int,row_id:int)->None:
     with connect(settings) as conn:
         conn.execute('''DELETE FROM v7_encounter_creatures WHERE id=? AND encounter_id=? AND encounter_id IN (SELECT id FROM v7_encounters WHERE campaign_id=?)''',(int(row_id),int(encounter_id),int(campaign_id)))
+
+
+def save_creature_folder(settings: Settings,campaign_id:int,payload:dict,*,actor_label:str='')->dict:
+    rid=int(payload.get('id') or 0);name=str(payload.get('name') or '').strip()[:180]
+    if not name:raise ValueError('Folder name is required.')
+    now=time.time();note=str(payload.get('note') or '')[:3000];source=str(payload.get('source') or 'manual')[:40]
+    with connect(settings) as conn:
+        if rid:
+            cur=conn.execute('UPDATE v7_creature_folders SET name=?,note=?,source=?,updated_at=? WHERE id=? AND campaign_id=?',(name,note,source,now,rid,int(campaign_id)))
+            if not cur.rowcount:raise ValueError('Creature folder not found.')
+        else:
+            existing=conn.execute('SELECT id FROM v7_creature_folders WHERE campaign_id=? AND lower(name)=lower(?)',(int(campaign_id),name)).fetchone()
+            if existing:rid=int(existing['id']);conn.execute('UPDATE v7_creature_folders SET note=?,updated_at=? WHERE id=?',(note,now,rid))
+            else:
+                cur=conn.execute('INSERT INTO v7_creature_folders(campaign_id,name,note,source,created_at,updated_at) VALUES(?,?,?,?,?,?)',(int(campaign_id),name,note,source,now,now));rid=int(cur.lastrowid or 0)
+    out=get_creature_folder(settings,campaign_id,rid) or {};audit(settings,campaign_id,actor_label,'creature_folder.save','creature_folder',str(rid),{},out);return out
+
+
+def get_creature_folder(settings: Settings,campaign_id:int,folder_id:int)->dict|None:
+    r=_row(settings,'SELECT * FROM v7_creature_folders WHERE id=? AND campaign_id=?',(int(folder_id),int(campaign_id)))
+    if not r:return None
+    members=[]
+    rows=_rows(settings,'SELECT entity_id,sort_order FROM v7_creature_folder_members WHERE folder_id=? ORDER BY sort_order,created_at,entity_id',(int(folder_id),))
+    for m in rows:
+        e=get_entity(settings,campaign_id,int(m['entity_id']))
+        if e:members.append(e)
+    r['members']=members;return r
+
+
+def list_creature_folders(settings: Settings,campaign_id:int)->list[dict]:
+    rows=_rows(settings,'SELECT id FROM v7_creature_folders WHERE campaign_id=? ORDER BY lower(name),id',(int(campaign_id),))
+    return [x for x in (get_creature_folder(settings,campaign_id,int(r['id'])) for r in rows) if x]
+
+
+def add_creature_to_folder(settings: Settings,campaign_id:int,folder_id:int,entity_id:int)->dict:
+    folder=get_creature_folder(settings,campaign_id,folder_id)
+    if not folder:raise ValueError('Creature folder not found.')
+    entity=get_entity(settings,campaign_id,entity_id)
+    if not entity:raise ValueError('Creature entity not found.')
+    if str(entity.get('kind') or '').lower() not in {'monster','npc','creature'}:raise ValueError('Only creatures and NPCs can be added to creature folders.')
+    with connect(settings) as conn:
+        pos=conn.execute('SELECT COALESCE(MAX(sort_order),-1)+1 n FROM v7_creature_folder_members WHERE folder_id=?',(int(folder_id),)).fetchone()['n']
+        conn.execute('INSERT OR IGNORE INTO v7_creature_folder_members(folder_id,entity_id,sort_order,created_at) VALUES(?,?,?,?)',(int(folder_id),int(entity_id),int(pos),time.time()))
+    return get_creature_folder(settings,campaign_id,folder_id) or {}
+
+
+def remove_creature_from_folder(settings: Settings,campaign_id:int,folder_id:int,entity_id:int)->None:
+    if not get_creature_folder(settings,campaign_id,folder_id):raise ValueError('Creature folder not found.')
+    with connect(settings) as conn:conn.execute('DELETE FROM v7_creature_folder_members WHERE folder_id=? AND entity_id=?',(int(folder_id),int(entity_id)))
+
+
+def delete_creature_folder(settings: Settings,campaign_id:int,folder_id:int,*,actor_label:str='')->None:
+    if not get_creature_folder(settings,campaign_id,folder_id):raise ValueError('Creature folder not found.')
+    with connect(settings) as conn:conn.execute('DELETE FROM v7_creature_folders WHERE id=? AND campaign_id=?',(int(folder_id),int(campaign_id)))
+    audit(settings,campaign_id,actor_label,'creature_folder.delete','creature_folder',str(folder_id),{}, {})
 
 
 def save_loot_pool(settings: Settings,campaign_id:int,payload:dict)->dict:
@@ -1082,6 +1426,28 @@ def sync_link(settings: Settings,entity_id:int)->dict|None:
     return r
 
 
+def sync_links_for_entities(settings: Settings, entities:list[dict])->dict[int,dict]:
+    """Load managed Foundry state for a rendered entity collection in one query.
+
+    The Living Table already has the entity payloads in memory; asking sync_link() for
+    every card used to re-read both the link and the entity row N times. Keeping this
+    bulk path separate preserves the simple single-entity API while making workspace
+    refreshes scale with larger campaigns.
+    """
+    by_id={int(e['id']):e for e in entities or [] if isinstance(e,dict) and e.get('id')}
+    if not by_id:return {}
+    ids=list(by_id);marks=','.join('?' for _ in ids)
+    rows=_rows(settings,f'SELECT * FROM v7_foundry_sync_links WHERE entity_id IN ({marks})',tuple(ids))
+    out={}
+    for row in rows:
+        r=dict(row);eid=int(r['entity_id'])
+        r['base_snapshot']=_json(r.pop('base_snapshot_json','{}'),{})
+        r['foundry_snapshot']=_json(r.pop('foundry_snapshot_json','{}'),{})
+        entity=by_id.get(eid);r['diffs']=_sync_diffs(entity,r['foundry_snapshot']) if entity else []
+        out[eid]=r
+    return out
+
+
 def _seeker_sync_snapshot(entity:dict)->dict:
     return {'name':entity.get('name'),'summary':entity.get('summary'),'image_ref':entity.get('image_ref'),'token_ref':entity.get('token_ref'),'data':entity.get('data') or {}}
 
@@ -1163,15 +1529,18 @@ def ingest_foundry_command_results(settings: Settings,campaign_id:int,results:li
     count=0
     for item in results or []:
         result=item.get('result') if isinstance(item,dict) and isinstance(item.get('result'),dict) else {}
-        eid=result.get('entity_id');uuid=str(result.get('uuid') or '').strip()
-        if not eid or not uuid:continue
-        try:eid=int(eid)
-        except Exception:continue
-        try:
-            set_sync_link(settings,campaign_id,eid,uuid,str(result.get('document_type') or ''))
-            count+=1
-        except ValueError:
-            continue
+        result_rows=[result]
+        if isinstance(result.get('items'),list):result_rows.extend(x for x in result['items'] if isinstance(x,dict))
+        for resolved in result_rows:
+            eid=resolved.get('entity_id');uuid=str(resolved.get('uuid') or '').strip()
+            if not eid or not uuid:continue
+            try:eid=int(eid)
+            except Exception:continue
+            try:
+                set_sync_link(settings,campaign_id,eid,uuid,str(resolved.get('document_type') or ''))
+                count+=1
+            except ValueError:
+                continue
     return count
 
 

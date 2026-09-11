@@ -31,15 +31,22 @@ $$('[data-delete-character-image]').forEach(b=>b.onclick=async()=>{if(!confirm('
 $$('[data-foundry-tab]').forEach(b=>b.onclick=()=>{const key=b.dataset.foundryTab;$$('[data-foundry-tab]').forEach(x=>x.classList.toggle('active',x===b));$$('[data-foundry-pane]').forEach(x=>x.classList.toggle('active',x.dataset.foundryPane===key))});
 $('[data-foundry-refresh]')?.addEventListener('click',()=>location.reload());
 const foundryRoot=$('[data-foundry-character]');
+const foundryLive=foundryRoot&&single?.id&&window.SeekerFoundryLive?new window.SeekerFoundryLive.FoundryLiveState(foundryRoot,single.id):null;
+const foundryStatusToast=(row,status)=>{const label=row.delivery_label||status;if(status==='failed')toast(label,true);else if(['queued','dispatched','executing'].includes(status))toast(`${label}…`)};
 async function queueFoundryAction(body,button){
   if(!single?.id)return;
-  if(button){button.disabled=true;button.dataset.busy='1'}
+  const delta=Number(body.delta||0);const op=body.action==='adjust_resource'?foundryLive?.beginResource(body.resource,delta):body.action==='adjust_item_quantity'?foundryLive?.beginItem(body.item_id,delta):null;
+  if(button){button.dataset.busy='1';button.setAttribute('aria-busy','true')}
   try{
-    await send(`/api/v61/characters/${single.id}/foundry/action`,'POST',body);
-    toast('Sent to Foundry. The bridge is checking the queue now.');
-    setTimeout(()=>location.reload(),3600);
-  }catch(err){toast(err.message||'Could not reach Foundry.',true)}
-  finally{if(button){button.disabled=false;delete button.dataset.busy}}
+    const queued=await send(`/api/v61/characters/${single.id}/foundry/action`,'POST',body);const id=queued?.command?.id;
+    if(!id)throw Error('Seeker did not create a Foundry delivery record.');
+    const result=await window.SeekerFoundryLive.waitForCommand(id,{onStatus:foundryStatusToast,timeout:45000});
+    if(!result){foundryLive?.rollback(op);toast('Foundry is not responding yet. The action remains queued; the display will update when applied.',true);return}
+    foundryLive?.commit(op,result.result?.after);
+    try{await foundryLive?.refresh()}catch(_){/* command ACK already projected the confirmed value */}
+    toast(result.result?.message||'Applied in Foundry.');
+  }catch(err){foundryLive?.rollback(op);toast(err.message||'Could not reach Foundry.',true)}
+  finally{if(button){delete button.dataset.busy;button.removeAttribute('aria-busy')}}
 }
 foundryRoot?.addEventListener('click',e=>{
   const resource=e.target.closest('[data-foundry-resource]');
