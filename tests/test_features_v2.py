@@ -212,6 +212,8 @@ def test_player_character_ownership_privacy_and_multiple_characters(tmp_path: Pa
     from app.storage import create_player_invite
     s=setup(tmp_path)
     a=create_player_invite(s,"Alice"); b=create_player_invite(s,"Bob")
+    from app.campaigns import default_campaign_id, set_campaign_members
+    set_campaign_members(s,default_campaign_id(s),[a["id"],b["id"]])
     hero=save_player_character(s,{"name":"Mira","ancestry":"Elf","class_name":"Wizard","visibility":"party"},invite_id=a["id"])
     secret=save_player_character(s,{"name":"The Mask","visibility":"private"},invite_id=a["id"])
     alt=save_player_character(s,{"name":"Old Mira","status":"retired","visibility":"party"},invite_id=a["id"])
@@ -265,6 +267,8 @@ def test_private_character_assets_and_search_follow_invite_visibility(tmp_path: 
     (s.project_dir/'main.tex').write_text('\\documentclass{book}\n\\begin{document}\n\\chapter{World}\n\\section{Welcome}\nHello.\n\\end{document}\n',encoding='utf-8')
     build_wiki(s)
     a=create_player_invite(s,'Alice'); b=create_player_invite(s,'Bob')
+    from app.campaigns import default_campaign_id, set_campaign_members
+    set_campaign_members(s,default_campaign_id(s),[a['id'],b['id']])
     secret=save_player_character(s,{"name":"Night Mask","visibility":"private","summary":"Secret alter ego"},invite_id=a['id'])
     rel=f"characters/{a['id']}/{secret['id']}/mask.webp"; asset=s.uploads_dir/rel; asset.parent.mkdir(parents=True,exist_ok=True); asset.write_bytes(b'fake-webp')
     add_character_image(s,secret['id'],rel,'portrait','Mask',invite_id=a['id'])

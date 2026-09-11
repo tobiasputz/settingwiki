@@ -379,22 +379,21 @@ def _campaign_context(request: Request) -> dict:
     gm=is_gm(request);iid=_invite_id(request)
     campaigns=list_campaigns(settings,invite_id=iid,admin=gm,include_archived=gm)
     # A named player invitation must never silently fall back into another
-    # table when all of its active campaign memberships were removed or
-    # archived. Without this guard, read routes would inherit the default
-    # campaign id and could expose that party's session state. Public/password
-    # access has no invitation membership to resolve, so it intentionally uses
-    # the default campaign as the setting's public table.
+    # table when all of its active memberships were removed or archived. Table
+    # access is explicit: authentication alone does not imply membership.
     if not campaigns and iid is not None and not gm:
         raise HTTPException(403, "This invitation is not assigned to an active campaign. Ask the GM to add you to a campaign.")
     if not campaigns:
-        cid=default_campaign_id(settings);campaigns=[get_campaign(settings,cid) or {'id':cid,'name':'Main Campaign','slug':'main-campaign','status':'active','is_default':1}]
+        # GM/public setting-only routes still need a deterministic context for
+        # legacy campaign-scoped helpers. This is a fallback id, not a membership
+        # grant and not a user-visible default table.
+        cid=default_campaign_id(settings);campaigns=[get_campaign(settings,cid) or {'id':cid,'name':'Main Campaign','slug':'main-campaign','status':'active','is_default':0}]
     allowed={int(c['id']) for c in campaigns if c and (gm or c.get('status')=='active')}
     requested=request.session.get('active_campaign_id')
     try:requested=int(requested)
     except (TypeError,ValueError):requested=0
     if requested not in allowed:
-        preferred=next((c for c in campaigns if c and int(c.get('is_default') or 0) and int(c['id']) in allowed),None)
-        active=preferred or next((c for c in campaigns if c and int(c['id']) in allowed),campaigns[0])
+        active=next((c for c in campaigns if c and int(c['id']) in allowed),campaigns[0])
         requested=int(active['id']);request.session['active_campaign_id']=requested
     active=next((c for c in campaigns if c and int(c['id'])==requested),None) or campaigns[0]
     ctx={'campaigns':[c for c in campaigns if c],'active_campaign':active,'active_campaign_id':int(active['id']),'multi_campaign':len([c for c in campaigns if c and c.get('status')=='active'])>1}
@@ -892,19 +891,10 @@ def admin_campaign_delete_api(request:Request,campaign_id:int):
     try:
         row=get_campaign(settings,campaign_id)
         if not row:raise ValueError('Campaign not found.')
-        # The UI used to make the default campaign effectively undeletable. For an
-        # owner-requested permanent deletion, transparently promote another active
-        # table first. The final remaining campaign is still protected.
-        if int(row.get('is_default') or 0):
-            alternatives=[c for c in list_campaigns(settings,admin=True,include_archived=True) if int(c['id'])!=int(campaign_id)]
-            if not alternatives:raise ValueError('Create another campaign before deleting the final table.')
-            replacement=next((c for c in alternatives if c.get('status')=='active'),alternatives[0])
-            if replacement.get('status')!='active':
-                save_campaign(settings,{**replacement,'status':'active'})
-            make_default_campaign(settings,int(replacement['id']))
         delete_campaign(settings,campaign_id)
-        if int(request.session.get("campaign_id") or 0)==int(campaign_id):request.session["campaign_id"]=default_campaign_id(settings)
-        return {"ok":True,"deleted":int(campaign_id),"active_campaign_id":request.session.get('campaign_id')}
+        if int(request.session.get("active_campaign_id") or 0)==int(campaign_id):
+            request.session.pop("active_campaign_id",None)
+        return {"ok":True,"deleted":int(campaign_id),"active_campaign_id":request.session.get('active_campaign_id')}
     except ValueError as exc:raise HTTPException(400,str(exc))
 
 
@@ -1553,7 +1543,7 @@ def characters_page(request: Request):
         link=foundry_link_for_character(settings,int(c['id']))
         c['foundry_actor_id']=str((link or {}).get('actor_id') or '')
         c['foundry_linked']=bool(link and not link.get('stale'))
-    return templates.TemplateResponse("characters.html",{"request":request,"wiki":wiki,"maps":maps,"characters":chars,"player":current_player_invite(request),"admin_view":admin_view,"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view),"foundry_actors":foundry_actors(settings,cid)})
+    return templates.TemplateResponse("characters.html",{"request":request,"wiki":wiki,"maps":maps,"characters":chars,"player":current_player_invite(request),"admin_view":admin_view,"character_campaigns":list_campaigns(settings,invite_id=iid,admin=admin_view,include_archived=admin_view),"foundry_actors":foundry_actors(settings,cid)})
 
 @app.get("/characters/{character_id}", response_class=HTMLResponse)
 def character_page(request: Request, character_id:int):
@@ -1571,7 +1561,7 @@ def character_page(request: Request, character_id:int):
     # Detailed Foundry mechanics are private to the character owner and GMs.
     # Party-facing story dossiers stay lightweight even when the actor is linked.
     foundry_view=foundry_linked if (owner or admin_view) else None
-    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[]),"character_campaigns":list_campaigns(settings,admin=True,include_archived=admin_view),"character_sessions":list_sessions(settings,public=False,campaign_id=cid),"foundry_actor":foundry_view,"foundry_actors":foundry_actors(settings,cid) if can_edit else []})
+    return templates.TemplateResponse("character.html",{"request":request,"wiki":wiki,"maps":maps,"character":char,"can_edit":can_edit,"admin_view":admin_view,"wiki_pages":wiki.get("pages",[]),"character_campaigns":list_campaigns(settings,invite_id=iid,admin=admin_view,include_archived=admin_view),"character_sessions":list_sessions(settings,public=False,campaign_id=cid),"foundry_actor":foundry_view,"foundry_actors":foundry_actors(settings,cid) if can_edit else []})
 
 @app.get("/api/player/characters")
 def player_characters_api(request:Request):
@@ -3853,7 +3843,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/9.0.1 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/9.0.2 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))

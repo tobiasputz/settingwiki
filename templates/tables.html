@@ -7,7 +7,7 @@
   {% for table in table_cards %}
     <article class="table-overview-card {% if table.status=='archived' %}archived{% endif %}" style="--table-accent:{{ table.accent or '#b79661' }}">
       <div class="table-overview-accent"></div>
-      <header><div><small>{{ 'DEFAULT · ' if table.is_default else '' }}{{ table.status|upper }}</small><h2>{{ table.name }}</h2></div><span>{{ table.characters|length }} PC{{ '' if table.characters|length==1 else 's' }}</span></header>
+      <header><div><small>{{ table.status|upper }}</small><h2>{{ table.name }}</h2></div><span>{{ table.characters|length }} PC{{ '' if table.characters|length==1 else 's' }}</span></header>
       <p>{{ table.description or 'A campaign unfolding in this setting.' }}</p>
       {% if table.live_session %}<div class="table-live-chip">● LIVE · {{ table.live_session.title }}</div>{% endif %}
       {% if table.own_characters %}<div class="table-own-characters"><small>YOUR CHARACTERS</small>{% for c in table.own_characters %}<a href="/characters/{{ c.id }}" data-table-enter="{{ table.id }}" data-table-href="/characters/{{ c.id }}">{% if c.portrait_url %}<img src="{{ c.portrait_url }}" alt="">{% else %}<span>♟</span>{% endif %}<strong>{{ c.name }}</strong></a>{% endfor %}</div>{% endif %}

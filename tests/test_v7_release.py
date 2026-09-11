@@ -47,8 +47,8 @@ def seed_wiki(s: Settings):
 
 def test_v7_release_identity_assets_and_bridge():
     root=Path(__file__).resolve().parents[1]
-    assert (root/'VERSION').read_text().strip()=='9.0.1'
-    assert 'seeker-static-v9001' in (root/'static/sw.js').read_text(encoding='utf-8')
+    assert (root/'VERSION').read_text().strip()=='9.0.2'
+    assert 'seeker-static-v9002' in (root/'static/sw.js').read_text(encoding='utf-8')
     assert (root/'app/v7.py').exists() and (root/'app/v7_api.py').exists()
     assert (root/'templates/v7_hub.html').exists() and (root/'templates/v7_player.html').exists()
     assert (root/'static/v7.css').exists() and (root/'static/v7.js').exists()
@@ -233,7 +233,7 @@ def test_v7_http_gm_and_player_privacy(tmp_path: Path,monkeypatch):
     pool=save_loot_pool(s,cid,{'title':'Player Cache','visibility':'players'});save_loot_item(s,cid,pool['id'],{'name':'Healing Potion','description':'Restorative draught','quantity':1,'visibility':'players'})
     gm=TestClient(main.app);assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     assert gm.get('/gm/v7').status_code==200 and 'Prepare. Run. Resolve. Remember.' in gm.get('/gm/v7').text
-    assert gm.get('/api/v7/health').json()['version']=='9.0.1'
+    assert gm.get('/api/v7/health').json()['version']=='9.0.2'
     saved=gm.post('/api/v7/entities',json={'kind':'npc','name':'Test NPC','summary':'v1'}).json();gm.post('/api/v7/entities',json={**saved,'summary':'v2'})
     versions=gm.get(f"/api/v7/entities/{saved['id']}/versions").json();assert len(versions)>=2
     assert gm.post(f"/api/v7/entities/{saved['id']}/versions/{versions[-1]['id']}/restore").status_code==200
@@ -253,7 +253,7 @@ def test_v7_cross_campaign_api_rejects_foreign_permission_override(tmp_path: Pat
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);monkeypatch.setattr(main,'settings',s)
     a=default_campaign_id(s);b=save_campaign(s,{'name':'B'})['id'];foreign=create_player_invite(s,'Foreign');set_campaign_members(s,a,[]);set_campaign_members(s,b,[foreign['id']])
-    gm=TestClient(main.app);gm.post('/admin/login',data={'password':'admin'})
+    gm=TestClient(main.app);gm.post('/admin/login',data={'password':'admin'});gm.post('/api/campaign/select',json={'campaign_id':a})
     r=gm.put(f"/api/v7/permissions/invites/{foreign['id']}",json={'view_statblocks':True})
     assert r.status_code==404
 

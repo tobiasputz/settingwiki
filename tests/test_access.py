@@ -47,6 +47,8 @@ def test_invitation_route_authenticates_one_browser_and_revocation_is_live(tmp_p
     created=admin.post('/api/admin/invitations',json={'label':'Sarah','max_devices':1})
     assert created.status_code==200
     invite=created.json()
+    from app.campaigns import default_campaign_id, set_campaign_members
+    set_campaign_members(s,default_campaign_id(s),[invite['id']])
 
     player=TestClient(main.app)
     assert player.get('/',follow_redirects=False).headers['location']=='/access'

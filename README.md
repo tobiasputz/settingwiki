@@ -1,6 +1,6 @@
-# Seeker — Campaign Workspace (9.0.1)
+# Seeker — Campaign Workspace (9.0.2)
 
-**9.0.1 maintenance update:** restores the animated archive landing screen and bumps the browser/PWA asset generation to 9001. Version 9.0 also adds Session Director, PF2e Encounter Builder, field-level player knowledge, campaign timeline consequences, opt-in relationship suggestions, expanded universal search, Forge 2.0 types, campaign-wide Foundry sync, Asset Library, map reveal states, backups, offline packs, plugin manifests, and campaign-independent Homebrew.
+**9.0.2 maintenance update:** restores the animated archive landing screen and bumps the browser/PWA asset generation to 9002. Version 9.0 also adds Session Director, PF2e Encounter Builder, field-level player knowledge, campaign timeline consequences, opt-in relationship suggestions, expanded universal search, Forge 2.0 types, campaign-wide Foundry sync, Asset Library, map reveal states, backups, offline packs, plugin manifests, and campaign-independent Homebrew.
 
 **One campaign, one source of truth.** This major release adds a connected **Campaign Workspace** without turning Seeker's document structure into another database you have to manage. LaTeX remains authoritative for source-backed campaign material; Foundry remains authoritative for live actor state; Seeker connects those systems to sessions, Chronicle, maps, handouts, Homebrew and campaign relationships.
 
@@ -106,7 +106,7 @@ GMs prepare through **Session Prep** (`/gm/prep`). A planned session can have an
 
 V5 also adds a private player **Investigation Board**, campaign objectives, lore follows/watches and notification preferences, a data-grounded **Previously on…** briefing, narrative character milestones, session RSVP, and campaign-specific Atlas knowledge/fog. Session scheduling remains player-global: availability is filled once per player and reused across every campaign in which that player has a current character.
 
-Multi-campaign management now supports true permanent deletion of non-default campaigns. Deletion removes table-specific state while preserving shared setting canon, player identities and global availability. The default campaign is intentionally protected.
+Multi-campaign management supports permanent deletion of any table as long as at least one table remains. Deletion removes table-specific state while preserving shared setting canon, player identities and global availability. There is no special default table; player access is determined only by explicit table membership.
 
 The free local semantic Codex search from V4 remains available and spoiler-safe; it does not require an API key or hosted AI service. Optional OpenAI-compatible answer generation can still be configured separately if desired.
 

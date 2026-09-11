@@ -48,20 +48,22 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
 
 
 def _default_campaign_id_conn(conn: sqlite3.Connection) -> int:
-    row = conn.execute("SELECT id FROM campaigns WHERE is_default=1 ORDER BY id LIMIT 1").fetchone()
+    """Compatibility helper for code paths that still require a campaign id.
+
+    Seeker no longer has a user-visible "default table". The helper now merely
+    returns a deterministic fallback (first active table, then first table) and
+    never grants membership or marks a campaign as special.
+    """
+    row = conn.execute("SELECT id FROM campaigns WHERE status='active' ORDER BY name COLLATE NOCASE,id LIMIT 1").fetchone()
+    if not row:
+        row = conn.execute("SELECT id FROM campaigns ORDER BY name COLLATE NOCASE,id LIMIT 1").fetchone()
     if row:
         return int(row[0])
-    row = conn.execute("SELECT id FROM campaigns ORDER BY id LIMIT 1").fetchone()
-    if row:
-        cid = int(row[0])
-        conn.execute("UPDATE campaigns SET is_default=CASE WHEN id=? THEN 1 ELSE 0 END", (cid,))
-        return cid
     now = time.time()
-    cid = int(conn.execute(
+    return int(conn.execute(
         "INSERT INTO campaigns(name,slug,description,status,accent,is_default,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-        ("Main Campaign", "main-campaign", "The original table carried forward from the single-campaign Seeker setup.", "active", "#b79661", 1, now, now),
+        ("Main Campaign", "main-campaign", "A table in this setting.", "active", "#b79661", 0, now, now),
     ).lastrowid)
-    return cid
 
 
 def _add_campaign_column(conn: sqlite3.Connection, table: str, default_id: int) -> None:
@@ -153,13 +155,27 @@ def init_campaign_db(settings: Settings) -> None:
     """
     with connect(settings) as conn:
         conn.executescript(CAMPAIGN_SCHEMA)
+        # Capture the old special table before clearing the legacy flag. Older
+        # builds automatically enrolled every invitation into it. On the one-time
+        # migration, remove that inherited membership only for players who already
+        # belong to another table; their explicit table access is preserved.
+        legacy_defaults=[int(r[0]) for r in conn.execute("SELECT id FROM campaigns WHERE is_default=1").fetchall()]
         default_id = _default_campaign_id_conn(conn)
-
-        # Existing invitations belonged to the original campaign. Preserve that
-        # assumption during upgrade so nobody loses access after deployment.
-        if _table_exists(conn, 'player_invites'):
-            conn.execute('''INSERT OR IGNORE INTO campaign_memberships(campaign_id,invite_id,created_at)
-                            SELECT ?,id,? FROM player_invites''', (default_id, time.time()))
+        marker=False
+        if _table_exists(conn,'app_settings'):
+            marker=conn.execute("SELECT 1 FROM app_settings WHERE key='campaign_default_logic_removed_v902'").fetchone() is not None
+        if not marker:
+            for legacy_id in legacy_defaults:
+                conn.execute('''DELETE FROM campaign_memberships AS cm
+                                WHERE cm.campaign_id=? AND EXISTS(
+                                  SELECT 1 FROM campaign_memberships other
+                                  WHERE other.invite_id=cm.invite_id AND other.campaign_id<>cm.campaign_id
+                                )''',(legacy_id,))
+            if _table_exists(conn,'app_settings'):
+                conn.execute("INSERT OR REPLACE INTO app_settings(key,value) VALUES('campaign_default_logic_removed_v902','1')")
+        # is_default remains only as a legacy schema column. No current UI or
+        # access rule treats any table as special.
+        conn.execute("UPDATE campaigns SET is_default=0 WHERE is_default<>0")
 
         for table in (
             'campaign_sessions','session_updates','mysteries','handouts','player_characters',
@@ -227,14 +243,14 @@ def list_campaigns(settings: Settings, *, invite_id: int | None = None, admin: b
         status = "" if include_archived else " AND c.status='active'"
         if admin:
             rows = conn.execute(f'''SELECT c.*, (SELECT COUNT(*) FROM campaign_memberships cm WHERE cm.campaign_id=c.id) AS member_count
-                                    FROM campaigns c WHERE 1=1 {status} ORDER BY c.is_default DESC,c.name COLLATE NOCASE,c.id''').fetchall()
+                                    FROM campaigns c WHERE 1=1 {status} ORDER BY c.name COLLATE NOCASE,c.id''').fetchall()
         elif invite_id is not None:
             rows = conn.execute(f'''SELECT c.*,1 AS member_count FROM campaigns c
                                     JOIN campaign_memberships cm ON cm.campaign_id=c.id
-                                    WHERE cm.invite_id=? {status} ORDER BY c.is_default DESC,c.name COLLATE NOCASE,c.id''',(int(invite_id),)).fetchall()
+                                    WHERE cm.invite_id=? {status} ORDER BY c.name COLLATE NOCASE,c.id''',(int(invite_id),)).fetchall()
         else:
             rows = conn.execute(f'''SELECT c.*,0 AS member_count FROM campaigns c
-                                    WHERE c.is_default=1 {status} ORDER BY c.id LIMIT 1''').fetchall()
+                                    WHERE 1=1 {status} ORDER BY c.name COLLATE NOCASE,c.id LIMIT 1''').fetchall()
         return [dict(r) for r in rows]
 
 
@@ -287,8 +303,6 @@ def save_campaign(settings: Settings, payload: dict) -> dict:
             row = conn.execute("SELECT * FROM campaigns WHERE id=?",(int(cid),)).fetchone()
             if not row:
                 raise ValueError('Campaign not found.')
-            if status=='archived' and int(row['is_default'] or 0):
-                raise ValueError('The default campaign cannot be archived. Make another campaign the default first.')
             slug = str(payload.get('slug') or row['slug'] or _slug(name))
             conn.execute("UPDATE campaigns SET name=?,slug=?,description=?,status=?,accent=?,updated_at=? WHERE id=?",(name,slug,description,status,accent,now,int(cid)))
             out = int(cid)
@@ -308,26 +322,23 @@ def archive_campaign(settings: Settings, campaign_id: int) -> dict:
         row = conn.execute("SELECT * FROM campaigns WHERE id=?",(cid,)).fetchone()
         if not row:
             raise ValueError('Campaign not found.')
-        if int(row['is_default'] or 0):
-            raise ValueError('The default campaign cannot be archived. Make another campaign the default first.')
-        conn.execute("UPDATE campaigns SET status='archived',updated_at=? WHERE id=?",(time.time(),cid))
+        conn.execute("UPDATE campaigns SET status='archived',is_default=0,updated_at=? WHERE id=?",(time.time(),cid))
     return get_campaign(settings,cid) or {}
 
 
 def make_default_campaign(settings: Settings, campaign_id: int) -> dict:
+    """Deprecated compatibility endpoint. Tables no longer have a default role."""
     cid = int(campaign_id)
+    row=get_campaign(settings,cid)
+    if not row:
+        raise ValueError('Campaign not found.')
     with connect(settings) as conn:
-        row=conn.execute("SELECT status FROM campaigns WHERE id=?",(cid,)).fetchone()
-        if not row:
-            raise ValueError('Campaign not found.')
-        if str(row['status'])!='active':
-            raise ValueError('An archived campaign cannot be the default.')
-        conn.execute("UPDATE campaigns SET is_default=CASE WHEN id=? THEN 1 ELSE 0 END",(cid,))
+        conn.execute("UPDATE campaigns SET is_default=0 WHERE is_default<>0")
     return get_campaign(settings,cid) or {}
 
 
 def delete_campaign(settings: Settings, campaign_id: int) -> None:
-    """Permanently delete one non-default campaign and all campaign-scoped state.
+    """Permanently delete one campaign and all campaign-scoped state.
 
     Player identities and player-global availability are intentionally preserved;
     canonical setting data is shared and is never removed with a table.
@@ -337,8 +348,9 @@ def delete_campaign(settings: Settings, campaign_id: int) -> None:
         row=conn.execute("SELECT * FROM campaigns WHERE id=?",(cid,)).fetchone()
         if not row:
             raise ValueError('Campaign not found.')
-        if int(row['is_default'] or 0):
-            raise ValueError('The default campaign cannot be deleted. Make another campaign the default first.')
+        remaining=int(conn.execute("SELECT COUNT(*) FROM campaigns WHERE id<>?",(cid,)).fetchone()[0])
+        if remaining < 1:
+            raise ValueError('Create another table before deleting the final table.')
         # Delete every table that explicitly carries campaign_id. This keeps the
         # cleanup forward-compatible with V5 features while leaving shared canon
         # and player-global scheduling untouched.

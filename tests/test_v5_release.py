@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.campaigns import default_campaign_id, delete_campaign, get_campaign, save_campaign
+from app.campaigns import default_campaign_id, delete_campaign, get_campaign, save_campaign, set_campaign_members
 from app.config import Settings
 from app.features import init_feature_db, save_player_character, save_session
 from app.latex import build_wiki
@@ -50,7 +50,7 @@ A pilgrim road crossing the northern hills.
 
 
 def test_v5_schema_and_narrative_character_links(tmp_path: Path):
-    s=setup(tmp_path);inv=create_player_invite(s,'Alice');cid=default_campaign_id(s)
+    s=setup(tmp_path);inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);set_campaign_members(s,cid,[inv['id']])
     char=save_player_character(s,{'name':'Aster','campaign_id':cid,'external_sheet_url':'https://pathbuilder.example/aster','foundry_actor_url':'https://foundry.example/actor/aster'},invite_id=inv['id'])
     with connect(s) as conn:
         cols={r['name'] for r in conn.execute('PRAGMA table_info(player_characters)').fetchall()}
@@ -61,7 +61,7 @@ def test_v5_schema_and_narrative_character_links(tmp_path: Path):
 
 
 def test_party_notes_and_investigation_are_campaign_and_player_scoped(tmp_path: Path):
-    s=setup(tmp_path);a=create_player_invite(s,'Alice');b=create_player_invite(s,'Bob');cid=default_campaign_id(s)
+    s=setup(tmp_path);a=create_player_invite(s,'Alice');b=create_player_invite(s,'Bob');cid=default_campaign_id(s);set_campaign_members(s,cid,[a['id'],b['id']])
     save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=a['id']);save_player_character(s,{'name':'Bram','campaign_id':cid},invite_id=b['id'])
     sess=save_session(s,{'campaign_id':cid,'title':'Night Watch','status':'live'})
     note=save_party_note(s,cid,sess['id'],a['id'],'Alice','The bell rang twice.')
@@ -72,11 +72,10 @@ def test_party_notes_and_investigation_are_campaign_and_player_scoped(tmp_path: 
 
 
 def test_campaign_delete_removes_table_state_but_keeps_global_availability(tmp_path: Path):
-    s=setup(tmp_path);inv=create_player_invite(s,'Alice');main=default_campaign_id(s);other=save_campaign(s,{'name':'Second Table'})
+    s=setup(tmp_path);inv=create_player_invite(s,'Alice');main=default_campaign_id(s);other=save_campaign(s,{'name':'Second Table'});set_campaign_members(s,other['id'],[inv['id']])
     save_player_character(s,{'name':'Bram','campaign_id':other['id']},invite_id=inv['id'])
     day=(dt.date.today()+dt.timedelta(days=14)).isoformat();save_player_availability(s,inv['id'],[{'date':day,'status':'available'}])
     save_session(s,{'campaign_id':other['id'],'title':'Second Table Session','status':'planned'})
-    with pytest.raises(ValueError): delete_campaign(s,main)
     delete_campaign(s,other['id'])
     assert get_campaign(s,other['id']) is None
     assert list_player_availability(s,inv['id'],day,day)[0]['status']=='available'
@@ -86,7 +85,7 @@ def test_campaign_delete_removes_table_state_but_keeps_global_availability(tmp_p
 
 
 def test_rsvp_and_gm_preparation_roundtrip(tmp_path: Path):
-    s=setup(tmp_path);inv=create_player_invite(s,'Alice');cid=default_campaign_id(s)
+    s=setup(tmp_path);inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);set_campaign_members(s,cid,[inv['id']])
     save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=inv['id'])
     sess=save_session(s,{'campaign_id':cid,'title':'Glass Road','session_date':'2030-05-05','status':'planned'})
     rsvp=save_rsvp(s,sess['id'],inv['id'],'going','I will bring snacks')
@@ -99,7 +98,7 @@ def test_rsvp_and_gm_preparation_roundtrip(tmp_path: Path):
 def test_followed_lore_generates_campaign_notification(tmp_path: Path, monkeypatch):
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
-    inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=inv['id'])
+    inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);set_campaign_members(s,cid,[inv['id']]);save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=inv['id'])
     player=TestClient(main.app);assert player.get(inv['invite_path'],follow_redirects=False).status_code==303
     assert player.post('/api/v5/follows',json={'target_type':'page','target_key':'moon-court','label':'Moon Court','enabled':True}).status_code==200
     gm=TestClient(main.app);gm.post('/admin/login',data={'password':'admin'})
@@ -128,7 +127,7 @@ def test_campaign_map_discovery_and_fog_are_table_specific(tmp_path: Path):
 def test_v5_session_prep_recap_and_investigation_routes_render(tmp_path: Path, monkeypatch):
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
-    inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=inv['id']);save_session(s,{'campaign_id':cid,'title':'Next Session','status':'planned'})
+    inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);set_campaign_members(s,cid,[inv['id']]);save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=inv['id']);save_session(s,{'campaign_id':cid,'title':'Next Session','status':'planned'})
     p=TestClient(main.app);p.get(inv['invite_path'])
     for path in ['/session','/recap','/investigation']:
         r=p.get(path);assert r.status_code==200,path
@@ -148,9 +147,9 @@ def test_v5_frontend_release_contracts():
     sw=(root/'static/sw.js').read_text(encoding='utf-8')
     assert 'PARTY-OWNED MEMORY' in session and 'session-v5-tabs' in session and 'data-rsvp' in session
     assert 'PINNED TO TONIGHT' in prep and 'SEEKER_PREP' in prep
-    assert 'INVESTIGATION' in investigation and 'investigation.js?v=9001' in investigation
+    assert 'INVESTIGATION' in investigation and 'investigation.js?v=9002' in investigation
     assert 'Previously on' in recap
     assert 'Pathbuilder / sheet URL' in chars and 'Foundry actor' in chars and 'shAttacks' not in (root/'static/characters.js').read_text()
     assert 'planSession(key)' in schedule and '/gm/prep?session_id=' in schedule
     assert "'/api/admin/campaigns/'+b.dataset.archiveCampaign+'/archive'" in campaign and 'data-delete-campaign' in campaign
-    assert 'seeker-static-v9001' in sw and "'/investigation','/recap'" in sw
+    assert 'seeker-static-v9002' in sw and "'/investigation','/recap'" in sw

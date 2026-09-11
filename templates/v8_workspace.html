@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Campaign Workspace · {{ campaign.name or wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v8.css?v=9001">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v8.css?v=9002">{% endblock %}
 {% block body %}
 <main class="v8-shell" data-v8-root>
   <header class="v8-hero">
@@ -76,4 +76,4 @@
 <div class="v8-modal" id="v8ObjectPicker" aria-hidden="true"><div class="v8-modal-card v8-picker-card"><header><div><small>TRACK A CODEX PAGE</small><strong>Add something meaningful to Campaign Objects</strong></div><button type="button" data-v8-picker-close>×</button></header><div class="v8-picker-body"><div class="v8-search"><span>⌕</span><input id="v8ObjectPickerSearch" placeholder="Search Codex pages"></div><label class="v8-picker-kind"><small>OBJECT TYPE</small><select id="v8ObjectPickerKind"><option value="lore">Lore / other</option><option value="npc">NPC / person</option><option value="place">Place</option><option value="faction">Faction</option><option value="organization">Organization</option><option value="item">Item</option><option value="monster">Creature</option></select></label><div id="v8ObjectPickerList" class="v8-picker-list"></div></div><footer><span>Tracking a page does not alter its LaTeX or move it in the Codex.</span><button class="v8-button ghost" type="button" data-v8-picker-close>Close</button></footer></div></div>
 <div class="v8-toast" id="v8Toast"></div>
 {% endblock %}
-{% block scripts %}<script src="/static/v8.js?v=9001"></script><script src="/static/v9.js?v=9001"></script>{% endblock %}
+{% block scripts %}<script src="/static/v8.js?v=9002"></script><script src="/static/v9.js?v=9002"></script>{% endblock %}

@@ -1,9 +1,14 @@
-# Seeker 9.0.1 — Landing Motion Repair
+# Seeker 9.0.2 — Landing Motion & Explicit Table Access
 
-- Restores the home-screen entrance animation with a deterministic post-paint trigger instead of relying on IntersectionObserver timing.
-- Makes the archive orbits visibly animate again, adds a restrained ambient glow pulse, and restores the scroll cue motion without changing the landing-page layout.
-- Keeps reduced-motion accessibility behavior intact.
-- Bumps the static/PWA cache generation to **9001** so installed/browser clients cannot retain the stale landing assets.
+- Rebuilt the home-screen archive motion around a dedicated `requestAnimationFrame` loop. Orbit rotation, the ambient glow, and the scroll cue no longer depend on CSS animation or IntersectionObserver timing, so the landing page cannot silently render as a static composition when generic motion rules interfere.
+- Keeps the existing landing composition intact while making the orbit markers visibly travel around the archive rings; the title/action entrance still runs after first paint.
+- Bumps the static/PWA cache generation to **9002** so browsers and installed apps fetch the repaired landing assets.
+- Removed the **default table** concept from current behavior and UI. The legacy `is_default` database column remains only for backwards-compatible schema reads and is cleared during migration.
+- New player invitations start with **no table membership**. A GM must explicitly assign them to one or more tables.
+- Players can only see and select tables they are members of. The character editor uses the same membership-filtered list, and creating/moving a character can no longer self-enroll a player into another table.
+- Removed Default badges and Make Default controls. Any table can be archived/deleted as long as Seeker is not being left with zero tables.
+- Added a one-time migration for old auto-default memberships: when a player already has another explicit table, the inherited legacy-default membership is removed automatically; players whose only table was the old one are preserved so an upgrade does not strand them unexpectedly.
+- Release verification: **228 automated tests pass** across all test modules; Python modules and browser/Foundry JavaScript pass syntax validation.
 
 # Changelog
 

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.storage import init_db, create_player_invite, set_setting, connect
 from app.features import init_feature_db, save_player_character, save_session
-from app.campaigns import default_campaign_id
+from app.campaigns import default_campaign_id, set_campaign_members
 from app.latex import build_wiki
 from app.living import create_notification, list_notifications
 from app.v51 import (
@@ -64,7 +64,7 @@ def test_v51_gm_resources_roundtrip_and_are_campaign_scoped(tmp_path: Path):
 def test_spotlight_and_gm_workspace_are_strictly_gm_only(tmp_path: Path, monkeypatch):
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
-    inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);char=save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=inv['id']);sess=save_session(s,{'campaign_id':cid,'title':'Next','status':'planned'})
+    inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);set_campaign_members(s,cid,[inv['id']]);char=save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=inv['id']);sess=save_session(s,{'campaign_id':cid,'title':'Next','status':'planned'})
     player=TestClient(main.app);player.get(inv['invite_path'])
     assert player.get(f'/api/v51/gm/workspace/{sess["id"]}').status_code==401
     assert player.post(f'/api/v51/gm/spotlights/{char["id"]}',json={'session_id':sess['id']}).status_code==401
@@ -82,7 +82,7 @@ def test_spotlight_and_gm_workspace_are_strictly_gm_only(tmp_path: Path, monkeyp
 def test_notification_read_state_persists_and_player_can_dismiss(tmp_path: Path, monkeypatch):
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
-    inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=inv['id'])
+    inv=create_player_invite(s,'Alice');cid=default_campaign_id(s);set_campaign_members(s,cid,[inv['id']]);save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=inv['id'])
     note=create_notification(s,{'campaign_id':cid,'title':'New clue','body':'Look at the old keep.'})
     p=TestClient(main.app);p.get(inv['invite_path'])
     assert p.post(f'/api/public/notifications/{note["id"]}/read',json={}).status_code==200
@@ -125,4 +125,4 @@ def test_v51_frontend_repairs_and_gm_tools_are_shipped():
     assert "image.complete&&image.naturalWidth" in map_js and "stage.addEventListener('click'" in map_js and 'aria-hidden="true" role="dialog"' in map_tpl
     assert 'character-hero-v5' in char_tpl and '.character-page.story-only' in wiki_css and 'Pathbuilder / sheet URL' in char_tpl
     assert 'data-notification-delete' in wiki_js and "method:'DELETE'" in wiki_js
-    assert 'seeker-static-v9001' in sw
+    assert 'seeker-static-v9002' in sw

@@ -28,11 +28,34 @@
   document.querySelectorAll('time[data-epoch]').forEach(t=>{const d=new Date(Number(t.dataset.epoch)*1000);t.textContent=d.toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})});
   const revealNodes=[...document.querySelectorAll('.reveal')];
   if('IntersectionObserver' in window){const io=new IntersectionObserver(entries=>entries.forEach(x=>x.isIntersecting&&x.target.classList.add('visible')),{threshold:.08});revealNodes.forEach(x=>io.observe(x))}else revealNodes.forEach(x=>x.classList.add('visible'));
-  // The landing hero used to depend on the generic observer happening after the
-  // browser's first paint. Fast/cached loads can resolve it before that paint,
-  // making the entrance appear completely static. Arm it explicitly two frames
-  // later so the intro is deterministic while the orbit animation remains CSS-only.
-  const homeHero=document.querySelector('[data-home-hero]');if(homeHero){requestAnimationFrame(()=>requestAnimationFrame(()=>{homeHero.classList.add('hero-motion-ready');homeHero.querySelector('.hero-inner')?.classList.add('visible')}))}
+  // Landing motion has its own rAF engine rather than depending on CSS animation.
+  // Some browsers/OS combinations collapse CSS animation through a global
+  // reduced-motion stylesheet, which made the archive rings look frozen. The
+  // ambient engine remains deliberately gentle under reduced-motion, but never
+  // becomes an accidentally static landing page.
+  const homeHero=document.querySelector('[data-home-hero]');
+  if(homeHero){
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{homeHero.classList.add('hero-motion-ready');homeHero.querySelector('.hero-inner')?.classList.add('visible')}));
+    const rings=[...homeHero.querySelectorAll('.hero-orbit')],cue=homeHero.querySelector('.scroll-cue span');
+    const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const speeds=reduced?[2.2,-1.35]:[10.5,-6.2],pulseRate=reduced?.22:.72,pulseAmp=reduced?.025:.17;
+    homeHero.dataset.motionEngine='raf';
+    let origin=performance.now(),motionFrame=0;
+    const animateHero=now=>{
+      const seconds=(now-origin)/1000;
+      rings.forEach((ring,i)=>{ring.style.transform=`rotate(${seconds*(speeds[i]??speeds[0])}deg)`});
+      const wave=(Math.sin(seconds*pulseRate)+1)/2;
+      const glowOpacity=.28+wave*pulseAmp,glowScale=.99+wave*(reduced?.006:.025),scrollOpacity=.35+wave*.55,scrollScale=.58+wave*.42;
+      homeHero.style.setProperty('--hero-glow-opacity',String(glowOpacity));
+      homeHero.style.setProperty('--hero-glow-scale',String(glowScale));
+      homeHero.style.setProperty('--hero-scroll-opacity',String(scrollOpacity));
+      homeHero.style.setProperty('--hero-scroll-scale',String(scrollScale));
+      if(cue){cue.style.opacity=String(scrollOpacity);cue.style.transform=`scaleY(${scrollScale})`}
+      motionFrame=requestAnimationFrame(animateHero);
+    };
+    motionFrame=requestAnimationFrame(animateHero);
+    addEventListener('pagehide',()=>cancelAnimationFrame(motionFrame),{once:true});
+  }
 
   // Codex sidebar state survives full page navigation.  In addition to open
   // groups and scrollTop, remember the clicked row's viewport offset; after the

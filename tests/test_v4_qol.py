@@ -31,6 +31,8 @@ Welcome to the campaign.
 
 def test_character_scoped_journals_allow_same_session_title_and_filter(tmp_path: Path):
     s=setup(tmp_path);inv=create_player_invite(s,'Alice')
+    from app.campaigns import default_campaign_id, set_campaign_members
+    set_campaign_members(s,default_campaign_id(s),[inv['id']])
     a=save_player_character(s,{'name':'Aster'},invite_id=inv['id'])
     b=save_player_character(s,{'name':'Bram'},invite_id=inv['id'])
     general=save_journal(s,{'session_id':7,'title':'Session journal','body':'Player-wide'},inv['id'])
@@ -48,6 +50,8 @@ def test_session_character_choice_scopes_new_notes_and_switches_visibility(tmp_p
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
     inv=create_player_invite(s,'Alice')
+    from app.campaigns import default_campaign_id, set_campaign_members
+    set_campaign_members(s,default_campaign_id(s),[inv['id']])
     a=save_player_character(s,{'name':'Aster'},invite_id=inv['id'])
     b=save_player_character(s,{'name':'Bram'},invite_id=inv['id'])
     save_session(s,{'session_number':12,'title':'The Glass Road','status':'live'})
@@ -72,6 +76,8 @@ def test_session_character_choice_scopes_new_notes_and_switches_visibility(tmp_p
 
 def test_journal_rejects_character_owned_by_another_invite(tmp_path: Path):
     s=setup(tmp_path);alice=create_player_invite(s,'Alice');bob=create_player_invite(s,'Bob')
+    from app.campaigns import default_campaign_id, set_campaign_members
+    set_campaign_members(s,default_campaign_id(s),[alice['id'],bob['id']])
     bob_char=save_player_character(s,{'name':'Bram'},invite_id=bob['id'])
     try:
         save_journal(s,{'character_id':bob_char['id'],'title':'Nope'},alice['id'])
@@ -89,13 +95,13 @@ def test_v4_player_qol_assets_and_compact_nav_are_shipped():
     tour=(root/'static'/'tour.js').read_text(encoding='utf-8')
     sw=(root/'static'/'sw.js').read_text(encoding='utf-8')
     assert 'gm-nav-menu' in base and '<summary>GM ' in base
-    assert 'data-start-tour' in base and '/static/tour.js?v=9001' in base
+    assert 'data-start-tour' in base and '/static/tour.js?v=9002' in base
     assert 'data-session-character' in session and 'SESSION IDENTITY' in session
     assert 'loreforge.journal.draft.v4' in living_js and 'data-journal-filter' in living_js
     assert "editing?(j.character_id||null)" in living_js  # editing a player-wide note must not silently rescope it
     assert 'Recently viewed' in wiki_js and 'Quick jumps' in wiki_js
     assert 'loreforge.quickTour.v4' in tour and 'Enter as your character' in tour
-    assert "seeker-static-v9001" in sw and '/static/tour.js?v=9001' in sw
+    assert "seeker-static-v9002" in sw and '/static/tour.js?v=9002' in sw
 
 def test_v3_journal_table_is_migrated_without_losing_notes(tmp_path: Path):
     from app.storage import connect

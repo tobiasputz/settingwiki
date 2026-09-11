@@ -12,4 +12,6 @@ def test_landing_animation_contract_and_cache_bust():
     assert 'hero-motion-ready' in css and 'heroScrollCue' in css
     assert "document.querySelector('[data-home-hero]')" in js
     assert "requestAnimationFrame(()=>requestAnimationFrame" in js
-    assert 'seeker-static-v9001' in sw and '/static/wiki.css?v=9001' in sw
+    assert "homeHero.dataset.motionEngine='raf'" in js
+    assert 'ring.style.transform=`rotate(' in js
+    assert 'seeker-static-v9002' in sw and '/static/wiki.css?v=9002' in sw
