@@ -283,7 +283,7 @@ def normalize_foundry_sheet(sheet: Any) -> dict:
 
 
 def _foundry_module_version() -> str:
-    return '1.9.1'
+    return '1.10.1'
 
 
 def _validate_foundry_token(settings: Settings, campaign_id: int, token: str) -> None:
@@ -345,7 +345,7 @@ def delete_foundry_prepared_content(settings: Settings, campaign_id: int, item_i
 
 def queue_foundry_command(settings: Settings, campaign_id: int, command_type: str, payload: dict, *, actor_id: str = '', scope: str = 'actor', requested_by: str = '') -> dict:
     ctype=str(command_type or '').strip().lower()
-    if ctype not in {'adjust_resource','adjust_item_quantity','grant_prepared_content','push_prepared_content','sync_entity_document','push_content_bundle','push_ancestry_bundle'}:
+    if ctype not in {'adjust_resource','adjust_item_quantity','grant_prepared_content','push_prepared_content','sync_entity_document','push_content_bundle','push_ancestry_bundle','push_homebrew_rule_bundle'}:
         raise ValueError('Unsupported Foundry action.')
     sc=str(scope or 'actor').strip().lower()
     if sc not in {'actor','world'}:
@@ -659,7 +659,7 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     query=urllib.parse.parse_qsl(parts.query,keep_blank_values=True)
     query=[(k,v) for k,v in query if k.lower()!='wait']+[('wait','true')]
     webhook_url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,parts.path,urllib.parse.urlencode(query),parts.fragment))
-    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.3.2'}, method='POST')
+    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.4.1'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             status=int(resp.status)

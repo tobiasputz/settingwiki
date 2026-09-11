@@ -315,11 +315,11 @@ def _pf2_rule_body_parts(body_raw: str, settings: Settings, analysis: dict | Non
     as the description.
     """
     label_re = re.compile(
-        r"\\(?:textbf|textit|emph)\s*\{\s*(Prerequisites?|Requirements?|Trigger|Frequency|Special)\s*:?[\s~]*\}\s*:?[\s~]*",
+        r"\\(?:textbf|textit|emph)\s*\{\s*(Access|Prerequisites?|Requirements?|Trigger|Frequency|Special)\s*:?[\s~]*\}\s*:?[\s~]*",
         re.I,
     )
     matches = list(label_re.finditer(body_raw or ""))
-    fields = {"prerequisites": "", "requirements": "", "trigger": "", "frequency": "", "special": ""}
+    fields = {"access": "", "prerequisites": "", "requirements": "", "trigger": "", "frequency": "", "special": ""}
 
     def render(fragment: str) -> tuple[str, str]:
         fragment = re.sub(r"^\s*(?:\\\\\s*)+", "", fragment or "")
@@ -349,6 +349,205 @@ def _pf2_rule_body_parts(body_raw: str, settings: Settings, analysis: dict | Non
         desc_html, desc_plain = render(body_raw)
 
     return {**fields, "description_html": desc_html, "description": desc_plain}
+
+
+
+ANCESTRY_SOURCE_LABELS = {
+    "hitpoints": "hp", "hitpoint": "hp", "hit points": "hp", "hit point": "hp", "hp": "hp",
+    "size": "size", "speed": "speed", "reach": "reach", "vision": "vision", "senses": "vision",
+    "ability boosts": "boosts", "ability boost": "boosts",
+    "ability flaws": "flaws", "ability flaw": "flaws",
+    "languages": "languages", "language": "languages",
+    "additional languages": "additional_languages", "additional language": "additional_languages",
+    "traits": "traits", "trait": "traits",
+}
+
+
+def _source_field_label(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").replace(":", " ")).strip().casefold()
+
+
+def extract_ancestry_source_fields(raw: str) -> dict:
+    """Read an ancestry chassis written as ordinary bold LaTeX labels.
+
+    A campaign source does not need a Seeker-specific ancestry command.  Blocks
+    such as ``\\textbf{Hitpoints:} 8`` inside ``multicols`` are intentionally
+    treated as structured ancestry data while the original source remains
+    untouched for PDF compilation.
+    """
+    label_re = re.compile(
+        r"\\(?:textbf|textit|emph)\s*\{\s*([^{}]+?)\s*\}\s*:?\s*",
+        re.I,
+    )
+    matches = list(label_re.finditer(raw or ""))
+    values: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        key = ANCESTRY_SOURCE_LABELS.get(_source_field_label(match.group(1)))
+        if not key:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(raw or "")
+        fragment = (raw or "")[match.end():end]
+        # An ancestry field is a compact stat line. Stop before an explicit
+        # LaTeX line break, paragraph, structural heading, or environment edge.
+        fragment = re.split(
+            r"\\\\|(?:\r?\n)\s*(?:\r?\n)|\\(?:part|chapter|section|subsection|subsubsection|begin|end)\b",
+            fragment,
+            maxsplit=1,
+            flags=re.I,
+        )[0]
+        value = clean_inline_text(fragment)
+        if value:
+            values[key] = value
+
+    def first_int(value: str, default: int = 0) -> int:
+        match = re.search(r"-?\d+", str(value or ""))
+        return int(match.group(0)) if match else default
+
+    size_raw = values.get("size", "").casefold().strip()
+    size = {
+        "tiny": "tiny", "small": "sm", "sm": "sm", "medium": "med", "med": "med",
+        "large": "lg", "lg": "lg", "huge": "huge", "gargantuan": "grg", "grg": "grg",
+    }.get(size_raw, size_raw)
+    vision_raw = values.get("vision", "").casefold().replace("_", "-").strip()
+    vision = {
+        "low light vision": "low-light-vision", "low-light vision": "low-light-vision",
+        "low light": "low-light-vision", "darkvision": "darkvision", "normal": "normal",
+    }.get(vision_raw, vision_raw)
+
+    boosts_raw = values.get("boosts", "")
+    boost_parts = [x.strip() for x in re.split(r"[,;]", boosts_raw) if x.strip()]
+    free_boosts = 0
+    fixed_boosts: list[str] = []
+    word_numbers = {"one": 1, "two": 2, "three": 3, "four": 4}
+    for part in boost_parts:
+        low = part.casefold()
+        if "free" in low:
+            count_match = re.search(r"\b(\d+)\b", low)
+            if count_match:
+                free_boosts += int(count_match.group(1))
+            else:
+                free_boosts += next((n for word, n in word_numbers.items() if re.search(rf"\b{word}\b", low)), 1)
+        else:
+            fixed_boosts.append(part)
+
+    add_lang_raw = values.get("additional_languages", "")
+    additional_languages = first_int(add_lang_raw, 0)
+    result = {
+        "hp": first_int(values.get("hp", ""), 0),
+        "size": size,
+        "size_display": values.get("size", ""),
+        "speed": first_int(values.get("speed", ""), 0),
+        "speed_display": values.get("speed", ""),
+        "reach": first_int(values.get("reach", ""), 0),
+        "reach_display": values.get("reach", ""),
+        "vision": vision,
+        "vision_display": values.get("vision", ""),
+        "languages": values.get("languages", ""),
+        "additional_languages": additional_languages,
+        "additional_languages_display": add_lang_raw,
+        "boosts": ", ".join(fixed_boosts),
+        "boosts_display": boosts_raw,
+        "free_boosts": free_boosts if "boosts" in values else None,
+        "flaws": values.get("flaws", ""),
+        "traits": values.get("traits", ""),
+        "raw_fields": values,
+    }
+    # Empty blocks should not be mistaken for a parsed ancestry.
+    return result if values else {}
+
+
+
+def extract_source_heritages(raw: str, settings: Settings, analysis: dict | None = None) -> list[dict]:
+    """Extract heritage subheadings from a conventional ancestry chapter.
+
+    No Seeker-specific syntax is required: a ``... Heritages`` section followed
+    by child headings is enough. The source remains authoritative and unmodified.
+    """
+    ranks = {"part": 0, "chapter": 1, "section": 2, "subsection": 3, "subsubsection": 4}
+    headings = list(HEADING_RE.finditer(raw or ""))
+    result: list[dict] = []
+    for index, heading in enumerate(headings):
+        level = heading.group(1)
+        title = clean_inline_text(heading.group(2))
+        if "heritage" not in title.casefold():
+            continue
+        parent_rank = ranks.get(level, 99)
+        scope_end = len(raw or "")
+        for nxt in headings[index + 1:]:
+            if ranks.get(nxt.group(1), 99) <= parent_rank:
+                scope_end = nxt.start()
+                break
+        children = [
+            h for h in headings[index + 1:]
+            if h.start() < scope_end and ranks.get(h.group(1), 99) == parent_rank + 1
+        ]
+        for child_index, child in enumerate(children):
+            child_title = clean_inline_text(child.group(2))
+            if not child_title or "heritage" in child_title.casefold() and child_title.casefold().endswith("heritages"):
+                continue
+            body_end = scope_end
+            for nxt in headings:
+                if nxt.start() <= child.start():
+                    continue
+                if nxt.start() >= scope_end:
+                    break
+                if ranks.get(nxt.group(1), 99) <= ranks.get(child.group(1), 99):
+                    body_end = nxt.start()
+                    break
+            body_raw = (raw or "")[child.end():body_end].strip()
+            # A Traits line is useful for Foundry, but should not be repeated in
+            # the prose body when rendered as a structured heritage card.
+            traits = ""
+            trait_match = re.search(r"\\(?:textbf|textit|emph)\s*\{\s*Traits\s*:?\s*\}\s*:?\s*(.*?)(?:\\\\|\n\s*\n|$)", body_raw, re.I | re.S)
+            if trait_match:
+                traits = clean_inline_text(trait_match.group(1))
+                body_for_text = body_raw[:trait_match.start()] + body_raw[trait_match.end():]
+            else:
+                body_for_text = body_raw
+            body_html, body_plain = latex_fragment_to_html(body_for_text, settings, page_kind="subsection", analysis=analysis, _allow_panels=False)
+            rarity = "common"
+            trait_tokens = [x.strip() for x in traits.split(",") if x.strip()]
+            for token in trait_tokens:
+                if token.casefold() in {"uncommon", "rare", "unique"}:
+                    rarity = token.casefold()
+                    break
+            result.append({
+                "title": child_title,
+                "name": child_title,
+                "traits": traits,
+                "rarity": rarity,
+                "description": body_plain.strip(),
+                "description_html": body_html.strip(),
+            })
+        # Only the first heritage section in an ancestry chapter owns the
+        # ancestry's heritage list; a later appendix can still render as prose.
+        if result:
+            break
+    return result
+
+
+def source_homebrew_root_title(settings: Settings, source: str) -> str:
+    """Prefer the classified source file's own chapter title over page titles."""
+    try:
+        raw = safe_project_path(settings, source).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    match = re.search(r"\\chapter\*?\s*\{([^{}]+)\}", raw, re.I)
+    if not match:
+        return ""
+    return clean_inline_text(match.group(1))
+
+
+def source_homebrew_metadata(settings: Settings, source: str, kind: str, analysis: dict | None = None) -> dict:
+    try:
+        raw = safe_project_path(settings, source).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    meta = {"root_title": source_homebrew_root_title(settings, source)}
+    if str(kind or "").casefold() == "ancestry":
+        meta["ancestry"] = extract_ancestry_source_fields(raw)
+        meta["heritages"] = extract_source_heritages(raw, settings, analysis)
+    return meta
 
 
 def extract_pf2e_rules(raw: str, settings: Settings, analysis: dict | None = None) -> list[dict]:
@@ -829,10 +1028,14 @@ def build_wiki(settings: Settings) -> dict:
             continue
         candidates.sort(key=lambda p: int(p.get("order") or 0))
         root = candidates[0]
-        title = str(root.get("title") or "").strip()
+        source_meta = source_homebrew_metadata(settings, source, kind, analysis)
+        # A classified .tex file is the Homebrew object. Its own chapter heading
+        # is therefore the canonical name even when that chapter is only a
+        # structural container and produces no Codex page of its own.
+        title = str(source_meta.get("root_title") or "").strip() or str(root.get("title") or "").strip()
         if re.match(r"^(?:\d+(?:st|nd|rd|th)?\s+)?level(?:\s+feats?)?$", title, re.I):
             title = Path(source).stem.replace("-", " ").replace("_", " ").strip().title() or title
-        file_owners[source] = {"slug": root.get("slug"), "title": title, "kind": kind}
+        file_owners[source] = {"slug": root.get("slug"), "title": title, "kind": kind, "meta": source_meta}
 
     active_homebrew: dict[tuple[str, str], dict] = {}
     for item in sorted(page_dicts, key=lambda x: int(x.get("order") or 0)):
@@ -843,6 +1046,7 @@ def build_wiki(settings: Settings) -> dict:
             item["homebrew_owner_slug"] = file_owner["slug"]
             item["homebrew_owner_title"] = file_owner["title"]
             item["homebrew_source_scope"] = "file"
+            item["homebrew_source_meta"] = dict(file_owner.get("meta") or {})
             continue
 
         presentation = item.get("presentation") or {}
@@ -936,7 +1140,7 @@ def build_wiki(settings: Settings) -> dict:
         bucket["presentation"]["navigation_art_is_auto"] = bool(auto_navigation_art and auto_cover and not bucket["presentation"].get("toc_image_url"))
 
     payload = {
-        "renderer_version": 7320,
+        "renderer_version": 7401,
         "title": get_setting(settings, "site_title", "") or analysis["title"],
         "tagline": get_setting(settings, "tagline", "Follow the people, places, histories, and secrets of the world."),
         "author": analysis["author"],
@@ -1474,7 +1678,18 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
         title = inner_html(args[0])
         meta = inner_html(args[1])
         traits = inner_html(args[2])
-        body = inner_html(args[3])
+        if kind in {"feat", "action"}:
+            parts = _pf2_rule_body_parts(args[3], settings, analysis, page_kind=kind)
+            body = str(parts.get("description_html") or "").strip()
+            meta_bits = []
+            for label, key in (("Access","access"),("Prerequisites","prerequisites"),("Frequency","frequency"),("Trigger","trigger"),("Requirements","requirements"),("Special","special")):
+                value = str(parts.get(key) or "").strip()
+                if value:
+                    meta_bits.append(f'<span><strong>{html.escape(label)}</strong> {html.escape(value)}</span>')
+            rule_meta = f'<div class="pf2-rule-meta">{"".join(meta_bits)}</div>' if meta_bits else ""
+            body_html = rule_meta + (f'<div class="pf2-rule-effect">{body}</div>' if body else "")
+        else:
+            body_html = inner_html(args[3])
         if kind == "feat":
             right = f"Feat {meta}" if meta else "Feat"
             kicker = "FEAT"
@@ -1489,7 +1704,7 @@ def latex_fragment_to_html(raw: str, settings: Settings, *, page_kind: str = "",
             f'<div class="pf2-rule-kicker">{kicker}</div>'
             f'<header class="pf2-rule-header"><h3>{title}</h3><strong>{right}</strong></header>'
             f'{f"<div class=\"pf2-traits\">{traits}</div>" if traits else ""}'
-            f'<div class="pf2-rule-divider"></div><div class="pf2-rule-body">{body}</div>'
+            f'<div class="pf2-rule-divider"></div><div class="pf2-rule-body">{body_html}</div>'
             f'</section>'
         )
 

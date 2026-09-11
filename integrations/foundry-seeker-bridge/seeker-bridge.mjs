@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.9.1";
+const BRIDGE_VERSION = "1.10.1";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 
 function seekerSlugify(value) {
@@ -302,14 +302,24 @@ function preparedAttackHtml(data) {
     return `<p><strong>${type}</strong> ${seekerEscapeHTML(String(a?.name || "Strike"))} ${bonusText}${traits ? ` (${seekerEscapeHTML(traits)})` : ""}, <strong>Damage</strong> ${seekerEscapeHTML(String(a?.damage || "—"))}</p>`;
   }).join("");
 }
-function preparedDetailsHtml(payload) {
+function preparedRuleMetaHtml(data = {}) {
+  const rows = [];
+  const add = (label, value) => { const raw = String(value || "").trim(); if (raw) rows.push(`<span><strong>${label}</strong> ${seekerEscapeHTML(raw)}</span>`); };
+  add("Access", data.access); add("Prerequisites", data.prerequisites); add("Frequency", data.frequency || data.activation_frequency || data.homebrew_frequency);
+  add("Trigger", data.trigger || data.activation_trigger || data.homebrew_trigger); add("Requirements", data.requirements || data.activation_requirements); add("Special", data.special);
+  if (!rows.length) return "";
+  return `<div class="seeker-rule-meta">${rows.join(" &nbsp; · &nbsp; ")}</div>`;
+}
+function preparedDetailsHtml(payload, { includeRuleMeta = true } = {}) {
   const data = payload?.data || {};
   const rows = [];
   const add = (label, value) => { const raw = String(value || "").trim(); if (raw) rows.push(`<p><strong>${label}</strong> ${seekerEscapeHTML(raw)}</p>`); };
   add("Source", payload?.subtitle);
   add("Price", data.price); add("Bulk", data.bulk); add("Usage", data.usage);
-  add("Prerequisites", data.prerequisites); add("Frequency", data.frequency || data.activation_frequency || data.homebrew_frequency);
-  add("Trigger", data.trigger || data.activation_trigger || data.homebrew_trigger); add("Requirements", data.requirements || data.activation_requirements);
+  if (includeRuleMeta) {
+    add("Access", data.access); add("Prerequisites", data.prerequisites); add("Frequency", data.frequency || data.activation_frequency || data.homebrew_frequency);
+    add("Trigger", data.trigger || data.activation_trigger || data.homebrew_trigger); add("Requirements", data.requirements || data.activation_requirements); add("Special", data.special);
+  }
   add("Senses", data.senses); add("Languages", data.languages); add("Skills", data.skills);
   add("Immunities", data.immunities); add("Weaknesses", data.weaknesses); add("Resistances", data.resistances);
   if (data.spellcasting) rows.push(`<p><strong>Spellcasting</strong><br>${seekerEscapeHTML(String(data.spellcasting)).replace(/\n/g,"<br>")}</p>`);
@@ -346,7 +356,13 @@ function buildPreparedItem(payload, endpoint = "") {
   const data = payload?.data || {};
   const kind = String(payload?.prepared_kind || "item").toLowerCase();
   const type = kind === "feat" ? "feat" : kind === "action" ? "action" : kind === "homebrew" ? (String(data.homebrew_document || data.item_type || "equipment") || "equipment") : (String(data.item_type || "equipment") || "equipment");
-  const description = (String(data.description_html || "").trim() || htmlDescription(payload?.summary, data.description)) + preparedDetailsHtml(payload);
+  const bodyDescription = String(data.description_html || "").trim() || htmlDescription(payload?.summary, data.description);
+  const isRuleDocument = type === "feat" || type === "action";
+  const ruleMeta = isRuleDocument ? preparedRuleMetaHtml(data) : "";
+  const ruleBreak = ruleMeta && bodyDescription ? '<hr class="seeker-rule-body-break">' : "";
+  const description = isRuleDocument
+    ? ruleMeta + ruleBreak + bodyDescription + preparedDetailsHtml(payload, { includeRuleMeta: false })
+    : bodyDescription + preparedDetailsHtml(payload);
   const traitChoices = type === "weapon" ? globalThis.CONFIG?.PF2E?.weaponTraits
     : type === "feat" ? globalThis.CONFIG?.PF2E?.featTraits
     : type === "action" ? globalThis.CONFIG?.PF2E?.actionTraits
@@ -1118,14 +1134,39 @@ async function importAncestryBundle(payload, endpoint = "") {
   let folder = (game.folders?.contents || []).find(f => f.type === "Item" && f.name === folderName && f.flags?.seeker?.ancestryBundle);
   if (!folder) folder = await Folder.create({ name: folderName, type: "Item", flags: { seeker: { ancestryBundle: true, ownerSlug: payload?.owner_slug || "" } } });
 
-  const baseFlag = { seeker: { managed: true, ancestryBundle: true, ownerSlug: payload?.owner_slug || "", sourceFile: payload?.source_file || "" } };
+  const info = payload?.ancestry || {};
+  const traitText = Array.isArray(info?.traits) ? info.traits.join(", ") : String(info?.traits || "");
+  const languageInfo = parsedLanguages(Array.isArray(info?.languages) ? info.languages.join(", ") : String(info?.languages || "common"));
+  const abilityChoices = ["str","dex","con","int","wis","cha"];
+  const abilityAliases = { strength:"str", dexterity:"dex", constitution:"con", intelligence:"int", wisdom:"wis", charisma:"cha" };
+  const abilitySlugs = raw => slugList(Array.isArray(raw) ? raw.join(",") : raw)
+    .map(x => seekerSlugify(x)).map(x => abilityAliases[x] || x).filter(x => abilityChoices.includes(x));
+  const fixedBoosts = abilitySlugs(info?.boosts);
+  const fixedFlaws = abilitySlugs(info?.flaws);
+  const freeBoosts = Math.max(0, Math.min(4, Math.trunc(numericOr(info?.free_boosts, 2))));
+  const boosts = {};
+  let boostIndex = 0;
+  for (const ability of fixedBoosts) boosts[String(boostIndex++)] = { value: [ability], selected: ability };
+  for (let i = 0; i < freeBoosts; i++) boosts[String(boostIndex++)] = { value: abilityChoices, selected: null };
+  const flaws = {};
+  fixedFlaws.forEach((ability, i) => { flaws[String(i)] = { value: [ability], selected: ability }; });
+  const visionRaw = String(info?.vision || "normal").toLowerCase();
+  const vision = ["normal","low-light-vision","darkvision"].includes(visionRaw) ? visionRaw : "normal";
+  const sizeRaw = String(info?.size || "med").toLowerCase();
+  const size = ["tiny","sm","med","lg","huge","grg"].includes(sizeRaw) ? sizeRaw : "med";
+  const ancestryTraits = validTraitList(traitText, globalThis.CONFIG?.PF2E?.ancestryTraits || globalThis.CONFIG?.PF2E?.creatureTraits);
+
+  const baseFlag = { seeker: { managed: true, ancestryBundle: true, ownerSlug: payload?.owner_slug || "", sourceFile: payload?.source_file || "", preparedId: payload?.prepared_id ?? null } };
   const ancestrySource = {
-    name: title, type: "ancestry", folder: folder?.id || null, img: "icons/svg/book.svg", flags: baseFlag,
+    name: title, type: "ancestry", folder: folder?.id || null, img: absoluteSeekerAsset(payload?.img, endpoint) || "icons/svg/book.svg", flags: baseFlag,
     system: {
       description: { value: String(payload?.description_html || "").trim() || htmlDescription("", payload?.description || "") }, items: {},
-      traits: { value: [], rarity: "common" }, additionalLanguages: { count: 0, value: [], custom: "" },
-      boosts: {}, flaws: {}, hp: 8, languages: { value: ["common"], custom: "" },
-      speed: 25, size: "med", hands: 2, reach: 5, vision: "normal"
+      traits: { value: ancestryTraits, rarity: "common" },
+      additionalLanguages: { count: Math.max(0, Math.min(20, Math.trunc(numericOr(info?.additional_languages, 0)))), value: [], custom: "" },
+      boosts, flaws, hp: Math.max(1, Math.trunc(numericOr(info?.hp, 8))),
+      languages: { value: languageInfo.value, custom: languageInfo.details || "" },
+      speed: Math.max(5, Math.trunc(numericOr(info?.speed, 25))), size, hands: 2,
+      reach: Math.max(0, Math.trunc(numericOr(info?.reach, 5))), vision
     }
   };
   let ancestry = (game.items?.contents || []).find(i => i.type === "ancestry" && i.folder?.id === folder?.id && i.flags?.seeker?.ownerSlug === payload?.owner_slug);
@@ -1133,16 +1174,42 @@ async function importAncestryBundle(payload, endpoint = "") {
   else ancestry = await Item.create(ancestrySource);
 
   const reports = [];
+  for (const heritage of (Array.isArray(payload?.heritages) ? payload.heritages : []).slice(0, 80)) {
+    try {
+      const heritageTraits = Array.isArray(heritage?.traits) ? heritage.traits.join(", ") : String(heritage?.traits || "");
+      const source = {
+        name: String(heritage?.title || heritage?.name || "Unnamed Heritage"), type: "heritage", folder: folder?.id || null,
+        img: absoluteSeekerAsset(heritage?.img, endpoint) || "icons/svg/book.svg",
+        flags: { seeker: { managed: true, ancestryBundle: true, ownerSlug: payload?.owner_slug || "", heritage: true, preparedId: payload?.prepared_id ?? null } },
+        system: {
+          description: { value: String(heritage?.description_html || "").trim() || htmlDescription("", heritage?.description || "") },
+          traits: { value: validTraitList(heritageTraits, globalThis.CONFIG?.PF2E?.heritageTraits), rarity: String(heritage?.rarity || "common").toLowerCase() },
+          ancestry: { name: title, slug: seekerSlugify(title), uuid: ancestry?.uuid || null }, rules: [], source: { value: "Seeker" }
+        }
+      };
+      const match = (game.items?.contents || []).find(i => i.type === "heritage" && i.folder?.id === folder?.id && i.name === source.name && i.flags?.seeker?.ownerSlug === payload?.owner_slug);
+      const doc = match ? (await match.update({ name: source.name, img: source.img, system: source.system, flags: source.flags }), match) : await Item.create(source);
+      reports.push({ status: "done", name: doc?.name || source.name, uuid: doc?.uuid || "", type: "heritage" });
+    } catch (error) {
+      reports.push({ status: "failed", name: heritage?.title || heritage?.name || "Heritage", message: error?.message || String(error) });
+    }
+  }
+
   for (const rule of (Array.isArray(payload?.rules) ? payload.rules : []).slice(0, 250)) {
     try {
       const kind = String(rule?.kind || "feat").toLowerCase();
-      if (!['feat','action'].includes(kind)) continue;
+      if (!["feat","action"].includes(kind)) continue;
+      const ruleTraits = Array.isArray(rule?.traits) ? rule.traits.join(", ") : String(rule?.traits || "");
       const source = buildPreparedItem({
         title: rule?.title || "Untitled", prepared_kind: kind, summary: "",
-        data: { level: Math.max(1, numericOr(rule?.level, 1)), traits: (rule?.traits || []).join(", "), description_html: rule?.description_html || "", description: rule?.description || "", action_cost: rule?.action_cost || "", feat_category: "ancestry" }
+        data: {
+          level: Math.max(1, numericOr(rule?.level, 1)), traits: ruleTraits, description_html: rule?.description_html || "", description: rule?.description || "",
+          action_cost: rule?.action_cost || "", feat_category: "ancestry", access: rule?.access || "", prerequisites: rule?.prerequisites || "", frequency: rule?.frequency || "",
+          trigger: rule?.trigger || "", requirements: rule?.requirements || "", special: rule?.special || ""
+        }
       }, endpoint);
       source.folder = folder?.id || null;
-      source.flags = { ...(source.flags || {}), seeker: { ...((source.flags || {}).seeker || {}), ancestryBundle: true, ownerSlug: payload?.owner_slug || "", sourcePageSlug: rule?.source_page_slug || "" } };
+      source.flags = { ...(source.flags || {}), seeker: { ...((source.flags || {}).seeker || {}), ancestryBundle: true, ownerSlug: payload?.owner_slug || "", sourcePageSlug: rule?.source_page_slug || "", preparedId: payload?.prepared_id ?? null } };
       const match = (game.items?.contents || []).find(i => i.type === source.type && i.folder?.id === folder?.id && i.name === source.name && i.flags?.seeker?.ownerSlug === payload?.owner_slug);
       const doc = match ? (await match.update({ name: source.name, system: source.system, flags: source.flags }), match) : await Item.create(source);
       reports.push({ status: "done", name: doc?.name || source.name, uuid: doc?.uuid || "", type: source.type });
@@ -1151,7 +1218,9 @@ async function importAncestryBundle(payload, endpoint = "") {
     }
   }
   const failed = reports.filter(x => x.status === "failed").length;
-  return { message: `${title} imported with ${reports.length - failed} linked rule${reports.length - failed === 1 ? "" : "s"}${failed ? `; ${failed} failed` : ""}.`, folder_id: folder?.id || "", ancestry_uuid: ancestry?.uuid || "", items: reports };
+  const heritages = reports.filter(x => x.type === "heritage" && x.status === "done").length;
+  const rules = reports.filter(x => x.type !== "heritage" && x.status === "done").length;
+  return { message: `${title} imported with ${heritages} heritage${heritages === 1 ? "" : "s"} and ${rules} linked rule${rules === 1 ? "" : "s"}${failed ? `; ${failed} failed` : ""}.`, folder_id: folder?.id || "", ancestry_uuid: ancestry?.uuid || "", items: reports };
 }
 
 async function importHomebrewRuleBundle(payload, endpoint = "") {
@@ -1170,9 +1239,9 @@ async function importHomebrewRuleBundle(payload, endpoint = "") {
         title: rule?.title || "Untitled", prepared_kind: kind, summary: "",
         data: {
           level: Math.max(kind === "feat" ? 1 : 0, numericOr(rule?.level, kind === "feat" ? 1 : 0)),
-          traits: (rule?.traits || []).join(", "), description_html: rule?.description_html || "",
+          traits: Array.isArray(rule?.traits) ? rule.traits.join(", ") : String(rule?.traits || ""), description_html: rule?.description_html || "",
           description: rule?.description || "", action_cost: rule?.action_cost || "", feat_category: featCategory,
-          prerequisites: rule?.prerequisites || "", frequency: rule?.frequency || "", trigger: rule?.trigger || "", requirements: rule?.requirements || ""
+          access: rule?.access || "", prerequisites: rule?.prerequisites || "", frequency: rule?.frequency || "", trigger: rule?.trigger || "", requirements: rule?.requirements || "", special: rule?.special || ""
         }
       }, endpoint);
       source.folder = folder?.id || null;

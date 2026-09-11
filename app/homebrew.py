@@ -10,8 +10,8 @@ from .storage import get_setting, set_setting
 
 NON_MONSTER_KINDS = {"item", "feat", "action", "homebrew"}
 HOME_BREW_SECTIONS = {
-    "ancestry": "Ancestry Feats",
-    "archetype": "Archetype Feats",
+    "ancestry": "Ancestries",
+    "archetype": "Archetypes",
     "class": "Class Feats",
     "general": "General & Skill Feats",
     "actions": "Actions & Activities",
@@ -158,13 +158,22 @@ def classify_homebrew(row: dict) -> dict:
     traits = _traits(payload)
     traits_low = {t.casefold() for t in traits}
 
-    if kind == "homebrew" and document in {"feat", "action", "equipment", "item", "weapon", "armor", "consumable"}:
-        effective = "action" if document == "action" else "feat" if document == "feat" else "item"
+    if kind == "homebrew" and document in {"feat", "action", "equipment", "item", "weapon", "armor", "consumable", "ancestry", "archetype"}:
+        if document == "action":
+            effective = "action"
+        elif document == "feat":
+            effective = "feat"
+        elif document in {"ancestry", "archetype"}:
+            effective = document
+        else:
+            effective = "item"
     else:
         effective = kind
 
     if explicit in HOME_BREW_SECTIONS:
         section = explicit
+    elif effective in {"ancestry", "archetype"}:
+        section = effective
     elif effective == "action":
         section = "actions"
     elif effective == "item":
@@ -183,7 +192,9 @@ def classify_homebrew(row: dict) -> dict:
         section = "other"
 
     if not group:
-        if section == "ancestry": group = str(payload.get("ancestry_trait") or "").strip()
+        if effective == "ancestry": group = str(row.get("title") or payload.get("ancestry_trait") or "").strip()
+        elif effective == "archetype": group = str(row.get("title") or payload.get("archetype_name") or "").strip()
+        elif section == "ancestry": group = str(payload.get("ancestry_trait") or "").strip()
         elif section == "archetype": group = str(payload.get("archetype_name") or "").strip()
         elif section == "class": group = str(payload.get("class_name") or "").strip()
         elif section == "items": group = str(payload.get("item_type") or "Equipment").strip().replace("_", " ").title()
@@ -241,7 +252,7 @@ def latex_escape(value: Any) -> str:
 def _rules_body(row: dict) -> str:
     payload=dict(row.get("payload") or {})
     lines=[]
-    for label,key in (("Prerequisites","prerequisites"),("Trigger","trigger"),("Requirements","requirements"),("Frequency","frequency"),("Special","special")):
+    for label,key in (("Access","access"),("Prerequisites","prerequisites"),("Trigger","trigger"),("Requirements","requirements"),("Frequency","frequency"),("Special","special")):
         value=str(payload.get(key) or "").strip()
         if value: lines.append(r"\textbf{"+label+":} "+latex_escape(value)+r"\\")
     desc=str(payload.get("description") or "").strip() or str(row.get("summary") or "").strip()
@@ -249,8 +260,92 @@ def _rules_body(row: dict) -> str:
     return "\n".join(lines).strip()
 
 
+def _bundle_rule_latex(rule: dict, *, default_category: str = "general") -> str:
+    kind=str(rule.get("kind") or "feat").strip().lower()
+    title=latex_escape(rule.get("title") or "Untitled")
+    level=int(rule.get("level") or 0)
+    traits_raw=rule.get("traits") or ""
+    if isinstance(traits_raw, list): traits=", ".join(str(x).strip() for x in traits_raw if str(x).strip())
+    else: traits=str(traits_raw)
+    traits=latex_escape(traits)
+    lines=[]
+    for label,key in (("Access","access"),("Prerequisites","prerequisites"),("Frequency","frequency"),("Trigger","trigger"),("Requirements","requirements"),("Special","special")):
+        value=str(rule.get(key) or "").strip()
+        if value: lines.append(r"\textbf{"+label+":} "+latex_escape(value)+r"\\")
+    desc=str(rule.get("description") or "").strip()
+    if desc: lines.append(latex_escape(desc).replace("\n", "\n\n"))
+    body="\n".join(lines).strip()
+    action=str(rule.get("action_cost") or "").strip().lower()
+    if kind=="action":
+        glyph={"1":r"\actionOne","2":r"\actionTwo","3":r"\actionThree","reaction":r"\reaction","free":r"\freeAction"}.get(action,"")
+        return f"\\action{{{title}}}{{{glyph}}}{{{traits}}}{{%\n{body}\n}}\n"
+    return f"\\feat{{{title}}}{{{level}}}{{{traits}}}{{%\n{body}\n}}\n"
+
+
+def _bundle_latex_snippet(row: dict, document: str) -> str:
+    payload=dict(row.get("payload") or {})
+    title=latex_escape(row.get("title") or ("Custom Ancestry" if document=="ancestry" else "Custom Archetype"))
+    description=str(payload.get("description") or row.get("summary") or "").strip()
+    out=[f"\\section{{{title}}}"]
+    if description: out.extend([latex_escape(description).replace("\n", "\n\n"), ""])
+    if document=="ancestry":
+        out.append(r"\subsection{Ancestry Statistics}")
+        stats=[]
+        for label,key,suffix in (("Hit Points","ancestry_hp",""),("Size","ancestry_size",""),("Speed","ancestry_speed"," feet"),("Reach","ancestry_reach"," feet"),("Vision","ancestry_vision",""),("Languages","ancestry_languages",""),("Additional Languages","ancestry_additional_languages",""),("Traits","ancestry_traits",""),("Ability Boosts","ancestry_boosts",""),("Free Ability Boosts","ancestry_free_boosts",""),("Ability Flaws","ancestry_flaws","")):
+            value=str(payload.get(key) or "").strip()
+            if value: stats.append(r"\textbf{"+label+":} "+latex_escape(value)+latex_escape(suffix)+r"\\")
+        out.extend(stats or [r"\emph{Ancestry statistics not yet specified.}"])
+        heritages=payload.get("heritages") if isinstance(payload.get("heritages"),list) else []
+        if heritages:
+            out.extend(["",r"\subsection{Heritages}"])
+            for h in heritages:
+                name=latex_escape(h.get("title") or h.get("name") or "Unnamed Heritage")
+                out.append(f"\\subsubsection{{{name}}}")
+                traits=h.get("traits") or ""
+                if traits: out.append(r"\textbf{Traits:} "+latex_escape(traits)+r"\\")
+                text=str(h.get("description") or "").strip()
+                if text: out.append(latex_escape(text).replace("\n","\n\n"))
+        rules=payload.get("bundle_feats") if isinstance(payload.get("bundle_feats"),list) else []
+        if rules:
+            out.extend(["",r"\subsection{Ancestry Feats}"])
+            current=None
+            for rule in sorted(rules,key=lambda x:(int(x.get("level") or 0),str(x.get("title") or "").casefold())):
+                level=int(rule.get("level") or 0)
+                if level!=current:
+                    current=level; out.append(f"\\subsubsection{{Level {level}}}")
+                out.append(_bundle_rule_latex(rule,default_category="ancestry").rstrip())
+    else:
+        archetype_traits=str(payload.get("archetype_traits") or "").strip()
+        access=str(payload.get("archetype_access") or "").strip()
+        if archetype_traits: out.extend([r"\textbf{Traits:} "+latex_escape(archetype_traits)+r"\\",""])
+        if access: out.extend([r"\textbf{Access:} "+latex_escape(access)+r"\\",""])
+        dedication={
+            "kind":"feat","title":str(payload.get("dedication_title") or f"{row.get('title') or 'Archetype'} Dedication"),
+            "level":int(payload.get("dedication_level") or 2),"traits":str(payload.get("dedication_traits") or "archetype, dedication"),
+            "action_cost":str(payload.get("dedication_action_cost") or ""),"prerequisites":str(payload.get("dedication_prerequisites") or ""),
+            "frequency":str(payload.get("dedication_frequency") or ""),"trigger":str(payload.get("dedication_trigger") or ""),
+            "requirements":str(payload.get("dedication_requirements") or ""),"special":str(payload.get("dedication_special") or ""),
+            "description":str(payload.get("dedication_description") or ""),
+        }
+        if str(dedication.get("title") or "").strip():
+            out.extend(["",r"\subsection{Dedication}",_bundle_rule_latex(dedication,default_category="archetype").rstrip()])
+        rules=payload.get("bundle_feats") if isinstance(payload.get("bundle_feats"),list) else []
+        if rules:
+            out.extend(["",r"\subsection{Archetype Feats}"])
+            current=None
+            for rule in sorted(rules,key=lambda x:(int(x.get("level") or 0),str(x.get("title") or "").casefold())):
+                level=int(rule.get("level") or 0)
+                if level!=current:
+                    current=level; out.append(f"\\subsubsection{{Level {level}}}")
+                out.append(_bundle_rule_latex(rule,default_category="archetype").rstrip())
+    return "\n\n".join(x for x in out if x is not None).strip()+"\n"
+
+
 def homebrew_latex_snippet(row: dict) -> str:
     payload=dict(row.get("payload") or {})
+    document=str(payload.get("homebrew_document") or "").strip().lower()
+    if document in {"ancestry", "archetype"}:
+        return _bundle_latex_snippet(row, document)
     meta=classify_homebrew(row)
     kind=meta["effective_kind"]
     title=latex_escape(row.get("title") or "Untitled")

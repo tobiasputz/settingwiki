@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% macro traits(value) -%}
+  {% if value %}{% set values = value.split(',') if value is string else value %}<div class="homebrew-traits">{% for raw in values %}{% set trait=raw|string|trim %}{% if trait %}<span>{{ trait }}</span>{% endif %}{% endfor %}</div>{% endif %}
+{%- endmacro %}
+{% macro rule_meta(access='', prerequisites='', frequency='', trigger='', requirements='', special='') -%}
+  {% if access or prerequisites or frequency or trigger or requirements or special %}<div class="homebrew-rule-meta">{% if access %}<span><b>Access</b> {{ access }}</span>{% endif %}{% if prerequisites %}<span><b>Prerequisites</b> {{ prerequisites }}</span>{% endif %}{% if frequency %}<span><b>Frequency</b> {{ frequency }}</span>{% endif %}{% if trigger %}<span><b>Trigger</b> {{ trigger }}</span>{% endif %}{% if requirements %}<span><b>Requirements</b> {{ requirements }}</span>{% endif %}{% if special %}<span><b>Special</b> {{ special }}</span>{% endif %}</div>{% endif %}
+{%- endmacro %}
+{% block title %}{{ entry.title }} · Homebrew · {{ wiki.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/homebrew.css?v=7401">{% endblock %}
+{% block body %}
+<main class="homebrew-shell homebrew-detail-shell" data-structured-bundle="{{ entry.id }}">
+  <nav class="homebrew-detail-back"><a href="/homebrew">← Homebrew</a><span>/</span><span>{{ 'Ancestries' if document=='ancestry' else 'Archetypes' }}</span></nav>
+  <header class="homebrew-detail-hero">
+    <div><span class="eyebrow">{{ document|upper }}{% if gm_view and not meta.published %} · DRAFT{% endif %}</span><h1>{{ entry.title }}</h1>{% if entry.subtitle %}<p>{{ entry.subtitle }}</p>{% endif %}{% if document=='ancestry' %}{{ traits(payload.ancestry_traits) }}{% else %}{{ traits(payload.archetype_traits) }}{% endif %}</div>
+    {% if gm_view %}<div class="homebrew-hero-actions"><a class="quiet-btn" href="/gm/foundry-workshop?entry={{ entry.id }}">Edit in Forge</a><button class="primary-button" type="button" data-bundle-foundry>Import to Foundry</button></div>{% endif %}
+  </header>
+
+  {% if entry.summary %}<p class="homebrew-bundle-lead">{{ entry.summary }}</p>{% endif %}
+  {% if payload.description %}<article class="homebrew-lore-overview"><section class="homebrew-lore-section"><h2>Overview</h2><div class="homebrew-description homebrew-bundle-prose">{{ payload.description }}</div></section></article>{% endif %}
+
+  {% if document=='ancestry' %}
+  <section class="homebrew-bundle-chassis"><header><span class="eyebrow">ANCESTRY CHASSIS</span><h2>Statistics</h2></header><div class="homebrew-chassis-grid">
+    <span><b>HP</b>{{ payload.ancestry_hp or 8 }}</span><span><b>Size</b>{{ payload.ancestry_size or 'med' }}</span><span><b>Speed</b>{{ payload.ancestry_speed or 25 }} ft</span><span><b>Reach</b>{{ payload.ancestry_reach or 5 }} ft</span><span><b>Vision</b>{{ (payload.ancestry_vision or 'normal')|replace('-',' ') }}</span>
+    <span class="wide"><b>Languages</b>{{ payload.ancestry_languages or 'common' }}{% if payload.ancestry_additional_languages %} · +{{ payload.ancestry_additional_languages }} additional{% endif %}</span>
+    <span class="wide"><b>Ability boosts</b>{{ payload.ancestry_boosts or '—' }}{% if payload.ancestry_free_boosts %} · {{ payload.ancestry_free_boosts }} free{% endif %}</span>{% if payload.ancestry_flaws %}<span class="wide"><b>Ability flaws</b>{{ payload.ancestry_flaws }}</span>{% endif %}
+  </div></section>
+  {% if payload.heritages %}<section class="homebrew-detail-rules"><header><div><span class="eyebrow">HERITAGES</span><h2>{{ entry.title }} heritages</h2></div><span>{{ payload.heritages|length }}</span></header><div class="homebrew-entry-list">{% for h in payload.heritages %}<article class="homebrew-entry source-rule"><div class="homebrew-entry-main"><div class="homebrew-entry-title"><span class="homebrew-kind">HERITAGE</span><h4>{{ h.title or h.name }}</h4></div>{{ traits(h.traits) }}<p class="homebrew-description homebrew-bundle-prose">{{ h.description }}</p></div></article>{% endfor %}</div></section>{% endif %}
+  {% endif %}
+
+  {% if document=='archetype' %}
+  {% if payload.archetype_access %}<section class="homebrew-archetype-access"><span class="eyebrow">ACCESS</span><p>{{ payload.archetype_access }}</p></section>{% endif %}
+  <section class="homebrew-detail-rules"><header><div><span class="eyebrow">DEDICATION</span><h2>{{ payload.dedication_title or (entry.title ~ ' Dedication') }}</h2></div><span>LEVEL {{ payload.dedication_level or 2 }}</span></header><div class="homebrew-entry-list"><article class="homebrew-entry source-rule"><div class="homebrew-entry-main">{{ traits(payload.dedication_traits) }}{{ rule_meta('', payload.dedication_prerequisites, payload.dedication_frequency, payload.dedication_trigger, payload.dedication_requirements, payload.dedication_special) }}<p class="homebrew-description homebrew-bundle-prose homebrew-rule-body">{{ payload.dedication_description }}</p></div></article></div></section>
+  {% endif %}
+
+  {% if rules %}<section class="homebrew-detail-rules"><header><div><span class="eyebrow">PF2E RULES</span><h2>{{ 'Ancestry feats' if document=='ancestry' else 'Archetype feats' }}</h2></div><span>{{ rules|length }} feats</span></header>
+    {% for level_group in rules|groupby('level') %}<div class="homebrew-level-band"><div class="homebrew-level-label">LEVEL {{ level_group.grouper }}</div><div class="homebrew-entry-list">{% for rule in level_group.list %}<article class="homebrew-entry source-rule"><div class="homebrew-entry-main"><div class="homebrew-entry-title"><span class="homebrew-kind">FEAT</span><h4>{{ rule.title }}</h4>{% if rule.action_cost %}<span class="homebrew-action-cost">{{ '↺' if rule.action_cost=='reaction' else ('◇' if rule.action_cost=='free' else ('◆' * (rule.action_cost|int))) }}</span>{% endif %}</div>{{ traits(rule.traits) }}{{ rule_meta(rule.access, rule.prerequisites, rule.frequency, rule.trigger, rule.requirements, rule.special) }}<p class="homebrew-description homebrew-bundle-prose homebrew-rule-body">{{ rule.description }}</p></div></article>{% endfor %}</div></div>{% endfor %}
+  </section>{% endif %}
+  <div id="homebrewToast" class="v6-toast"></div>
+</main>
+{% endblock %}
+{% block scripts %}{% if gm_view %}<script src="/static/homebrew-bundle.js?v=7401"></script>{% endif %}{% endblock %}

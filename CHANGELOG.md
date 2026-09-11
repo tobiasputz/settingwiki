@@ -1,11 +1,31 @@
+## 7.4.1 — Source parser refinement
+
+- Classified source bundles now take their canonical Homebrew name from the source file's own `\chapter{...}` heading, even when that chapter is only a structural container and the first rendered Codex page is a section.
+- Source-backed ancestries recognize ordinary bold LaTeX chassis labels such as Hit Points, Size, Speed, Ability Boosts/Flaws, Languages, Reach, Vision/Senses, Traits, and Additional Languages, including inside `multicols`, without rewriting the campaign source.
+- Conventional heritage sections are detected and rendered as structured ancestry heritages while preserving the original PDF source.
+- Only actual `\feat` cards are collected into the level-grouped feat section. Inline actions/activities stay in the lore/body position where they occur in the LaTeX source.
+- PF2e Access, Prerequisites, Frequency, Trigger, Requirements, and Special metadata render compactly together, followed by a guaranteed visual break before the rules/effect text in Seeker and Foundry.
+- Foundry Bridge **1.10.1** receives parsed ancestry chassis/heritage data and body-only rule descriptions so metadata is not duplicated.
+- Renderer/static/PWA generation is **7401**.
+
+## 7.4.0 — Complete Homebrew Forge
+
+- Added full **Ancestry Creator** to Homebrew Forge: lore/overview, HP, size, speed, reach, vision, languages, ancestry traits, fixed/free boosts, flaws, repeatable heritages, and a complete repeatable ancestry-feat progression.
+- Added full **Archetype Creator**: overview/access, archetype traits, a structured dedication feat, and a complete repeatable archetype-feat progression. Child feats preserve action cost, prerequisites, frequency, trigger, requirements, Special, traits, level, and rules text.
+- Complete ancestry/archetype objects save through the existing draft workflow, publish as one Homebrew entry, and open into a dedicated rules-reference page. Complete bundles no longer show a meaningless Level 0 wrapper or duplicated group title.
+- Foundry Bridge **1.10.0** imports Forge ancestries as a real PF2e Ancestry plus linked Heritage/feat items, and imports archetypes as a managed dedication + feat bundle.
+- Complete-bundle LaTeX export now includes ancestry chassis fields, heritages, archetype access/traits, dedication, and level-grouped feats. Same-name manual ancestry/archetype headings and exported source-backed bundles are de-duplicated.
+- Fixed repeatable ancestry/archetype feat editing so hidden bundle editors cannot overwrite the active bundle's feat state.
+- Homebrew bundle pages preserve author line breaks without rendering untrusted description text as raw HTML.
+- Static/PWA generation is **7400** and includes the structured bundle detail script/page.
+
 ## 7.3.2 — Source-scoped Homebrew
 
-- `.tex` files can now be classified from their three-dot Studio menu as an entire ancestry, archetype, class, general rules source, actions source, item source, or other Homebrew. Classification changes only Seeker library placement; source paths and PDF compilation are untouched.
-- Homebrew now shows one source card per classified file (for example **Jotunari**) instead of level/subsection cards. Opening it presents the file's lore and heritage material first, then detected PF2e feats/actions grouped by level.
-- Ancestries and archetypes have distinct Homebrew sections. Source-backed ancestry bundles import the ancestry plus linked rules to Foundry; archetype/class/general bundles import their rules to a managed Foundry Items folder. Foundry Bridge is **1.9.1**.
-- `\feat` / `\action` parsing preserves Prerequisites, Frequency, Trigger, Requirements, and Special as separate fields rather than flattening them into the description.
-- Homebrew Forge LaTeX export now targets a specific existing file and part/chapter/section/subsection. Re-export moves/updates one stable marker, while same-name manually-authored commands are linked rather than duplicated. Exported Forge entries are de-duplicated against the source-backed Homebrew view.
-- Static/PWA generation is **7320**, including source-backed Homebrew detail pages.
+- `.tex` files can be classified from their three-dot Studio menu as an entire ancestry, archetype, class, general rules source, actions source, item source, or other Homebrew without changing PDF placement.
+- Homebrew shows one source-backed entry per classified ancestry/archetype and groups native `\feat` / `\action` commands by level on its detail page.
+- PF2e rule parsing preserves Prerequisites, Frequency, Trigger, Requirements, and Special as structured fields.
+- Homebrew Forge LaTeX export targets existing headings, uses stable update markers, and de-duplicates exported rules against source-backed Homebrew.
+- Foundry Bridge **1.9.1** added source-bundle ancestry/archetype import. Static/PWA generation was **7320**.
 
 ## 7.3.1 — Homebrew, handout, and Foundry reliability
 
