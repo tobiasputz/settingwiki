@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.9.0";
+const BRIDGE_VERSION = "1.9.1";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 
 function seekerSlugify(value) {
@@ -1154,6 +1154,40 @@ async function importAncestryBundle(payload, endpoint = "") {
   return { message: `${title} imported with ${reports.length - failed} linked rule${reports.length - failed === 1 ? "" : "s"}${failed ? `; ${failed} failed` : ""}.`, folder_id: folder?.id || "", ancestry_uuid: ancestry?.uuid || "", items: reports };
 }
 
+async function importHomebrewRuleBundle(payload, endpoint = "") {
+  const title = String(payload?.title || "Custom Homebrew").trim() || "Custom Homebrew";
+  const section = String(payload?.section || "other").toLowerCase();
+  const folderName = String(payload?.folder_name || `Seeker · ${title}`).slice(0, 180);
+  let folder = (game.folders?.contents || []).find(f => f.type === "Item" && f.name === folderName && f.flags?.seeker?.homebrewRuleBundle);
+  if (!folder) folder = await Folder.create({ name: folderName, type: "Item", flags: { seeker: { homebrewRuleBundle: true, ownerSlug: payload?.owner_slug || "", section } } });
+  const featCategory = section === "archetype" ? "archetype" : section === "class" ? "class" : section === "ancestry" ? "ancestry" : "general";
+  const reports = [];
+  for (const rule of (Array.isArray(payload?.rules) ? payload.rules : []).slice(0, 250)) {
+    try {
+      const kind = String(rule?.kind || "feat").toLowerCase();
+      if (!["feat", "action"].includes(kind)) continue;
+      const source = buildPreparedItem({
+        title: rule?.title || "Untitled", prepared_kind: kind, summary: "",
+        data: {
+          level: Math.max(kind === "feat" ? 1 : 0, numericOr(rule?.level, kind === "feat" ? 1 : 0)),
+          traits: (rule?.traits || []).join(", "), description_html: rule?.description_html || "",
+          description: rule?.description || "", action_cost: rule?.action_cost || "", feat_category: featCategory,
+          prerequisites: rule?.prerequisites || "", frequency: rule?.frequency || "", trigger: rule?.trigger || "", requirements: rule?.requirements || ""
+        }
+      }, endpoint);
+      source.folder = folder?.id || null;
+      source.flags = { ...(source.flags || {}), seeker: { ...((source.flags || {}).seeker || {}), homebrewRuleBundle: true, ownerSlug: payload?.owner_slug || "", section, sourcePageSlug: rule?.source_page_slug || "" } };
+      const match = (game.items?.contents || []).find(i => i.type === source.type && i.folder?.id === folder?.id && i.name === source.name && i.flags?.seeker?.ownerSlug === payload?.owner_slug);
+      const doc = match ? (await match.update({ name: source.name, system: source.system, flags: source.flags }), match) : await Item.create(source);
+      reports.push({ status: "done", name: doc?.name || source.name, uuid: doc?.uuid || "", type: source.type });
+    } catch (error) {
+      reports.push({ status: "failed", name: rule?.title || "Rule", message: error?.message || String(error) });
+    }
+  }
+  const failed = reports.filter(x => x.status === "failed").length;
+  return { message: `${title} imported with ${reports.length - failed} rule${reports.length - failed === 1 ? "" : "s"}${failed ? `; ${failed} failed` : ""}.`, folder_id: folder?.id || "", items: reports };
+}
+
 async function resolveCommandActor(command, payload = {}) {
   const actorId = String(command?.actor_id || "").trim();
   if (actorId) {
@@ -1256,6 +1290,9 @@ async function runFoundryCommand(command, endpoint = "") {
   }
   if (type === "push_ancestry_bundle") {
     return await importAncestryBundle(payload, endpoint);
+  }
+  if (type === "push_homebrew_rule_bundle") {
+    return await importHomebrewRuleBundle(payload, endpoint);
   }
   if (type === "push_content_bundle") {
     return importCreatureBundle(payload, endpoint);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import html
 import hashlib
 import hmac
 import io
@@ -67,8 +68,10 @@ from .scheduling import (
 from .semantic_search import semantic_search
 from .aon import sanitize_aon_summary
 from .homebrew import (
-    NON_MONSTER_KINDS, HOME_BREW_SECTIONS, classify_homebrew, group_homebrew, homebrew_latex_snippet,
+    NON_MONSTER_KINDS, HOME_BREW_SECTIONS, HOME_BREW_SOURCE_TITLES, classify_homebrew, group_homebrew, homebrew_latex_snippet,
     is_homebrew_page, page_homebrew_kind, is_homebrew_source_path, source_homebrew_bucket, truthy, upsert_latex_block,
+    insert_latex_block_in_heading, remove_latex_block, load_homebrew_file_kinds, set_file_homebrew_kind,
+    move_file_homebrew_metadata, delete_file_homebrew_metadata,
 )
 
 from .v5 import (
@@ -348,7 +351,7 @@ def ensure_built() -> dict:
             pass
         return wiki
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 7301}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 7320}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -672,7 +675,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 7301
+                    needs_build=int(existing.get("renderer_version") or 0) < 7320
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -1842,7 +1845,30 @@ def admin_invitation_delete(request: Request, invite_id: int):
 
 
 @app.get("/api/admin/files")
-def admin_files(request: Request): require_admin(request); return list_project_files(settings)
+def admin_files(request: Request):
+    require_admin(request)
+    kinds=load_homebrew_file_kinds(settings)
+    rows=[]
+    for source in list_project_files(settings):
+        row=dict(source);path=str(row.get('path') or '').replace('\\','/').strip('/')
+        if str(row.get('suffix') or '').lower()=='.tex':row['homebrew_kind']=kinds.get(path,'codex')
+        rows.append(row)
+    return rows
+
+
+@app.put('/api/admin/file/homebrew')
+def admin_file_homebrew(request:Request,payload:dict=Body(...)):
+    require_admin(request)
+    rel=str(payload.get('path') or '').replace('\\','/').strip('/')
+    kind=str(payload.get('kind') or 'codex').strip().lower()
+    if not rel or not rel.lower().endswith('.tex'):raise HTTPException(400,'Choose a .tex source file.')
+    target=safe_project_path(settings,rel)
+    if not target.exists() or not target.is_file():raise HTTPException(404,'Source file not found.')
+    try:set_file_homebrew_kind(settings,rel,kind)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+    try:wiki=build_wiki(settings);warning=''
+    except Exception as exc:wiki=None;warning=str(exc)
+    return {'ok':True,'path':rel,'homebrew_kind':kind,'wiki_warning':warning,'pages':len((wiki or {}).get('pages',[]))}
 
 
 @app.get("/api/admin/folders")
@@ -1895,7 +1921,9 @@ def admin_new_file(request: Request, payload: dict = Body(...)):
 def admin_delete_file(request: Request, path: str):
     require_admin(request); p=safe_project_path(settings,path)
     if not p.exists(): raise HTTPException(404)
-    if p.is_dir(): shutil.rmtree(p)
+    was_dir=p.is_dir()
+    delete_file_homebrew_metadata(settings,path,is_dir=was_dir)
+    if was_dir: shutil.rmtree(p)
     else: p.unlink()
     return {"ok":True}
 
@@ -1957,6 +1985,7 @@ def admin_move_file(request:Request,payload:dict=Body(...)):
     if source.is_dir() and (dest==source or source in dest.parents):raise HTTPException(400,'A folder cannot be moved inside itself.')
     was_dir=source.is_dir();dest.parent.mkdir(parents=True,exist_ok=True)
     shutil.move(str(source),str(dest))
+    move_file_homebrew_metadata(settings,old_rel,new_rel,is_dir=was_dir)
     rewritten=[]
     if bool(payload.get('rewrite_includes',True)):
         rewritten=_rewrite_moved_tex_references(old_rel,new_rel,was_dir)
@@ -3816,7 +3845,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.3.1 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.3.2 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -3989,9 +4018,21 @@ def v704_bestiary_remove(request:Request,entry_id:int):
     return {'ok':True,'removed':True,'source_preserved':True}
 
 
+def _strip_source_rule_cards(value:str) -> str:
+    # Generated PF2e cards do not contain sibling ``section`` elements, so this
+    # controlled-source removal is safe and keeps lore/heritage prose separate
+    # from the normalized rules list shown at the bottom of a Homebrew entry.
+    return re.sub(r'<section class="pf2-rule-card\b[^>]*>.*?</section>', '', str(value or ''), flags=re.I|re.S).strip()
+
+
 def _homebrew_source_sections(wiki:dict) -> list[dict]:
-    # Source Homebrew is driven by Codex metadata. Legacy homebrew/ paths remain
-    # supported, but a normal jotunari.tex can now be marked once and left alone.
+    """Return one Homebrew bundle per classified LaTeX source/owner.
+
+    The Homebrew landing page should show *Jotunari*, not every ``1st Level`` /
+    ``5th Level`` subsection that happened to become a Codex page.  The bundle
+    keeps those pages internally for the detail view and gathers all detected
+    \feat / \action commands into one rules list.
+    """
     bundles: dict[tuple[str, str], dict] = {}
     for page in sorted(wiki.get('pages',[]), key=lambda x:int(x.get('order') or 0)):
         section=page_homebrew_kind(page)
@@ -3999,20 +4040,62 @@ def _homebrew_source_sections(wiki:dict) -> list[dict]:
         owner_slug=str(page.get('homebrew_owner_slug') or page.get('slug') or '')
         owner_title=str(page.get('homebrew_owner_title') or page.get('title') or 'Homebrew')
         key=(section,owner_slug)
-        bundle=bundles.setdefault(key,{'key':section,'name':owner_title,'owner_slug':owner_slug,'pages':[],'rules':[],'source_file':page.get('source_file') or ''})
+        bundle=bundles.setdefault(key,{
+            'key':section,'name':owner_title,'owner_slug':owner_slug,'pages':[],'lore_pages':[],
+            'rules':[],'source_file':page.get('source_file') or '',
+        })
         bundle['pages'].append(page)
+        lore_html=_strip_source_rule_cards(page.get('html') or '')
+        lore_plain=re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',lore_html)).strip()
+        if lore_plain:
+            lore=dict(page);lore['lore_html']=lore_html;lore['lore_plain']=lore_plain
+            bundle['lore_pages'].append(lore)
         for rule in page.get('pf2e_rules') or []:
-            item=dict(rule);item['source_page_slug']=page.get('slug');item['source_page_title']=page.get('title');bundle['rules'].append(item)
+            item=dict(rule);item['source_page_slug']=page.get('slug');item['source_page_title']=page.get('title');item['source_file']=page.get('source_file') or ''
+            bundle['rules'].append(item)
     grouped={}
     for (section,_),bundle in bundles.items():
         bundle['rules'].sort(key=lambda x:(int(x.get('level') or 0),str(x.get('title') or '').casefold()))
+        bundle['feat_count']=sum(1 for x in bundle['rules'] if str(x.get('kind') or '')=='feat')
+        bundle['action_count']=sum(1 for x in bundle['rules'] if str(x.get('kind') or '')=='action')
+        first_lore=(bundle.get('lore_pages') or [{}])[0]
+        bundle['summary']=str(first_lore.get('excerpt') or first_lore.get('lore_plain') or '')[:260]
         grouped.setdefault(section,[]).append(bundle)
     order=['ancestry','archetype','class','general','actions','items','other'];out=[]
     for section in order:
         rows=grouped.get(section,[])
         if not rows:continue
         rows.sort(key=lambda x:x['name'].casefold())
-        out.append({'key':section,'title':HOME_BREW_SECTIONS.get(section,'Other Homebrew'),'groups':[{'name':row['name'],'pages':row['pages'],'rules':row['rules'],'owner_slug':row['owner_slug'],'source_file':row['source_file']} for row in rows]})
+        out.append({'key':section,'title':HOME_BREW_SOURCE_TITLES.get(section,HOME_BREW_SECTIONS.get(section,'Other Homebrew')),'groups':rows})
+    return out
+
+
+def _source_rule_index(source_sections:list[dict]) -> set[tuple[str,str,str]]:
+    found=set()
+    for section in source_sections:
+        for group in section.get('groups',[]):
+            source=str(group.get('source_file') or '').replace('\\','/').strip('/')
+            for rule in group.get('rules',[]):
+                found.add((source,str(rule.get('kind') or '').casefold(),str(rule.get('title') or '').strip().casefold()))
+    return found
+
+
+def _dedupe_exported_homebrew_rows(rows:list[dict],source_sections:list[dict]) -> list[dict]:
+    """Hide a Forge row once its generated rule is represented by classified LaTeX.
+
+    The Workshop record remains the editable source of truth; this only prevents
+    the Homebrew library from showing the same exported feat twice.
+    """
+    source_rules=_source_rule_index(source_sections);out=[]
+    for row in rows:
+        payload=dict(row.get('payload') or {})
+        path=str(payload.get('latex_export_path') or '').replace('\\','/').strip('/')
+        if path and truthy(payload.get('latex_exported')):
+            meta=classify_homebrew(row)
+            key=(path,str(meta.get('effective_kind') or '').casefold(),str(row.get('title') or '').strip().casefold())
+            if key in source_rules:
+                continue
+        out.append(row)
     return out
 
 
@@ -4020,10 +4103,11 @@ def _homebrew_source_sections(wiki:dict) -> list[dict]:
 def homebrew_library_page(request:Request):
     if not player_allowed(request):return player_gate_redirect(request)
     cid=_active_campaign_id(request);gm=is_gm(request);wiki=_visible_wiki(request)
-    rows=list_foundry_prepared_content(settings,cid)
+    source_sections=_homebrew_source_sections(wiki)
+    rows=_dedupe_exported_homebrew_rows(list_foundry_prepared_content(settings,cid),source_sections)
     return templates.TemplateResponse('homebrew.html',{
         'request':request,'wiki':wiki,'maps':list_maps(settings,public=not gm),'gm_view':gm,
-        'homebrew_sections':group_homebrew(rows,include_drafts=gm),'source_sections':_homebrew_source_sections(wiki),
+        'homebrew_sections':group_homebrew(rows,include_drafts=gm),'source_sections':source_sections,
         'foundry_actors':foundry_actors(settings,cid) if gm else [],
         'project_tex_files':[f['path'] for f in list_project_files(settings) if f.get('suffix')=='.tex'] if gm else [],
     })
@@ -4037,31 +4121,57 @@ def _source_homebrew_bundle_or_404(wiki:dict, owner_slug:str) -> dict:
     raise HTTPException(404,'Homebrew source entry not found.')
 
 
+@app.get('/homebrew/source/{owner_slug}', response_class=HTMLResponse)
+def homebrew_source_detail(request:Request,owner_slug:str):
+    if not player_allowed(request):return player_gate_redirect(request)
+    gm=is_gm(request);wiki=_visible_wiki(request);bundle=_source_homebrew_bundle_or_404(wiki,owner_slug)
+    return templates.TemplateResponse('homebrew_source.html',{
+        'request':request,'wiki':wiki,'maps':list_maps(settings,public=not gm),'gm_view':gm,
+        'bundle':bundle,'group':bundle['group'],
+    })
+
+
+def _source_rule_foundry_html(rule:dict) -> str:
+    chunks=[]
+    for label,key in (('Prerequisites','prerequisites'),('Frequency','frequency'),('Trigger','trigger'),('Requirements','requirements'),('Special','special')):
+        value=str(rule.get(key) or '').strip()
+        if value:chunks.append(f'<p><strong>{html.escape(label)}</strong> {html.escape(value)}</p>')
+    description=str(rule.get('description_html') or rule.get('html') or '').strip()
+    if description:chunks.append(description)
+    return ''.join(chunks)
+
+
 @app.post('/api/homebrew/source/{owner_slug}/foundry')
 def homebrew_source_foundry_push(request:Request,owner_slug:str):
     require_gm(request);cid=_active_campaign_id(request);wiki=_visible_wiki(request)
-    bundle=_source_homebrew_bundle_or_404(wiki,owner_slug)
-    if bundle['section']!='ancestry':
-        raise HTTPException(400,'Foundry ancestry bundle import is currently available for entries marked Homebrew — Ancestry.')
+    bundle=_source_homebrew_bundle_or_404(wiki,owner_slug);section=str(bundle['section'] or 'other')
     group=bundle['group'];pages=group.get('pages') or []
     root=next((p for p in pages if str(p.get('slug') or '')==str(owner_slug)),pages[0] if pages else None)
-    if not root:raise HTTPException(404,'Ancestry source entry not found.')
+    if not root:raise HTTPException(404,'Homebrew source entry not found.')
     rules=[]
     for rule in group.get('rules') or []:
         if str(rule.get('kind') or '') not in {'feat','action'}:continue
         rules.append({
             'kind':str(rule.get('kind') or 'feat'),'title':str(rule.get('title') or 'Untitled'),
             'level':int(rule.get('level') or 0),'traits':list(rule.get('traits') or []),
-            'description_html':str(rule.get('html') or ''),'description':str(rule.get('plain_text') or ''),
+            'description_html':_source_rule_foundry_html(rule),'description':str(rule.get('description') or rule.get('plain_text') or ''),
+            'prerequisites':str(rule.get('prerequisites') or ''),'frequency':str(rule.get('frequency') or ''),
+            'trigger':str(rule.get('trigger') or ''),'requirements':str(rule.get('requirements') or ''),'special':str(rule.get('special') or ''),
             'action_cost':str(rule.get('action_cost') or ''),'source_page_slug':str(rule.get('source_page_slug') or ''),
         })
-    command=queue_foundry_command(settings,cid,'push_ancestry_bundle',{
-        'title':str(group.get('name') or root.get('title') or 'Custom Ancestry'),
+    lore_html=''.join(
+        f"<h2>{html.escape(str(p.get('title') or ''))}</h2>{str(p.get('lore_html') or '')}"
+        for p in group.get('lore_pages') or []
+    )
+    payload={
+        'title':str(group.get('name') or root.get('title') or 'Custom Homebrew'),'section':section,
         'owner_slug':str(owner_slug),'source_file':str(group.get('source_file') or root.get('source_file') or ''),
-        'description_html':str(root.get('html') or ''),'description':str(root.get('plain_text') or ''),
-        'rules':rules,'folder_name':f"Seeker · {str(group.get('name') or root.get('title') or 'Custom Ancestry')}",
-    },scope='world',requested_by=requester_label(request))
-    return {'ok':True,'command':command,'rules':len(rules)}
+        'description_html':lore_html or str(root.get('html') or ''),'description':'\n\n'.join(str(p.get('lore_plain') or '') for p in group.get('lore_pages') or []),
+        'rules':rules,'folder_name':f"Seeker · {str(group.get('name') or root.get('title') or 'Custom Homebrew')}",
+    }
+    command_type='push_ancestry_bundle' if section=='ancestry' else 'push_homebrew_rule_bundle'
+    command=queue_foundry_command(settings,cid,command_type,payload,scope='world',requested_by=requester_label(request))
+    return {'ok':True,'command':command,'rules':len(rules),'section':section}
 
 
 def _homebrew_entry_or_404(campaign_id:int,entry_id:int) -> dict:
@@ -4095,10 +4205,32 @@ def homebrew_delete(request:Request,entry_id:int):
     require_gm(request);cid=_active_campaign_id(request);_homebrew_entry_or_404(cid,entry_id);delete_foundry_prepared_content(settings,cid,entry_id);return {'ok':True}
 
 
+def _project_latex_targets() -> list[dict]:
+    rows=[];heading_re=re.compile(r'\\(part|chapter|section|subsection|subsubsection)\*?\s*\{([^{}]+)\}')
+    for info in list_project_files(settings):
+        if str(info.get('suffix') or '').lower()!='.tex':continue
+        rel=str(info.get('path') or '')
+        try:text=safe_project_path(settings,rel).read_text(encoding='utf-8',errors='replace')
+        except OSError:continue
+        seen={};headings=[]
+        for match in heading_re.finditer(text):
+            level,title=match.group(1),re.sub(r'\s+',' ',match.group(2)).strip();key=(level,title);index=seen.get(key,0);seen[key]=index+1
+            headings.append({'level':level,'title':title,'index':index})
+        rows.append({'path':rel,'headings':headings})
+    return rows
+
+
 @app.get('/api/homebrew/{entry_id}/latex')
 def homebrew_latex(request:Request,entry_id:int):
-    require_gm(request);row=_homebrew_entry_or_404(_active_campaign_id(request),entry_id)
-    return {'id':entry_id,'snippet':homebrew_latex_snippet(row),'suggested_path':_suggest_homebrew_tex_path(row)}
+    require_gm(request);row=_homebrew_entry_or_404(_active_campaign_id(request),entry_id);payload=dict(row.get('payload') or {})
+    suggested=str(payload.get('latex_export_path') or _suggest_homebrew_tex_path(row))
+    return {
+        'id':entry_id,'snippet':homebrew_latex_snippet(row),'suggested_path':suggested,'targets':_project_latex_targets(),
+        'selected_heading':{
+            'level':str(payload.get('latex_heading_level') or ''),'title':str(payload.get('latex_heading_title') or ''),
+            'index':int(payload.get('latex_heading_index') or 0),
+        },
+    }
 
 
 def _suggest_homebrew_tex_path(row:dict) -> str:
@@ -4107,17 +4239,63 @@ def _suggest_homebrew_tex_path(row:dict) -> str:
     return f'homebrew/{folder}/{group}.tex'
 
 
+def _manual_homebrew_duplicate(text:str,row:dict) -> bool:
+    meta=classify_homebrew(row);kind=str(meta.get('effective_kind') or '')
+    command='feat' if kind=='feat' else 'action' if kind=='action' else 'itemtemplate' if kind=='item' else ''
+    if not command:return False
+    title=str(row.get('title') or '').strip()
+    if not title:return False
+    return bool(re.search(r'\\'+re.escape(command)+r'\s*\{\s*'+re.escape(title)+r'\s*\}',text,re.I))
+
+
 @app.post('/api/homebrew/{entry_id}/latex/write')
 def homebrew_latex_write(request:Request,entry_id:int,payload:dict=Body(...)):
-    require_admin(request);row=_homebrew_entry_or_404(_active_campaign_id(request),entry_id)
+    require_admin(request);cid=_active_campaign_id(request);row=_homebrew_entry_or_404(cid,entry_id)
     rel=str(payload.get('path') or _suggest_homebrew_tex_path(row)).replace('\\','/').strip('/')
     if not rel.lower().endswith('.tex'):raise HTTPException(400,'Homebrew LaTeX must be written to a .tex file.')
-    target=safe_project_path(settings,rel);existing=target.read_text(encoding='utf-8',errors='replace') if target.exists() else '% Seeker homebrew\n'
     snippet=str(payload.get('snippet') or homebrew_latex_snippet(row))
-    result=save_text_file(settings,rel,upsert_latex_block(existing,entry_id,snippet))
+    heading_level=str(payload.get('heading_level') or '').strip().lower();heading_title=str(payload.get('heading_title') or '').strip()
+    try:heading_index=max(0,int(payload.get('heading_index') or 0))
+    except (TypeError,ValueError):heading_index=0
+
+    # A Forge item has one generated LaTeX identity. Remove the old marker from
+    # every project file before writing/moving it so changing the target chapter
+    # can never leave a second copy behind.
+    removed_any=False;changed_paths=[]
+    for info in list_project_files(settings):
+        if str(info.get('suffix') or '').lower()!='.tex':continue
+        path=str(info.get('path') or '');src=safe_project_path(settings,path)
+        try:text=src.read_text(encoding='utf-8',errors='replace')
+        except OSError:continue
+        cleaned,removed=remove_latex_block(text,entry_id)
+        if removed:
+            removed_any=True
+            if path!=rel:
+                save_text_file(settings,path,cleaned);changed_paths.append(path)
+            else:
+                # Reuse the cleaned version below instead of writing twice.
+                pass
+
+    target=safe_project_path(settings,rel)
+    existing=target.read_text(encoding='utf-8',errors='replace') if target.exists() else '% Seeker homebrew\n'
+    existing,_=remove_latex_block(existing,entry_id)
+    duplicate=bool(not removed_any and _manual_homebrew_duplicate(existing,row))
+    if duplicate:
+        rendered=existing
+    else:
+        rendered=insert_latex_block_in_heading(existing,entry_id,snippet,heading_level=heading_level,heading_title=heading_title,heading_index=heading_index)
+    result=save_text_file(settings,rel,rendered)
+
+    # Persist the link between the Forge entry and its LaTeX representation. The
+    # Homebrew library uses it to merge the generated/source-backed views.
+    data=dict(row.get('payload') or {});data.update({
+        'latex_exported':True,'latex_export_path':rel,'latex_heading_level':heading_level,
+        'latex_heading_title':heading_title,'latex_heading_index':heading_index,
+    })
+    save_foundry_prepared_content(settings,cid,{**row,'payload':data})
     try:build_wiki(settings)
     except Exception as exc:result['wiki_warning']=str(exc)
-    result.update({'ok':True,'snippet':snippet});return result
+    result.update({'ok':True,'snippet':snippet,'duplicate_detected':duplicate,'changed_paths':changed_paths,'path':rel});return result
 
 
 
@@ -4311,7 +4489,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.9.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.9.1.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -4319,7 +4497,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.9.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.9.1.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 

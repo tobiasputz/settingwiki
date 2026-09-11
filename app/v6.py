@@ -283,7 +283,7 @@ def normalize_foundry_sheet(sheet: Any) -> dict:
 
 
 def _foundry_module_version() -> str:
-    return '1.9.0'
+    return '1.9.1'
 
 
 def _validate_foundry_token(settings: Settings, campaign_id: int, token: str) -> None:
@@ -659,7 +659,7 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     query=urllib.parse.parse_qsl(parts.query,keep_blank_values=True)
     query=[(k,v) for k,v in query if k.lower()!='wait']+[('wait','true')]
     webhook_url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,parts.path,urllib.parse.urlencode(query),parts.fragment))
-    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.3.1'}, method='POST')
+    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.3.2'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             status=int(resp.status)

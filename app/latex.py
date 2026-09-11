@@ -18,6 +18,7 @@ from html.parser import HTMLParser
 
 from .config import Settings
 from .storage import get_setting, list_codex_presentations, safe_project_path, set_setting
+from .homebrew import HOME_BREW_SECTIONS, load_homebrew_file_kinds
 
 
 COMMENT_RE = re.compile(r"(?<!\\)%.*$")
@@ -303,6 +304,53 @@ def _extract_balanced_commands(raw: str, name: str, nargs: int) -> list[list[str
     return rows
 
 
+def _pf2_rule_body_parts(body_raw: str, settings: Settings, analysis: dict | None, *, page_kind: str) -> dict:
+    """Split common PF2e stat lines out of a \feat/\action body.
+
+    Campaign sources commonly write ``\textbf{Frequency} ...`` and similar
+    labels. Rendering the whole body to plain text first loses those boundaries,
+    which is why Seeker previously produced strings such as
+    ``Frequency once per day Trigger ...``.  Preserve the original LaTeX
+    boundaries, render each field independently, and leave the actual effect text
+    as the description.
+    """
+    label_re = re.compile(
+        r"\\(?:textbf|textit|emph)\s*\{\s*(Prerequisites?|Requirements?|Trigger|Frequency|Special)\s*:?[\s~]*\}\s*:?[\s~]*",
+        re.I,
+    )
+    matches = list(label_re.finditer(body_raw or ""))
+    fields = {"prerequisites": "", "requirements": "", "trigger": "", "frequency": "", "special": ""}
+
+    def render(fragment: str) -> tuple[str, str]:
+        fragment = re.sub(r"^\s*(?:\\\\\s*)+", "", fragment or "")
+        fragment = re.sub(r"(?:\\\\\s*)+$", "", fragment)
+        html_value, plain_value = latex_fragment_to_html(fragment, settings, page_kind=page_kind, analysis=analysis, _allow_panels=False)
+        return html_value.strip(), plain_value.strip()
+
+    if matches:
+        desc_raw = body_raw[:matches[0].start()]
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(body_raw)
+            raw_value = body_raw[match.end():end]
+            key = match.group(1).casefold()
+            if key.startswith("prerequisite"): key = "prerequisites"
+            elif key.startswith("requirement"): key = "requirements"
+            value_html, value_plain = render(raw_value)
+            # Standard source often terminates the metadata line with ``\\``.
+            # Keep only the first rendered logical line in the field and put any
+            # following prose back into the description.
+            if "\\\\" in raw_value:
+                first, rest = raw_value.split("\\\\", 1)
+                value_html, value_plain = render(first)
+                desc_raw += "\n" + rest
+            fields[key] = value_plain
+        desc_html, desc_plain = render(desc_raw)
+    else:
+        desc_html, desc_plain = render(body_raw)
+
+    return {**fields, "description_html": desc_html, "description": desc_plain}
+
+
 def extract_pf2e_rules(raw: str, settings: Settings, analysis: dict | None = None) -> list[dict]:
     """Extract structured PF2e rules from the existing LaTeX without rewriting it.
 
@@ -316,21 +364,23 @@ def extract_pf2e_rules(raw: str, settings: Settings, analysis: dict | None = Non
             level = int(re.search(r"-?\d+", clean_inline_text(level_raw)).group(0))
         except (AttributeError, TypeError, ValueError):
             level = 0
-        body_html, body_plain = latex_fragment_to_html(body_raw, settings, page_kind="feat", analysis=analysis, _allow_panels=False)
+        parts = _pf2_rule_body_parts(body_raw, settings, analysis, page_kind="feat")
         rows.append({
             "kind": "feat", "title": clean_inline_text(title), "level": level,
             "traits": [clean_inline_text(x) for x in traits_raw.split(",") if clean_inline_text(x)],
-            "html": body_html, "plain_text": body_plain.strip(),
+            "html": parts["description_html"], "plain_text": parts["description"],
+            **parts,
         })
     for args in _extract_balanced_commands(raw, "action", 4):
         title, action_raw, traits_raw, body_raw = args
         action_text = clean_inline_text(action_raw).casefold()
         action_cost = "reaction" if "reaction" in action_text else "free" if "free" in action_text else next((x for x in ("1", "2", "3") if x in action_text), "")
-        body_html, body_plain = latex_fragment_to_html(body_raw, settings, page_kind="action", analysis=analysis, _allow_panels=False)
+        parts = _pf2_rule_body_parts(body_raw, settings, analysis, page_kind="action")
         rows.append({
             "kind": "action", "title": clean_inline_text(title), "level": 0, "action_cost": action_cost,
             "traits": [clean_inline_text(x) for x in traits_raw.split(",") if clean_inline_text(x)],
-            "html": body_html, "plain_text": body_plain.strip(),
+            "html": parts["description_html"], "plain_text": parts["description"],
+            **parts,
         })
     return rows
 
@@ -749,16 +799,55 @@ def build_wiki(settings: Settings) -> dict:
         item["presentation"]["navigation_art_is_auto"] = False
         page_dicts.append(item)
 
-    # A Homebrew classification belongs to the LaTeX content, not to a folder.
-    # Mark one page (for example the Jotunari ancestry introduction) in Codex
-    # Studio and subsequent sections from the same source/chapter inherit that
-    # owner until another explicitly classified page starts. This keeps a normal
-    # jotunari.tex structure intact and lets level headings/feat sections follow it.
+    # File-level Homebrew placement is the primary authoring model. A GM can use
+    # the three-dot menu next to ``jotunari.tex`` and mark the *whole source file*
+    # as an ancestry/archetype/etc. The source stays where it is for the PDF, but
+    # every Codex page emitted from that file receives one shared Homebrew owner.
+    # Older page-level Codex Studio metadata and homebrew/ folders remain valid as
+    # migration fallbacks.
+    configured_file_kinds = load_homebrew_file_kinds(settings)
+    effective_file_kinds: dict[str, str] = dict(configured_file_kinds)
+    for item in page_dicts:
+        source = str(item.get("source_file") or "").replace("\\", "/").strip("/")
+        if source in effective_file_kinds or not source:
+            continue
+        parts = [p for p in source.lower().split("/") if p]
+        if parts and parts[0] in {"homebrew", "home-brew", "custom"}:
+            bucket = parts[1] if len(parts) > 1 else ""
+            effective_file_kinds[source] = {
+                "ancestry": "ancestry", "ancestries": "ancestry",
+                "archetype": "archetype", "archetypes": "archetype",
+                "class": "class", "classes": "class",
+                "action": "actions", "actions": "actions", "activities": "actions",
+                "item": "items", "items": "items", "equipment": "items",
+            }.get(bucket, "other")
+
+    file_owners: dict[str, dict] = {}
+    for source, kind in effective_file_kinds.items():
+        candidates = [p for p in page_dicts if str(p.get("source_file") or "").replace("\\", "/").strip("/") == source]
+        if not candidates:
+            continue
+        candidates.sort(key=lambda p: int(p.get("order") or 0))
+        root = candidates[0]
+        title = str(root.get("title") or "").strip()
+        if re.match(r"^(?:\d+(?:st|nd|rd|th)?\s+)?level(?:\s+feats?)?$", title, re.I):
+            title = Path(source).stem.replace("-", " ").replace("_", " ").strip().title() or title
+        file_owners[source] = {"slug": root.get("slug"), "title": title, "kind": kind}
+
     active_homebrew: dict[tuple[str, str], dict] = {}
     for item in sorted(page_dicts, key=lambda x: int(x.get("order") or 0)):
+        source = str(item.get("source_file") or "").replace("\\", "/").strip("/")
+        file_owner = file_owners.get(source)
+        if file_owner:
+            item["homebrew_kind"] = file_owner["kind"]
+            item["homebrew_owner_slug"] = file_owner["slug"]
+            item["homebrew_owner_title"] = file_owner["title"]
+            item["homebrew_source_scope"] = "file"
+            continue
+
         presentation = item.get("presentation") or {}
         explicit_kind = str(presentation.get("homebrew_kind") or "codex").lower()
-        key = (str(item.get("source_file") or ""), str(item.get("chapter") or ""))
+        key = (source, str(item.get("chapter") or ""))
         if explicit_kind != "codex":
             active_homebrew[key] = {"slug": item.get("slug"), "title": item.get("title"), "kind": explicit_kind}
         owner = active_homebrew.get(key)
@@ -766,25 +855,12 @@ def build_wiki(settings: Settings) -> dict:
             item["homebrew_kind"] = owner["kind"]
             item["homebrew_owner_slug"] = owner["slug"]
             item["homebrew_owner_title"] = owner["title"]
-        elif str(item.get("source_file") or "").replace("\\", "/").lower().split("/", 1)[0] in {"homebrew", "home-brew", "custom"}:
-            # Preserve the old folder convention as a migration fallback. New
-            # projects do not need to move files: Codex Studio metadata wins.
-            legacy_parts = [p for p in str(item.get("source_file") or "").replace("\\", "/").lower().split("/") if p]
-            legacy_bucket = legacy_parts[1] if len(legacy_parts) > 1 else ""
-            legacy_kind = {
-                "ancestry": "ancestry", "ancestries": "ancestry",
-                "archetype": "archetype", "archetypes": "archetype",
-                "class": "class", "classes": "class",
-                "action": "actions", "actions": "actions", "activities": "actions",
-                "item": "items", "items": "items", "equipment": "items",
-            }.get(legacy_bucket, "other")
-            item["homebrew_kind"] = legacy_kind
-            item["homebrew_owner_slug"] = item.get("slug")
-            item["homebrew_owner_title"] = item.get("title")
+            item["homebrew_source_scope"] = "page"
         else:
             item["homebrew_kind"] = "codex"
             item["homebrew_owner_slug"] = ""
             item["homebrew_owner_title"] = ""
+            item["homebrew_source_scope"] = ""
 
     # Turn ordinary mentions of unique codex entry names into links. This is
     # intentionally conservative: generic headings and ambiguous duplicate names
@@ -860,7 +936,7 @@ def build_wiki(settings: Settings) -> dict:
         bucket["presentation"]["navigation_art_is_auto"] = bool(auto_navigation_art and auto_cover and not bucket["presentation"].get("toc_image_url"))
 
     payload = {
-        "renderer_version": 7301,
+        "renderer_version": 7320,
         "title": get_setting(settings, "site_title", "") or analysis["title"],
         "tagline": get_setting(settings, "tagline", "Follow the people, places, histories, and secrets of the world."),
         "author": analysis["author"],

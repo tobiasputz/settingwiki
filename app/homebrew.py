@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import PurePosixPath
 from typing import Any
+
+from .config import Settings
+from .storage import get_setting, set_setting
 
 NON_MONSTER_KINDS = {"item", "feat", "action", "homebrew"}
 HOME_BREW_SECTIONS = {
@@ -14,6 +18,16 @@ HOME_BREW_SECTIONS = {
     "items": "Items & Equipment",
     "other": "Other Homebrew",
 }
+HOME_BREW_SOURCE_TITLES = {
+    "ancestry": "Ancestries",
+    "archetype": "Archetypes",
+    "class": "Classes",
+    "general": "General Homebrew",
+    "actions": "Actions & Activities",
+    "items": "Items & Equipment",
+    "other": "Other Homebrew",
+}
+FILE_HOME_BREW_SETTING = "homebrew_file_kinds_v2"
 
 
 def truthy(value: Any) -> bool:
@@ -22,13 +36,86 @@ def truthy(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _norm_path(path: str | None) -> str:
+    return str(path or "").replace("\\", "/").strip("/")
+
+
+def load_homebrew_file_kinds(settings: Settings) -> dict[str, str]:
+    try:
+        raw = json.loads(get_setting(settings, FILE_HOME_BREW_SETTING, "{}") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raw = {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for path, kind in raw.items():
+        path = _norm_path(path)
+        kind = str(kind or "codex").strip().lower()
+        if path and kind in HOME_BREW_SECTIONS:
+            out[path] = kind
+    return out
+
+
+def save_homebrew_file_kinds(settings: Settings, mapping: dict[str, str]) -> dict[str, str]:
+    cleaned: dict[str, str] = {}
+    for path, kind in (mapping or {}).items():
+        path = _norm_path(path)
+        kind = str(kind or "codex").strip().lower()
+        if path and kind in HOME_BREW_SECTIONS:
+            cleaned[path] = kind
+    set_setting(settings, FILE_HOME_BREW_SETTING, json.dumps(cleaned, sort_keys=True, separators=(",", ":")))
+    return cleaned
+
+
+def file_homebrew_kind(settings: Settings, path: str | None) -> str:
+    return load_homebrew_file_kinds(settings).get(_norm_path(path), "codex")
+
+
+def set_file_homebrew_kind(settings: Settings, path: str, kind: str) -> dict[str, str]:
+    path = _norm_path(path)
+    kind = str(kind or "codex").strip().lower()
+    if kind != "codex" and kind not in HOME_BREW_SECTIONS:
+        raise ValueError("Unknown Homebrew library placement.")
+    mapping = load_homebrew_file_kinds(settings)
+    if kind == "codex":
+        mapping.pop(path, None)
+    else:
+        mapping[path] = kind
+    return save_homebrew_file_kinds(settings, mapping)
+
+
+def move_file_homebrew_metadata(settings: Settings, old_path: str, new_path: str, *, is_dir: bool = False) -> None:
+    old_path, new_path = _norm_path(old_path), _norm_path(new_path)
+    mapping = load_homebrew_file_kinds(settings)
+    changed = False
+    updated: dict[str, str] = {}
+    for path, kind in mapping.items():
+        if path == old_path or (is_dir and path.startswith(old_path.rstrip("/") + "/")):
+            suffix = path[len(old_path):].lstrip("/")
+            target = new_path.rstrip("/") + ("/" + suffix if suffix else "")
+            updated[target] = kind
+            changed = True
+        else:
+            updated[path] = kind
+    if changed:
+        save_homebrew_file_kinds(settings, updated)
+
+
+def delete_file_homebrew_metadata(settings: Settings, path: str, *, is_dir: bool = False) -> None:
+    path = _norm_path(path)
+    mapping = load_homebrew_file_kinds(settings)
+    updated = {p: k for p, k in mapping.items() if not (p == path or (is_dir and p.startswith(path.rstrip("/") + "/")))}
+    if updated != mapping:
+        save_homebrew_file_kinds(settings, updated)
+
+
 def is_homebrew_source_path(path: str | None) -> bool:
-    parts = [p.casefold() for p in PurePosixPath(str(path or "").replace("\\", "/")).parts]
+    parts = [p.casefold() for p in PurePosixPath(_norm_path(path)).parts]
     return bool(parts and parts[0] in {"homebrew", "home-brew", "custom"})
 
 
 def source_homebrew_bucket(path: str | None) -> tuple[str, str]:
-    parts = list(PurePosixPath(str(path or "").replace("\\", "/")).parts)
+    parts = list(PurePosixPath(_norm_path(path)).parts)
     if not parts or not is_homebrew_source_path(path):
         return "other", "Source files"
     lower = [p.casefold() for p in parts]
@@ -41,7 +128,6 @@ def source_homebrew_bucket(path: str | None) -> tuple[str, str]:
         elif lower[1] in {"item", "items", "equipment"}: section = "items"
     group = parts[2] if len(parts) > 2 else (parts[1] if len(parts) > 1 else "Source files")
     return section, group.replace("-", " ").replace("_", " ").strip().title() or "Source files"
-
 
 
 def page_homebrew_kind(page: dict | None) -> str:
@@ -57,6 +143,7 @@ def page_homebrew_kind(page: dict | None) -> str:
 
 def is_homebrew_page(page: dict | None) -> bool:
     return page_homebrew_kind(page) != "codex"
+
 
 def _traits(payload: dict) -> list[str]:
     return [x.strip() for x in str(payload.get("traits") or "").split(",") if x.strip()]
@@ -103,8 +190,6 @@ def classify_homebrew(row: dict) -> dict:
         elif section == "actions": group = "Actions & Activities"
         elif section == "general": group = str(payload.get("feat_category") or "General").strip().title()
     if not group:
-        # A PF2e ancestry/archetype/class name is normally also a trait. Prefer a
-        # non-generic trait as a useful automatic guess, but keep it fully editable.
         generic = {"common","uncommon","rare","unique","feat","skill","general","ancestry","archetype","class","downtime","exploration","concentrate","manipulate","fortune","incapacitation"}
         group = next((t for t in traits if t.casefold() not in generic), "Ungrouped")
 
@@ -156,7 +241,7 @@ def latex_escape(value: Any) -> str:
 def _rules_body(row: dict) -> str:
     payload=dict(row.get("payload") or {})
     lines=[]
-    for label,key in (("Prerequisites","prerequisites"),("Trigger","trigger"),("Requirements","requirements"),("Frequency","frequency")):
+    for label,key in (("Prerequisites","prerequisites"),("Trigger","trigger"),("Requirements","requirements"),("Frequency","frequency"),("Special","special")):
         value=str(payload.get(key) or "").strip()
         if value: lines.append(r"\textbf{"+label+":} "+latex_escape(value)+r"\\")
     desc=str(payload.get("description") or "").strip() or str(row.get("summary") or "").strip()
@@ -189,12 +274,60 @@ def homebrew_latex_snippet(row: dict) -> str:
     return f"% {title}\n{body}\n"
 
 
+def homebrew_marker(entry_id: int) -> tuple[str, str]:
+    return f"% SEEKER-HOMEBREW:{int(entry_id)}:BEGIN", f"% SEEKER-HOMEBREW:{int(entry_id)}:END"
+
+
+def remove_latex_block(existing: str, entry_id: int) -> tuple[str, bool]:
+    start, end = homebrew_marker(entry_id)
+    pattern = re.compile(r"(?:\n{0,2})?" + re.escape(start) + r".*?" + re.escape(end) + r"(?:\n{0,2})?", re.S)
+    updated, count = pattern.subn("\n", existing)
+    return updated.strip("\n") + ("\n" if updated.strip("\n") else ""), bool(count)
+
+
+def _marked_block(entry_id: int, snippet: str) -> str:
+    start, end = homebrew_marker(entry_id)
+    return f"{start}\n{snippet.rstrip()}\n{end}"
+
+
 def upsert_latex_block(existing: str, entry_id: int, snippet: str) -> str:
-    start=f"% SEEKER-HOMEBREW:{int(entry_id)}:BEGIN"
-    end=f"% SEEKER-HOMEBREW:{int(entry_id)}:END"
-    block=f"{start}\n{snippet.rstrip()}\n{end}"
+    start, end = homebrew_marker(entry_id)
+    block=_marked_block(entry_id,snippet)
     pattern=re.compile(re.escape(start)+r".*?"+re.escape(end), re.S)
     if pattern.search(existing):
         return pattern.sub(lambda _m:block, existing)
     prefix=existing.rstrip()
     return (prefix+"\n\n" if prefix else "")+block+"\n"
+
+
+def insert_latex_block_in_heading(existing: str, entry_id: int, snippet: str, *, heading_level: str = "", heading_title: str = "", heading_index: int = 0) -> str:
+    """Insert a stable Seeker block at the end of a chosen LaTeX heading scope.
+
+    Re-exporting the same entry updates the marker block rather than adding a
+    second command.  When no heading is selected the block is appended normally.
+    """
+    cleaned, _ = remove_latex_block(existing, entry_id)
+    level = str(heading_level or "").strip().lower()
+    title = str(heading_title or "").strip()
+    if not level or not title:
+        return upsert_latex_block(cleaned, entry_id, snippet)
+    order = {"part": 0, "chapter": 1, "section": 2, "subsection": 3, "subsubsection": 4}
+    if level not in order:
+        return upsert_latex_block(cleaned, entry_id, snippet)
+    heading_re = re.compile(r"\\(part|chapter|section|subsection|subsubsection)\*?\s*\{([^{}]+)\}")
+    matches = list(heading_re.finditer(cleaned))
+    candidates = [m for m in matches if m.group(1)==level and re.sub(r"\s+", " ", m.group(2)).strip()==title]
+    if not candidates:
+        return upsert_latex_block(cleaned, entry_id, snippet)
+    idx = max(0, min(int(heading_index or 0), len(candidates)-1))
+    selected = candidates[idx]
+    insert_at = len(cleaned)
+    selected_rank = order[level]
+    for m in matches:
+        if m.start() <= selected.start():
+            continue
+        if order.get(m.group(1), 99) <= selected_rank:
+            insert_at = m.start()
+            break
+    block = "\n\n" + _marked_block(entry_id, snippet) + "\n\n"
+    return cleaned[:insert_at].rstrip() + block + cleaned[insert_at:].lstrip("\n")

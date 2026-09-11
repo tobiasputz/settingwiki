@@ -12,7 +12,7 @@ from app.v51 import init_v51_db
 from app.v6 import init_v6_db, integration_config, claim_foundry_commands
 from app.v7 import init_v7_db
 from app.campaigns import default_campaign_id
-from app.latex import build_wiki
+from app.latex import build_wiki, extract_pf2e_rules
 from app.homebrew import classify_homebrew, group_homebrew, homebrew_latex_snippet, upsert_latex_block
 
 
@@ -88,7 +88,7 @@ def test_studio_move_rewrites_tex_include_and_homebrew_leaves_main_codex(tmp_pat
 
 def test_bridge_has_first_class_action_item_support():
     bridge=(Path(__file__).resolve().parents[1]/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.9.0"' in bridge
+    assert 'const BRIDGE_VERSION = "1.9.1"' in bridge
     assert 'kind === "action" ? "action"' in bridge
     assert 'Item.create(' in bridge and 'createEmbeddedDocuments("Item"' in bridge
 
@@ -116,7 +116,7 @@ def test_studio_folder_move_rewrites_nested_include_and_main_file(tmp_path: Path
     assert r'\input{homebrew/ancestries/elf/elf}' in (s.project_dir/'main.tex').read_text()
 
 
-def test_normal_latex_ancestry_metadata_groups_feat_commands_without_moving_source(tmp_path: Path, monkeypatch):
+def test_normal_latex_file_can_be_classified_as_one_ancestry_without_moving_source(tmp_path: Path, monkeypatch):
     import app.main as main
     s=setup(tmp_path);monkeypatch.setattr(main,'settings',s)
     (s.project_dir/'chapters').mkdir()
@@ -125,8 +125,9 @@ def test_normal_latex_ancestry_metadata_groups_feat_commands_without_moving_sour
 The Jotunari are stone-blooded wanderers.
 \subsection{Heritages}
 Choose a Jotunari heritage appropriate to your lineage.
-\subsection{Jotunari Feats}
+\subsection{1st Level}
 \feat{Stone Memory}{1}{jotunari, ancestry}{Recall the voice of the mountain.}
+\subsection{5th Level}
 \feat{Giant's Step}{5}{jotunari, ancestry}{Stride with impossible reach.}
 '''
     source.write_text(original,encoding='utf-8')
@@ -135,12 +136,12 @@ Choose a Jotunari heritage appropriate to your lineage.
 \input{chapters/jotunari}
 \end{document}''',encoding='utf-8')
     build_wiki(s);gm=gm_client(main,s);cid=default_campaign_id(s)
-    codex=gm.get('/api/admin/codex').json()
-    root=next(p for p in codex['pages'] if p['title']=='Jotunari')
-    marked=gm.put('/api/admin/codex/presentation',json={
-        'target_type':'page','target_key':root['slug'],'presentation':{'homebrew_kind':'ancestry'}
-    })
+
+    # This is the backend used by the three-dot menu beside jotunari.tex.
+    marked=gm.put('/api/admin/file/homebrew',json={'path':'chapters/jotunari.tex','kind':'ancestry'})
     assert marked.status_code==200,marked.text
+    file_row=next(f for f in gm.get('/api/admin/files').json() if f['path']=='chapters/jotunari.tex')
+    assert file_row['homebrew_kind']=='ancestry'
 
     # Classification changes Seeker's library placement only: the campaign
     # source remains byte-for-byte in its original folder for PDF compilation.
@@ -148,18 +149,28 @@ Choose a Jotunari heritage appropriate to your lineage.
     assert source.exists() and not (s.project_dir/'homebrew').exists()
 
     rebuilt=gm.get('/api/admin/codex').json()
-    jot=next(p for p in rebuilt['pages'] if p['title']=='Jotunari')
-    feats=next(p for p in rebuilt['pages'] if p['title']=='Jotunari Feats')
-    assert jot['homebrew_kind']=='ancestry'
-    assert feats['homebrew_kind']=='ancestry' and feats['homebrew_owner_slug']==jot['slug']
-    assert [(r['title'],r['level']) for r in feats['pf2e_rules']]==[('Stone Memory',1),("Giant's Step",5)]
+    source_pages=[p for p in rebuilt['pages'] if p.get('source_file')=='chapters/jotunari.tex']
+    assert source_pages
+    jot=next(p for p in source_pages if p['title']=='Jotunari')
+    assert all(p['homebrew_kind']=='ancestry' for p in source_pages)
+    assert all(p['homebrew_owner_slug']==jot['slug'] for p in source_pages)
+    assert all(p['homebrew_owner_title']=='Jotunari' for p in source_pages)
+    detected=[r for p in source_pages for r in p.get('pf2e_rules',[])]
+    assert [(r['title'],r['level']) for r in detected]==[('Stone Memory',1),("Giant's Step",5)]
 
     main_codex=gm.get('/')
     assert main_codex.status_code==200 and 'Jotunari' not in main_codex.text
     homebrew=gm.get('/homebrew')
     assert homebrew.status_code==200
-    assert 'Jotunari' in homebrew.text and 'Stone Memory' in homebrew.text and "Giant&#39;s Step" in homebrew.text
-    assert 'LEVEL 1' in homebrew.text and 'LEVEL 5' in homebrew.text
+    assert 'Jotunari' in homebrew.text
+    # The landing page is intentionally one ancestry card, not a second list of
+    # all 1st/5th/etc. subsections or feat cards.
+    assert 'Stone Memory' not in homebrew.text and "Giant&#39;s Step" not in homebrew.text
+    detail=gm.get(f"/homebrew/source/{jot['slug']}")
+    assert detail.status_code==200
+    assert 'The Jotunari are stone-blooded wanderers.' in detail.text
+    assert 'Heritages' in detail.text and 'Stone Memory' in detail.text and "Giant&#39;s Step" in detail.text
+    assert 'LEVEL 1' in detail.text and 'LEVEL 5' in detail.text
 
     pushed=gm.post(f"/api/homebrew/source/{jot['slug']}/foundry")
     assert pushed.status_code==200,pushed.text
@@ -172,8 +183,111 @@ Choose a Jotunari heritage appropriate to your lineage.
     assert [(r['title'],r['level']) for r in command['payload']['rules']]==[('Stone Memory',1),("Giant's Step",5)]
 
 
+def test_source_scoped_archetypes_are_separate_from_ancestries(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);monkeypatch.setattr(main,'settings',s)
+    (s.project_dir/'chapters').mkdir()
+    (s.project_dir/'chapters/jotunari.tex').write_text(r'''\section{Jotunari}\subsection{1st Level}\feat{Stone Memory}{1}{jotunari, ancestry}{Remember.}''',encoding='utf-8')
+    (s.project_dir/'chapters/stonebound.tex').write_text(r'''\section{Stonebound}\subsection{Dedication Feats}\feat{Stonebound Dedication}{2}{archetype, dedication}{Become stonebound.}''',encoding='utf-8')
+    (s.project_dir/'main.tex').write_text(r'''\documentclass{book}\begin{document}\chapter{Rules}\input{chapters/jotunari}\input{chapters/stonebound}\end{document}''',encoding='utf-8')
+    build_wiki(s);gm=gm_client(main,s)
+    assert gm.put('/api/admin/file/homebrew',json={'path':'chapters/jotunari.tex','kind':'ancestry'}).status_code==200
+    assert gm.put('/api/admin/file/homebrew',json={'path':'chapters/stonebound.tex','kind':'archetype'}).status_code==200
+    landing=gm.get('/homebrew')
+    assert landing.status_code==200 and 'Ancestries' in landing.text and 'Archetypes' in landing.text
+    assert 'Jotunari' in landing.text and 'Stonebound' in landing.text
+    codex=gm.get('/api/admin/codex').json()['pages']
+    arch=next(p for p in codex if p['title']=='Stonebound')
+    detail=gm.get(f"/homebrew/source/{arch['slug']}")
+    assert detail.status_code==200 and 'Archetype feats' in detail.text and 'Stonebound Dedication' in detail.text
+
+
+def test_pf2e_rule_metadata_is_structured_instead_of_flattened(tmp_path: Path):
+    s=setup(tmp_path)
+    raw=r'''\feat{Colossal Resilience}{1}{Jotunari}{%
+\textbf{Frequency:} once per day\\
+\textbf{Prerequisites:} Titan Fortitude\\
+\textbf{Trigger:} You would take physical damage\\
+\textbf{Requirements:} You are conscious\\
+\textbf{Special:} Tomb Jotunari reduce the initial damage.\\
+You brace for impact and steel your titanic resolve.
+}'''
+    rules=extract_pf2e_rules(raw,s,{"custom_macros":[]})
+    assert len(rules)==1
+    rule=rules[0]
+    assert rule['frequency']=='once per day'
+    assert rule['prerequisites']=='Titan Fortitude'
+    assert rule['trigger']=='You would take physical damage'
+    assert rule['requirements']=='You are conscious'
+    assert rule['special']=='Tomb Jotunari reduce the initial damage.'
+    assert rule['description']=='You brace for impact and steel your titanic resolve.'
+    assert 'Frequency' not in rule['description'] and 'Trigger' not in rule['description']
+
+
+def test_homebrew_forge_latex_target_heading_move_and_duplicate_detection(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);monkeypatch.setattr(main,'settings',s)
+    target=s.project_dir/'main.tex'
+    target.write_text(r'''\documentclass{book}\begin{document}
+\chapter{Rules}
+Existing prose.
+\chapter{Appendix}
+Appendix prose.
+\end{document}''',encoding='utf-8')
+    build_wiki(s);gm=gm_client(main,s)
+    created=gm.post('/api/v61/foundry/content',json={'kind':'feat','title':'Cinder Step','payload':{'level':2,'traits':'fire, general','description':'Stride through cinders.','homebrew_publish':True,'library_section':'general'}})
+    assert created.status_code==200;eid=created.json()['id']
+    meta=gm.get(f'/api/homebrew/{eid}/latex').json()
+    main_target=next(t for t in meta['targets'] if t['path']=='main.tex')
+    assert any(h['level']=='chapter' and h['title']=='Rules' for h in main_target['headings'])
+
+    first=gm.post(f'/api/homebrew/{eid}/latex/write',json={'path':'main.tex','heading_level':'chapter','heading_title':'Rules','heading_index':0})
+    assert first.status_code==200 and not first.json()['duplicate_detected']
+    text=target.read_text(encoding='utf-8')
+    assert text.count('SEEKER-HOMEBREW:'+str(eid)+':BEGIN')==1
+    assert text.index('SEEKER-HOMEBREW') < text.index(r'\chapter{Appendix}')
+
+    # Re-exporting/moving the same Forge object is an update, never a second copy.
+    second=gm.post(f'/api/homebrew/{eid}/latex/write',json={'path':'main.tex','heading_level':'chapter','heading_title':'Appendix','heading_index':0})
+    assert second.status_code==200
+    text=target.read_text(encoding='utf-8')
+    assert text.count('SEEKER-HOMEBREW:'+str(eid)+':BEGIN')==1
+    assert text.index('SEEKER-HOMEBREW') > text.index(r'\chapter{Appendix}')
+
+    # If a same-name rule already exists manually, Seeker links to it and does
+    # not append a generated duplicate.
+    manual=gm.post('/api/v61/foundry/content',json={'kind':'feat','title':'Already Here','payload':{'level':1,'traits':'general','description':'No duplicate.','homebrew_publish':True}})
+    mid=manual.json()['id']
+    with target.open('a',encoding='utf-8') as fh: fh.write('\n\\feat{Already Here}{1}{general}{Manual source.}\n')
+    linked=gm.post(f'/api/homebrew/{mid}/latex/write',json={'path':'main.tex','heading_level':'chapter','heading_title':'Rules','heading_index':0})
+    assert linked.status_code==200 and linked.json()['duplicate_detected'] is True
+    assert target.read_text(encoding='utf-8').count(r'\feat{Already Here}')==1
+
 def test_bridge_contains_ancestry_bundle_nonce_dedupe_and_absolute_resource_updates():
     bridge=(Path(__file__).resolve().parents[1]/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
     assert 'function commandDedupeKey' in bridge and 'payload?.command_nonce' in bridge
     assert 'push_ancestry_bundle' in bridge and 'type: "ancestry"' in bridge
     assert 'mode === "set"' in bridge and 'await actor.update({ [path]: next })' in bridge
+
+
+def test_exported_forge_rule_merges_with_classified_source_in_homebrew(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);monkeypatch.setattr(main,'settings',s)
+    (s.project_dir/'chapters').mkdir()
+    source=s.project_dir/'chapters/custom-rules.tex'
+    source.write_text(r'''\section{Ashen Customs}\subsection{Feats}\n''',encoding='utf-8')
+    (s.project_dir/'main.tex').write_text(r'''\documentclass{book}\begin{document}\chapter{Rules}\input{chapters/custom-rules}\end{document}''',encoding='utf-8')
+    build_wiki(s);gm=gm_client(main,s)
+    assert gm.put('/api/admin/file/homebrew',json={'path':'chapters/custom-rules.tex','kind':'general'}).status_code==200
+    created=gm.post('/api/v61/foundry/content',json={'kind':'feat','title':'Ash Walker','payload':{'level':3,'traits':'fire, general','description':'Walk across hot ash.','homebrew_publish':True,'library_section':'general'}})
+    eid=created.json()['id']
+    written=gm.post(f'/api/homebrew/{eid}/latex/write',json={'path':'chapters/custom-rules.tex','heading_level':'subsection','heading_title':'Feats','heading_index':0})
+    assert written.status_code==200
+    landing=gm.get('/homebrew')
+    # The source-backed bundle owns the exported feat now; the Forge record is
+    # retained for editing but is not rendered as a second library card.
+    assert f'data-homebrew-entry="{eid}"' not in landing.text
+    codex=gm.get('/api/admin/codex').json()['pages']
+    owner=next(p for p in codex if p['title']=='Ashen Customs')
+    detail=gm.get(f"/homebrew/source/{owner['slug']}")
+    assert detail.status_code==200 and detail.text.count('Ash Walker')>=1

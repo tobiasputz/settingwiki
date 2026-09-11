@@ -1,3 +1,12 @@
+## 7.3.2 — Source-scoped Homebrew
+
+- `.tex` files can now be classified from their three-dot Studio menu as an entire ancestry, archetype, class, general rules source, actions source, item source, or other Homebrew. Classification changes only Seeker library placement; source paths and PDF compilation are untouched.
+- Homebrew now shows one source card per classified file (for example **Jotunari**) instead of level/subsection cards. Opening it presents the file's lore and heritage material first, then detected PF2e feats/actions grouped by level.
+- Ancestries and archetypes have distinct Homebrew sections. Source-backed ancestry bundles import the ancestry plus linked rules to Foundry; archetype/class/general bundles import their rules to a managed Foundry Items folder. Foundry Bridge is **1.9.1**.
+- `\feat` / `\action` parsing preserves Prerequisites, Frequency, Trigger, Requirements, and Special as separate fields rather than flattening them into the description.
+- Homebrew Forge LaTeX export now targets a specific existing file and part/chapter/section/subsection. Re-export moves/updates one stable marker, while same-name manually-authored commands are linked rather than duplicated. Exported Forge entries are de-duplicated against the source-backed Homebrew view.
+- Static/PWA generation is **7320**, including source-backed Homebrew detail pages.
+
 ## 7.3.1 — Homebrew, handout, and Foundry reliability
 
 - Codex Studio can mark ordinary LaTeX pages as Homebrew ancestry/archetype/class/etc. entries without moving source files; the original LaTeX/PDF workflow is unchanged.
