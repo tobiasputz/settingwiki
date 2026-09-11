@@ -48,9 +48,9 @@ def seed_source(s: Settings):
 
 def test_v8_release_contract_and_assets():
     root=Path(__file__).resolve().parents[1]
-    assert (root/'VERSION').read_text().strip()=='8.0.1'
+    assert (root/'VERSION').read_text().strip()=='9.0.0'
     sw=(root/'static/sw.js').read_text(encoding='utf-8')
-    assert 'seeker-static-v8001' in sw and '/static/v8.js?v=8001' in sw
+    assert 'seeker-static-v9000' in sw and '/static/v8.js?v=9000' in sw
     assert (root/'app/v8.py').exists() and (root/'app/v8_api.py').exists()
     assert (root/'templates/v8_workspace.html').exists() and (root/'templates/v8_player_portal.html').exists()
     base=(root/'templates/base.html').read_text(encoding='utf-8')
@@ -94,7 +94,7 @@ def test_v8_http_workspace_source_studio_portal_and_command_palette(tmp_path: Pa
     inv=create_player_invite(s,'Alice');set_campaign_members(s,cid,[inv['id']])
     gm=TestClient(main.app);assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     page=gm.get('/app/v8');assert page.status_code==200 and 'CAMPAIGN WORKSPACE' in page.text and 'SOURCE MAP' in page.text and 'Seeker 8' not in page.text
-    state=gm.get('/api/v8/state');assert state.status_code==200 and state.json()['version']=='8.0.1'
+    state=gm.get('/api/v8/state');assert state.status_code==200 and state.json()['version']=='9.0.0'
     payload=state.json();assert payload['entities']==[] and payload['codex_candidates']
     candidate=payload['codex_candidates'][0]
     tracked=gm.post('/api/v8/codex/track',json={'slug':candidate['slug'],'kind':'place'});assert tracked.status_code==200
@@ -136,14 +136,14 @@ def test_v8_explicit_object_root_is_tracked_automatically(tmp_path: Path):
 def test_v8_source_linked_forge_record_does_not_duplicate_source_object(tmp_path: Path):
     s=setup(tmp_path);cid=default_campaign_id(s)
     prepared=save_foundry_prepared_content(s,cid,{'kind':'homebrew','title':'Jotunari','payload':{'homebrew_document':'ancestry','source_linked':True,'source_link_path':'jotunari.tex'}})
-    # Simulate a pre-workspace database where the Forge record was already mirrored.
+    # A source-linked ancestry/archetype should not create a standalone prepared-content object.
     sync_existing_entities(s,cid,{'pages':[]})
-    assert any(e['source_type']=='foundry_prepared' for e in list_entities(s,cid,tracked_only=True))
+    assert not any(e['source_type']=='foundry_prepared' for e in list_entities(s,cid,tracked_only=True))
     wiki={'pages':[{'slug':'jotunari','title':'Jotunari','chapter':'Jotunari','level':'chapter','source_file':'jotunari.tex','homebrew_kind':'ancestry','homebrew_owner_slug':'jotunari','homebrew_owner_title':'Jotunari','homebrew_source_scope':'file','plain_text':'Lore','excerpt':'Mountain people.'}]}
     sync_existing_entities(s,cid,wiki)
     rows=list_entities(s,cid,tracked_only=True)
     assert len(rows)==1 and rows[0]['source_type']=='homebrew_source' and rows[0]['name']=='Jotunari'
-    assert rows[0]['data']['prepared_content_id']==prepared['id']
+    assert rows[0]['data']['source_path']=='jotunari.tex'
 
 def test_v8_command_catalog_and_source_structure_are_contextual(tmp_path: Path):
     s=setup(tmp_path);wiki=seed_source(s);cid=default_campaign_id(s);sync_existing_entities(s,cid,wiki)

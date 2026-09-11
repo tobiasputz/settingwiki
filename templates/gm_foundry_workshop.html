@@ -75,6 +75,10 @@
           <button type="button" data-fw-kind="action"><span>◆</span><strong>Action</strong><small>Actions & activities</small></button>
           <button type="button" data-fw-kind="ancestry"><span>♜</span><strong>Ancestry</strong><small>Full ancestry package</small></button>
           <button type="button" data-fw-kind="archetype"><span>⌘</span><strong>Archetype</strong><small>Dedication + feat line</small></button>
+          <button type="button" data-fw-doc-kind="background"><span>◈</span><strong>Background</strong><small>Boosts, skills & feat</small></button>
+          <button type="button" data-fw-doc-kind="spell"><span>✧</span><strong>Spell</strong><small>Standalone PF2e spell</small></button>
+          <button type="button" data-fw-doc-kind="hazard"><span>⚠</span><strong>Hazard</strong><small>Simple or complex hazard</small></button>
+          <button type="button" data-fw-doc-kind="class"><span>♛</span><strong>Class</strong><small>Class chassis + feat line</small></button>
           <button type="button" data-fw-kind="homebrew"><span>◇</span><strong>Freeform</strong><small>Anything else</small></button>
         </section>
 
@@ -95,6 +99,10 @@
             <button type="button" data-fw-template="free-action" data-fw-template-kind="action">Custom action</button>
             <button type="button" data-fw-template="ancestry-standard" data-fw-template-kind="ancestry">Standard ancestry</button>
             <button type="button" data-fw-template="archetype-standard" data-fw-template-kind="archetype">Standard archetype</button>
+            <button type="button" data-fw-template="background-standard" data-fw-template-kind="homebrew">PF2e background</button>
+            <button type="button" data-fw-template="spell-standard" data-fw-template-kind="homebrew">PF2e spell</button>
+            <button type="button" data-fw-template="hazard-standard" data-fw-template-kind="homebrew">PF2e hazard</button>
+            <button type="button" data-fw-template="class-standard" data-fw-template-kind="homebrew">PF2e class</button>
             <button type="button" data-fw-template="free-item" data-fw-template-kind="homebrew">Custom item</button>
           </div>
         </div>
@@ -110,7 +118,7 @@
               <label data-fw-show="creature"><span>Disposition</span><select name="actor_role"><option value="npc">Opposition / neutral</option><option value="ally">Party ally</option></select></label>
               <label data-fw-show="item"><span>Item category</span><select name="item_type"><option value="equipment">Equipment</option><option value="consumable">Consumable</option><option value="weapon">Weapon</option><option value="armor">Armor</option><option value="shield">Shield</option><option value="treasure">Treasure</option><option value="backpack">Container</option></select></label>
               <label data-fw-show="feat"><span>Feat category</span><select name="feat_category"><option value="general">General</option><option value="skill">Skill</option><option value="class">Class</option><option value="ancestry">Ancestry</option><option value="archetype">Archetype</option><option value="bonus">Bonus</option><option value="other">Other</option></select></label>
-              <label data-fw-show="homebrew"><span>Foundry document</span><select name="homebrew_document"><option value="equipment">Item / equipment</option><option value="feat">Feat</option><option value="action">Action</option><option value="npc">NPC / creature</option></select></label>
+              <label data-fw-show="homebrew"><span>Foundry document</span><select name="homebrew_document"><option value="equipment">Item / equipment</option><option value="feat">Feat</option><option value="action">Action</option><option value="background">Background</option><option value="spell">Spell</option><option value="hazard">Hazard</option><option value="class">Class</option><option value="npc">NPC / creature</option></select></label><input type="hidden" name="extension_plugin"><input type="hidden" name="extension_type"><input type="hidden" name="extension_fields">
               <label class="span-2" data-fw-show="creature item feat action homebrew"><span>Traits</span><input name="traits" placeholder="human, humanoid, fire"></label>
               <label class="span-2"><span>Subtitle / source line</span><input name="subtitle" maxlength="180" placeholder="Elite guardian of the Cinder Gate"></label>
               <label class="span-2"><span>Portrait artwork</span><div class="fw-art-field"><input name="img" inputmode="url" placeholder="https://… or upload below"><button class="quiet-btn" type="button" data-fw-art-import>Import link</button><label class="quiet-btn fw-upload-button">Upload art<input type="file" accept="image/png,image/jpeg,image/webp" data-fw-art-upload hidden></label><button class="quiet-btn" type="button" data-fw-art-crop>Crop / frame</button></div><small class="fw-field-help" data-fw-art-status>Uploaded/imported art is automatically resized, compressed to WebP, and deduplicated in Seeker.</small></label>
@@ -270,6 +278,55 @@
             </div>
           </section>
 
+          <section class="fw-form-section fw-hidden" data-fw-doc="background">
+            <div class="fw-section-heading"><span>B</span><div><h2>Background chassis</h2><p>Structured PF2e background fields. These become a real Background item in Foundry and remain available in the global Homebrew library.</p></div></div>
+            <div class="fw-field-grid">
+              <label class="span-2"><span>Ability boosts</span><input name="background_boosts" placeholder="Strength or Charisma, Free"></label>
+              <label><span>Trained skill</span><input name="background_skill" placeholder="Athletics"></label><label><span>Lore</span><input name="background_lore" placeholder="Giant Lore"></label>
+              <label class="span-2"><span>Skill feat</span><input name="background_skill_feat" placeholder="Titan Wrestler"></label>
+              <label class="span-2"><span>Special / additional rules</span><textarea name="background_special" rows="4" placeholder="Additional languages, unusual choices, or access rules."></textarea></label>
+            </div>
+          </section>
+
+          <section class="fw-form-section fw-hidden" data-fw-doc="spell">
+            <div class="fw-section-heading"><span>S</span><div><h2>Spell rules</h2><p>Create a standalone PF2e spell item with rank, traditions, casting time, range, targets and defenses.</p></div></div>
+            <div class="fw-field-grid">
+              <label><span>Rank</span><input name="spell_rank" type="number" min="0" max="10" value="1"></label><label><span>Category</span><select name="spell_category"><option value="spell">Spell</option><option value="cantrip">Cantrip</option><option value="focus">Focus spell</option><option value="ritual">Ritual</option></select></label>
+              <label class="span-2"><span>Traditions</span><input name="spell_traditions" placeholder="arcane, primal"></label>
+              <label><span>Casting time</span><select name="spell_actions"><option value="1">◆ One action</option><option value="2" selected>◆◆ Two actions</option><option value="3">◆◆◆ Three actions</option><option value="reaction">↺ Reaction</option><option value="free">◇ Free action</option><option value="1 minute">1 minute</option><option value="10 minutes">10 minutes</option></select></label><label><span>Range</span><input name="spell_range" placeholder="60 feet"></label>
+              <label><span>Targets</span><input name="spell_targets" placeholder="1 creature"></label><label><span>Area</span><input name="spell_area" placeholder="20-foot burst"></label>
+              <label><span>Duration</span><input name="spell_duration" placeholder="1 minute"></label><label><span>Defense / save</span><input name="spell_defense" placeholder="basic Reflex"></label>
+              <label class="span-2"><span>Heightened</span><textarea name="spell_heightened" rows="4" placeholder="(+1) The damage increases by 2d6."></textarea></label>
+            </div>
+          </section>
+
+          <section class="fw-form-section fw-hidden" data-fw-doc="hazard">
+            <div class="fw-section-heading"><span>H</span><div><h2>Hazard chassis</h2><p>Build a PF2e simple or complex hazard. Special abilities below become hazard actions/routines in Foundry.</p></div></div>
+            <div class="fw-field-grid">
+              <label><span>Complexity</span><select name="hazard_complexity"><option value="simple">Simple</option><option value="complex">Complex</option></select></label><label><span>Stealth</span><input name="hazard_stealth" placeholder="DC 24 (expert)"></label>
+              <label class="span-2"><span>Description / notice</span><input name="hazard_notice" placeholder="What reveals the hazard before it activates"></label>
+              <label class="span-2"><span>Disable</span><textarea name="hazard_disable" rows="3" placeholder="Thievery DC 22 (trained) to jam the mechanism…"></textarea></label>
+              <label><span>AC</span><input name="hazard_ac" type="number" min="0" max="80"></label><label><span>Hardness</span><input name="hazard_hardness" type="number" min="0" max="999"></label>
+              <label><span>HP</span><input name="hazard_hp" type="number" min="0" max="99999"></label><label><span>BT</span><input name="hazard_bt" type="number" min="0" max="99999"></label>
+              <label><span>Fort</span><input name="hazard_fortitude" type="number"></label><label><span>Ref</span><input name="hazard_reflex" type="number"></label>
+              <label class="span-2"><span>Routine</span><textarea name="hazard_routine" rows="5" placeholder="On its initiative, the hazard…"></textarea></label>
+              <label class="span-2"><span>Reset</span><textarea name="hazard_reset" rows="3"></textarea></label>
+            </div>
+          </section>
+
+          <section class="fw-form-section fw-hidden" data-fw-doc="class">
+            <div class="fw-section-heading"><span>C</span><div><h2>Class chassis</h2><p>Author a class reference and its feat progression as one global Homebrew package.</p></div><div class="fw-heading-actions"><button class="quiet-btn" type="button" data-fw-sort-bundle-feats>⇅ Sort feats</button><button class="quiet-btn" type="button" data-fw-add-bundle-feat>＋ Add class feat</button></div></div>
+            <div class="fw-field-grid">
+              <label><span>Hit Points</span><input name="class_hp" type="number" min="1" max="30" value="8"></label><label><span>Key ability</span><input name="class_key_ability" placeholder="Strength or Dexterity"></label>
+              <label><span>Perception</span><input name="class_perception" placeholder="Trained"></label><label><span>Class DC</span><input name="class_dc" placeholder="Trained"></label>
+              <label class="span-2"><span>Saving throws</span><input name="class_saves" placeholder="Expert Fortitude, Trained Reflex, Expert Will"></label>
+              <label class="span-2"><span>Skills</span><textarea name="class_skills" rows="3" placeholder="Trained in Athletics; trained in additional skills equal to…"></textarea></label>
+              <label class="span-2"><span>Attacks & defenses</span><textarea name="class_proficiencies" rows="4"></textarea></label>
+              <label class="span-2"><span>Class features / progression</span><textarea name="class_progression" rows="6"></textarea></label>
+            </div>
+            <div class="fw-section-heading fw-nested-heading"><span>F</span><div><h2>Class feats</h2><p>Keep the class feat progression in the same package.</p></div></div><div class="fw-repeater fw-bundle-repeater" data-fw-bundle-feats></div>
+          </section>
+
           <section class="fw-form-section fw-library-placement" data-fw-section="noncreature">
             <div class="fw-section-heading"><span>03</span><div><h2>Homebrew Library</h2><p>Publish this entry to Seeker. Complete ancestries and archetypes are automatically kept together as one library entry; ordinary feats/items can still be grouped manually.</p></div></div>
             <label class="fw-toggle-line"><input type="checkbox" name="homebrew_publish" value="1"><span><strong>Publish in Homebrew</strong><small>Players can browse it in the Homebrew section.</small></span></label>
@@ -416,5 +473,5 @@
 <div class="fw-token-modal hidden" data-fw-latex-modal aria-hidden="true"><div class="fw-token-card fw-latex-card"><header><div><span class="eyebrow">LATEX EXPORT</span><h2>Seeker source block</h2><p>Generate the same feat/action/item as a native Seeker LaTeX command.</p></div><button class="fw-token-close" type="button" data-fw-latex-close>×</button></header><div class="fw-token-workspace"><section class="fw-token-controls"><label><span>Project .tex file</span><select data-fw-latex-path>{% for f in project_tex_files %}<option value="{{ f|e }}">{{ f }}</option>{% endfor %}</select></label><p class="fw-field-help">Writing uses stable markers, so exporting this entry again updates the same block instead of duplicating it.</p><div class="fw-token-actions"><button class="quiet-btn" type="button" data-fw-latex-copy>Copy</button><button class="primary-button" type="button" data-fw-latex-write>Write to source</button></div></section><section class="fw-token-preview"><textarea data-fw-latex-text rows="18" style="width:100%;height:100%;min-height:340px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></section></div></div></div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=8001">{% endblock %}
-{% block scripts %}<script src="/static/foundry-workshop.js?v=8001"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=9000">{% endblock %}
+{% block scripts %}<script src="/static/foundry-workshop.js?v=9000"></script>{% endblock %}

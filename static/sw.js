@@ -1,8 +1,8 @@
-const STATIC='seeker-static-v8001';
-const PRIVATE='seeker-private-v8001';
-const META='seeker-offline-meta-v8001';
+const STATIC='seeker-static-v9000';
+const PRIVATE='seeker-private-v9000';
+const META='seeker-offline-meta-v9000';
 const ENABLE_KEY='/__seeker_offline_enabled__';
-const SHELL=['/static/wiki.css?v=8001','/static/wiki.js?v=8001','/static/tour.css?v=8001','/static/tour.js?v=8001','/static/refinement.css?v=8001','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png','/static/v7.css?v=8001','/static/v7-player.js?v=8001','/static/homebrew.css?v=8001','/static/homebrew.js?v=8001','/static/homebrew-source.js?v=8001','/static/homebrew-bundle.js?v=8001','/static/v8.css?v=8001','/static/v8.js?v=8001'];
+const SHELL=['/static/wiki.css?v=9000','/static/wiki.js?v=9000','/static/tour.css?v=9000','/static/tour.js?v=9000','/static/refinement.css?v=9000','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png','/static/v7.css?v=9000','/static/v7-player.js?v=9000','/static/homebrew.css?v=9000','/static/homebrew.js?v=9000','/static/homebrew-source.js?v=9000','/static/homebrew-bundle.js?v=9000','/static/v8.css?v=9000','/static/v8.js?v=9000','/static/v9.js?v=9000'];
 const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/structures','/archive','/schedule','/tables','/investigation','/recap','/app','/app/v8','/portal','/homebrew'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/homebrew/source/')||u.pathname.startsWith('/homebrew/entry/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
 const privateAsset=u=>u.pathname.startsWith('/project-asset/')||u.pathname.startsWith('/uploads/');
 async function offlineEnabled(){const c=await caches.open(META);return !!(await c.match(ENABLE_KEY))}
@@ -38,7 +38,16 @@ self.addEventListener('fetch',e=>{
     })());
   }
 });
+async function cacheOfflinePack(urls=[]){
+  await enableOffline();
+  const c=await caches.open(PRIVATE);let cached=0,failed=0;
+  for(const raw of urls.slice(0,300)){
+    try{const u=new URL(String(raw),location.origin);if(u.origin!==location.origin){failed++;continue}const req=new Request(u.href,{credentials:'include'});const r=await fetch(req);const type=r.headers.get('content-type')||'';if(r.ok&&!r.redirected&&(type.includes('text/html')||type.startsWith('image/')||type.startsWith('audio/')||type==='application/pdf')){await c.put(req,r.clone());cached++}else failed++;}catch(_){failed++;}
+  }
+  return {ok:true,cached,failed};
+}
 self.addEventListener('message',e=>{
   if(e.data==='OFFLINE_ON')e.waitUntil(enableOffline());
   if(e.data==='OFFLINE_OFF'||e.data==='CLEAR_PRIVATE')e.waitUntil(disableOffline());
+  if(e.data&&e.data.type==='OFFLINE_PACK'){const port=e.ports&&e.ports[0];e.waitUntil(cacheOfflinePack(Array.isArray(e.data.urls)?e.data.urls:[]).then(out=>port&&port.postMessage(out)).catch(err=>port&&port.postMessage({ok:false,cached:0,error:String(err)})));}
 });

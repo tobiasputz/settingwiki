@@ -112,6 +112,9 @@ from .v7 import (
 from .v7_api import register_v7_routes
 from .v8 import init_v8_db
 from .v8_api import register_v8_routes
+from .homebrew_global import init_global_homebrew
+from .v9 import init_v9_db
+from .v9_api import register_v9_routes
 
 settings = load_settings()
 BUILD_LOCK = threading.Lock()
@@ -123,6 +126,8 @@ init_v51_db(settings)
 init_v6_db(settings)
 init_v7_db(settings)
 init_v8_db(settings)
+init_global_homebrew(settings)
+init_v9_db(settings)
 seed_project(settings)
 
 app = FastAPI(title="Seeker", docs_url=None, redoc_url=None)
@@ -354,7 +359,7 @@ def ensure_built() -> dict:
             pass
         return wiki
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 8001}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 9000}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -678,7 +683,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 8001
+                    needs_build=int(existing.get("renderer_version") or 0) < 9000
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -3848,7 +3853,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/8.0.1 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/9.0.0 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -5205,6 +5210,17 @@ register_v8_routes(app,settings,templates,{
     'requester_label':requester_label,
     'is_gm':is_gm,
     'ensure_built':ensure_built,
+})
+
+# Live-play and library extensions build on the Campaign Workspace without
+# changing its public route or branding.
+register_v9_routes(app,settings,{
+    'active_campaign_id':_active_campaign_id,
+    'visible_wiki':_visible_wiki,
+    'require_gm':require_gm,
+    'require_admin':require_admin,
+    'invite_id':_invite_id,
+    'requester_label':requester_label,
 })
 
 @app.post('/api/admin/handout-creator/artwork')

@@ -628,7 +628,7 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             queue={r['status']:r['n'] for r in conn.execute('SELECT status,COUNT(*) AS n FROM foundry_command_queue WHERE campaign_id=? GROUP BY status',(cid,)).fetchall()}
         tracked=len(list_entities(settings,cid,tracked_only=True))
         backups=settings.data_dir/'migration-backups'
-        return {'ok':True,'version':'8.0.1','campaign_id':cid,'entities':tracked,'objects':tracked,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
+        return {'ok':True,'version':'9.0.0','campaign_id':cid,'entities':tracked,'objects':tracked,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
 
     @app.get('/entity/{entity_id}',response_class=HTMLResponse)
     def v7_entity_page(request:Request,entity_id:int):
@@ -641,7 +641,9 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         view=entity if gm else player_entity_view(settings,entity,iid,can_view_statblock=can_stats)
         role='owner' if helpers.get('is_admin',lambda _r:False)(request) else player_role(request)
         perms=effective_permissions(settings,role,iid,cid)
-        return templates.TemplateResponse('v7_entity.html',{'request':request,'wiki':visible_wiki(request),'maps':list_maps(settings,public=not gm),'entity':view,'facts':facts,'observations':observations,'gm_view':gm,'can_view_statblock':can_stats,'v7_permissions':perms,'viewer_invite_id':iid})
+        from .v9 import knowledge_fields as v9_knowledge_fields
+        structured_fields=v9_knowledge_fields(settings,cid,entity_id,iid,gm=gm)
+        return templates.TemplateResponse('v7_entity.html',{'request':request,'wiki':visible_wiki(request),'maps':list_maps(settings,public=not gm),'entity':view,'facts':facts,'structured_fields':structured_fields,'observations':observations,'gm_view':gm,'can_view_statblock':can_stats,'v7_permissions':perms,'viewer_invite_id':iid})
 
     @app.get('/app',response_class=HTMLResponse)
     def v7_player_app(request:Request,character_id:int|None=None):

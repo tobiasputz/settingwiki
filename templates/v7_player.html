@@ -7,9 +7,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Table App · {{ wiki.title }}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=8001">
-  <link rel="stylesheet" href="/static/v7.css?v=8001">
-  <link rel="stylesheet" href="/static/refinement.css?v=8001">
+  <link rel="stylesheet" href="/static/wiki.css?v=9000">
+  <link rel="stylesheet" href="/static/v7.css?v=9000">
+  <link rel="stylesheet" href="/static/refinement.css?v=9000">
 </head>
 {% set fs = foundry_actor.sheet if foundry_actor else {} %}{% set vitals = fs.vitals or {} %}{% set ident = fs.identity or {} %}
 <body class="v7-player-body" data-v7-player-app data-character-id="{{ character.id if character else '' }}" data-foundry-received-at="{{ foundry_actor.received_at if foundry_actor else 0 }}">
@@ -73,7 +73,7 @@
     <button data-player-tab="map"><span>⌖</span><small>Map</small></button>
     <button data-player-tab="party"><span>⌘</span><small>Party</small></button>
   </nav>
-  <script src="/static/wiki.js?v=8001"></script>
-  <script src="/static/foundry-live.js?v=8001"></script>
-  <script src="/static/v7-player.js?v=8001"></script>
+  <script src="/static/wiki.js?v=9000"></script>
+  <script src="/static/foundry-live.js?v=9000"></script>
+  <script src="/static/v7-player.js?v=9000"></script>
 </body></html>

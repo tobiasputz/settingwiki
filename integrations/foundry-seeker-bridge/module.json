@@ -2,7 +2,7 @@
   "id": "seeker-bridge",
   "title": "Seeker Bridge",
   "description": "Sync Seeker with Foundry VTT, import structured PF2e homebrew, and allow a safe queued subset of Seeker-triggered Foundry actions.",
-  "version": "1.10.1",
+  "version": "1.11.0",
   "authors": [
     {
       "name": "Seeker"

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}{{ group.name }} · Homebrew · {{ wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/homebrew.css?v=8001">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/homebrew.css?v=9000">{% endblock %}
 {% block body %}
 <main class="homebrew-shell homebrew-detail-shell">
   <nav class="homebrew-detail-back"><a href="/homebrew">← Homebrew</a><span>/</span><span>{{ bundle.section_title }}</span></nav>
@@ -36,4 +36,4 @@
   <div id="homebrewToast" class="v6-toast"></div>
 </main>
 {% endblock %}
-{% block scripts %}<script src="/static/homebrew-source.js?v=8001"></script>{% endblock %}
+{% block scripts %}<script src="/static/homebrew-source.js?v=9000"></script>{% endblock %}

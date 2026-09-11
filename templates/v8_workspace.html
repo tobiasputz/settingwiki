@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Campaign Workspace · {{ campaign.name or wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v8.css?v=8001">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v8.css?v=9000">{% endblock %}
 {% block body %}
 <main class="v8-shell" data-v8-root>
   <header class="v8-hero">
@@ -14,6 +14,7 @@
     <button data-v8-tab="entities">◇ <span>Objects</span></button>
     <button data-v8-tab="sources">⌘ <span>Sources</span></button>
     <button data-v8-tab="homebrew">◆ <span>Homebrew</span></button>
+    <button data-v8-tab="world">◎ <span>World</span></button>
     <button data-v8-tab="foundry">∞ <span>Foundry</span></button>
     <button data-v8-tab="diagnostics">⚙ <span>Diagnostics</span></button>
   </nav>
@@ -25,12 +26,14 @@
   <section class="v8-pane" data-v8-pane="session">
     <header class="v8-section-head"><div><span class="eyebrow">PREP → RUN → CHRONICLE</span><h2>Session workspace</h2><p>Prepare once, run from the same surface, then turn what actually happened into the Chronicle.</p></div><a class="v8-button ghost" href="/gm/prep">Open detailed prep</a></header>
     <div id="v8Session"></div>
+    <div class="v9-stack"><section class="v8-panel"><header><div><span class="eyebrow">SESSION DIRECTOR</span><h3>Live scene control</h3></div><span>scene · encounter · exploration</span></header><div id="v9SessionDirector" class="v9-feature-host"><div class="v8-loading">Loading live director…</div></div></section><section class="v8-panel"><header><div><span class="eyebrow">PF2E ENCOUNTER BUILDER</span><h3>XP budget & Foundry handoff</h3></div><a class="v8-button ghost small" href="/gm/living-table#encounters">Advanced encounters</a></header><div id="v9EncounterBuilder" class="v9-feature-host"></div></section></div>
   </section>
 
   <section class="v8-pane" data-v8-pane="entities">
     <header class="v8-section-head"><div><span class="eyebrow">TRACKED CAMPAIGN OBJECTS</span><h2>People, places and things that actually matter</h2><p>Ordinary LaTeX headings stay document structure. Track only NPCs, places, factions, creatures, items, source-backed Homebrew and other things that need relationships, history, Foundry links, maps or handouts.</p></div><div class="v8-head-actions"><button class="v8-button ghost" id="v8TrackCodex">＋ Track Codex page</button><div class="v8-search"><span>⌕</span><input id="v8EntitySearch" placeholder="Search tracked objects"></div></div></header>
     <div class="v8-object-note"><strong>What counts as an object?</strong><span>Characters, explicit object articles and whole source-backed Homebrew are tracked automatically. Sections such as “History”, “Culture” or “17th Level” are not.</span></div>
     <div id="v8EntityGrid" class="v8-entity-grid"></div>
+    <section class="v8-panel v9-suggestion-panel"><header><div><span class="eyebrow">OPT-IN RELATIONSHIP SUGGESTIONS</span><h3>Repeated campaign connections</h3></div><button class="v8-button ghost small" id="v9RefreshRelations">Scan references</button></header><p>Seeker only suggests relationships. Nothing is created until you approve it.</p><div id="v9RelationSuggestions"></div></section>
   </section>
 
   <section class="v8-pane" data-v8-pane="sources">
@@ -39,25 +42,32 @@
   </section>
 
   <section class="v8-pane" data-v8-pane="homebrew">
-    <header class="v8-section-head"><div><span class="eyebrow">PF2E AUTHORING</span><h2>Homebrew workbench</h2><p>Author complete rules objects while keeping the LaTeX file authoritative. Existing source-backed ancestries and archetypes remain editable in Forge.</p></div><a class="v8-button" href="/gm/foundry-workshop">Open Forge</a></header>
+    <header class="v8-section-head"><div><span class="eyebrow">PF2E AUTHORING · TABLE-INDEPENDENT</span><h2>Homebrew workbench</h2><p>Homebrew belongs to your Seeker rules library, not to one campaign table. Build it once, then use or import it in any campaign while preserving LaTeX and Foundry metadata.</p></div><a class="v8-button" href="/gm/foundry-workshop">Open Forge</a></header>
     <div class="v8-homebrew-grid">
       <a href="/gm/foundry-workshop?new=ancestry"><span>✦</span><h3>Ancestry</h3><p>Chassis → heritages → feats by 1 / 5 / 9 / 13 / 17.</p></a>
       <a href="/gm/foundry-workshop?new=archetype"><span>⌘</span><h3>Archetype</h3><p>Overview → dedication → level-grouped archetype feats.</p></a>
       <a href="/homebrew"><span>◆</span><h3>Homebrew Library</h3><p>Browse ancestries, heritages, archetypes, general/skill/class feats and other rules.</p></a>
       <a href="/admin"><span>◇</span><h3>Source ownership</h3><p>Classify complete .tex files and preserve their exact PDF placement.</p></a>
     </div>
-    <section class="v8-panel"><header><div><span class="eyebrow">AUTHORING SAFETY</span><h3>Source-linked by design</h3></div></header><p>Forge changes update the original source block, while Source Studio keeps protected revisions. If Seeker cannot infer a safe source location, it leaves the source untouched instead of silently guessing.</p></section>
+    <section class="v8-panel"><header><div><span class="eyebrow">GLOBAL HOMEBREW LIBRARY</span><h3>One rules library across campaigns</h3></div><span id="v9HomebrewCount">—</span></header><div id="v9HomebrewScope"></div></section><section class="v8-panel"><header><div><span class="eyebrow">AUTHORING SAFETY</span><h3>Source-linked by design</h3></div></header><p>Forge changes update the original source block, while Source Studio keeps protected revisions. If Seeker cannot infer a safe source location, it leaves the source untouched instead of silently guessing.</p></section>
+  </section>
+
+
+  <section class="v8-pane" data-v8-pane="world">
+    <header class="v8-section-head"><div><span class="eyebrow">WORLD STATE</span><h2>Timeline, maps & assets</h2><p>Track consequences over time, preserve map reveal states, and reuse campaign art without hunting through upload folders.</p></div><div class="v8-head-actions"><div class="v8-search"><span>⌕</span><input id="v9UniversalSearch" placeholder="Search everything: sessions, NPCs, feats, handouts…"></div></div></header>
+    <div id="v9SearchResults" class="v9-search-results"></div>
+    <div class="v9-world-grid"><section class="v8-panel"><header><div><span class="eyebrow">CAMPAIGN TIMELINE</span><h3>Events & consequences</h3></div><a class="v8-button ghost small" href="/timeline">Full timeline</a></header><div id="v9Timeline"></div></section><section class="v8-panel"><header><div><span class="eyebrow">MAP STATES</span><h3>Reveal snapshots</h3></div><a class="v8-button ghost small" href="/#atlas">Open Atlas</a></header><div id="v9MapStates"></div></section><section class="v8-panel v9-assets-panel"><header><div><span class="eyebrow">ASSET LIBRARY</span><h3>Artwork & reuse</h3></div><button class="v8-button ghost small" id="v9ReloadAssets">Refresh</button></header><div id="v9Assets"></div></section></div>
   </section>
 
   <section class="v8-pane" data-v8-pane="foundry">
     <header class="v8-section-head"><div><span class="eyebrow">BIDIRECTIONAL SYNC</span><h2>Foundry state</h2><p>Live actor state stays in Foundry; Seeker tracks document ownership and exposes conflicts instead of duplicating items.</p></div><a class="v8-button ghost" href="/gm/foundry-workshop">Foundry Workshop</a></header>
-    <div id="v8Foundry"></div>
+    <div id="v8Foundry"></div><section class="v8-panel v9-sync-panel"><header><div><span class="eyebrow">CAMPAIGN-WIDE SYNC MANAGER</span><h3>Resolve or push in batches</h3></div><button class="v8-button ghost small" id="v9RefreshSync">Refresh</button></header><div id="v9SyncManager"></div></section>
   </section>
 
   <section class="v8-pane" data-v8-pane="diagnostics">
     <header class="v8-section-head"><div><span class="eyebrow">SYSTEM CHECK</span><h2>Diagnostics Center</h2><p>Bridge state, parser warnings, duplicate tracked objects, continuity and Railway storage in one place.</p></div><button class="v8-button" id="v8RunDiagnostics">Run system check</button></header>
     <div id="v8Diagnostics"></div>
-    <section class="v8-panel v8-module-panel"><header><div><span class="eyebrow">WORKSPACE MODULES</span><h3>Keep Seeker focused</h3></div><button class="v8-button small" id="v8SaveModules">Save layout</button></header><div id="v8Modules"></div></section>
+    <div class="v9-diagnostics-grid"><section class="v8-panel"><header><div><span class="eyebrow">BACKUP & MIGRATION CENTER</span><h3>Safe upgrades and restore points</h3></div><button class="v8-button small" id="v9CreateBackup">Create backup</button></header><div id="v9Backups"></div></section><section class="v8-panel"><header><div><span class="eyebrow">OFFLINE MOBILE PACK</span><h3>Keep current campaign data on-device</h3></div><button class="v8-button small" id="v9CacheOffline">Cache now</button></header><div id="v9Offline"></div></section><section class="v8-panel"><header><div><span class="eyebrow">EXTENSIONS</span><h3>Declarative module API</h3></div></header><div id="v9Extensions"></div></section></div><section class="v8-panel v8-module-panel"><header><div><span class="eyebrow">WORKSPACE MODULES</span><h3>Keep Seeker focused</h3></div><button class="v8-button small" id="v8SaveModules">Save layout</button></header><div id="v8Modules"></div></section>
   </section>
 </main>
 
@@ -66,4 +76,4 @@
 <div class="v8-modal" id="v8ObjectPicker" aria-hidden="true"><div class="v8-modal-card v8-picker-card"><header><div><small>TRACK A CODEX PAGE</small><strong>Add something meaningful to Campaign Objects</strong></div><button type="button" data-v8-picker-close>×</button></header><div class="v8-picker-body"><div class="v8-search"><span>⌕</span><input id="v8ObjectPickerSearch" placeholder="Search Codex pages"></div><label class="v8-picker-kind"><small>OBJECT TYPE</small><select id="v8ObjectPickerKind"><option value="lore">Lore / other</option><option value="npc">NPC / person</option><option value="place">Place</option><option value="faction">Faction</option><option value="organization">Organization</option><option value="item">Item</option><option value="monster">Creature</option></select></label><div id="v8ObjectPickerList" class="v8-picker-list"></div></div><footer><span>Tracking a page does not alter its LaTeX or move it in the Codex.</span><button class="v8-button ghost" type="button" data-v8-picker-close>Close</button></footer></div></div>
 <div class="v8-toast" id="v8Toast"></div>
 {% endblock %}
-{% block scripts %}<script src="/static/v8.js?v=8001"></script>{% endblock %}
+{% block scripts %}<script src="/static/v8.js?v=9000"></script><script src="/static/v9.js?v=9000"></script>{% endblock %}
