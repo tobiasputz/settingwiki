@@ -1,4 +1,6 @@
-# Seeker — Campaign Workspace (8.0.1)
+# Seeker — Campaign Workspace (9.0.1)
+
+**9.0.1 maintenance update:** restores the animated archive landing screen and bumps the browser/PWA asset generation to 9001. Version 9.0 also adds Session Director, PF2e Encounter Builder, field-level player knowledge, campaign timeline consequences, opt-in relationship suggestions, expanded universal search, Forge 2.0 types, campaign-wide Foundry sync, Asset Library, map reveal states, backups, offline packs, plugin manifests, and campaign-independent Homebrew.
 
 **One campaign, one source of truth.** This major release adds a connected **Campaign Workspace** without turning Seeker's document structure into another database you have to manage. LaTeX remains authoritative for source-backed campaign material; Foundry remains authoritative for live actor state; Seeker connects those systems to sessions, Chronicle, maps, handouts, Homebrew and campaign relationships.
 

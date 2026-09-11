@@ -123,7 +123,7 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             compact.append({**e,'sync':syncs.get(int(e['id']))})
         wf=workflow(settings,cid,int(session['id'])) if session else None
         return {
-            'version':'9.0.0','campaign':get_campaign(settings,cid) or {},'modules':module_settings(settings,cid),
+            'version':'9.0.1','campaign':get_campaign(settings,cid) or {},'modules':module_settings(settings,cid),
             'session':session,'workflow':wf,'sessions':list_sessions(settings,public=False,campaign_id=cid),
             'entities':compact,'codex_candidates':_codex_candidates(wiki,entities),'table':_table_payload(cid,session),'maps':list_maps(settings,public=False),
             'handouts':list_handouts(settings,admin=True,campaign_id=cid),'threads':list_threads(settings,admin=True,campaign_id=cid),

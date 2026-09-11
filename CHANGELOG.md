@@ -1,3 +1,10 @@
+# Seeker 9.0.1 — Landing Motion Repair
+
+- Restores the home-screen entrance animation with a deterministic post-paint trigger instead of relying on IntersectionObserver timing.
+- Makes the archive orbits visibly animate again, adds a restrained ambient glow pulse, and restores the scroll cue motion without changing the landing-page layout.
+- Keeps reduced-motion accessibility behavior intact.
+- Bumps the static/PWA cache generation to **9001** so installed/browser clients cannot retain the stale landing assets.
+
 # Changelog
 
 ## 8.0.1 — Campaign Workspace naming & object registry cleanup

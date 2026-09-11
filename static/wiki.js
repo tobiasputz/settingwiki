@@ -26,7 +26,13 @@
   // Reading progress.
   const progress=document.getElementById('readingProgress'); if(progress){const update=()=>{const h=document.documentElement.scrollHeight-innerHeight;progress.style.width=(h?scrollY/h*100:0)+'%'};addEventListener('scroll',update,{passive:true});update()}
   document.querySelectorAll('time[data-epoch]').forEach(t=>{const d=new Date(Number(t.dataset.epoch)*1000);t.textContent=d.toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})});
-  const io=new IntersectionObserver(entries=>entries.forEach(x=>x.isIntersecting&&x.target.classList.add('visible')),{threshold:.08});document.querySelectorAll('.reveal').forEach(x=>io.observe(x));
+  const revealNodes=[...document.querySelectorAll('.reveal')];
+  if('IntersectionObserver' in window){const io=new IntersectionObserver(entries=>entries.forEach(x=>x.isIntersecting&&x.target.classList.add('visible')),{threshold:.08});revealNodes.forEach(x=>io.observe(x))}else revealNodes.forEach(x=>x.classList.add('visible'));
+  // The landing hero used to depend on the generic observer happening after the
+  // browser's first paint. Fast/cached loads can resolve it before that paint,
+  // making the entrance appear completely static. Arm it explicitly two frames
+  // later so the intro is deterministic while the orbit animation remains CSS-only.
+  const homeHero=document.querySelector('[data-home-hero]');if(homeHero){requestAnimationFrame(()=>requestAnimationFrame(()=>{homeHero.classList.add('hero-motion-ready');homeHero.querySelector('.hero-inner')?.classList.add('visible')}))}
 
   // Codex sidebar state survives full page navigation.  In addition to open
   // groups and scrollTop, remember the clicked row's viewport offset; after the
