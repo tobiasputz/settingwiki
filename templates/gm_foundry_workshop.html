@@ -233,7 +233,7 @@
             <div class="fw-bundle-help">Use the main description below for ancestry lore, physiology, society, naming conventions, and any other player-facing information. Heritages and feats stay attached to this same ancestry entry.</div>
             <div class="fw-section-heading fw-nested-heading"><span>H</span><div><h2>Heritages</h2><p>Each heritage becomes its own PF2e Heritage item linked to this ancestry.</p></div><button class="quiet-btn" type="button" data-fw-add-heritage>＋ Add heritage</button></div>
             <div class="fw-repeater fw-bundle-repeater" data-fw-heritages></div>
-            <div class="fw-section-heading fw-nested-heading"><span>F</span><div><h2>Ancestry feats</h2><p>Create the entire feat progression here. Level grouping happens automatically in Seeker and LaTeX.</p></div><button class="quiet-btn" type="button" data-fw-add-bundle-feat>＋ Add ancestry feat</button></div>
+            <div class="fw-section-heading fw-nested-heading"><span>F</span><div><h2>Ancestry feats</h2><p>Create the entire feat progression here. Level grouping happens automatically in Seeker and LaTeX.</p></div><div class="fw-heading-actions"><button class="quiet-btn" type="button" data-fw-sort-bundle-feats>⇅ Sort by level</button><button class="quiet-btn" type="button" data-fw-add-bundle-feat>＋ Add ancestry feat</button></div></div>
             <div class="fw-repeater fw-bundle-repeater" data-fw-bundle-feats></div>
           </section>
 
@@ -257,7 +257,7 @@
                 <label class="span-2"><span>Rules text</span><textarea name="dedication_description" rows="6" placeholder="What the dedication grants and any archetype-specific rules."></textarea></label>
               </div>
             </div>
-            <div class="fw-section-heading fw-nested-heading"><span>F</span><div><h2>Archetype feats</h2><p>Add every feat in the archetype. The dedication above remains separate and is included automatically.</p></div><button class="quiet-btn" type="button" data-fw-add-bundle-feat>＋ Add archetype feat</button></div>
+            <div class="fw-section-heading fw-nested-heading"><span>F</span><div><h2>Archetype feats</h2><p>Add every feat in the archetype. The dedication above remains separate and is included automatically.</p></div><div class="fw-heading-actions"><button class="quiet-btn" type="button" data-fw-sort-bundle-feats>⇅ Sort by level</button><button class="quiet-btn" type="button" data-fw-add-bundle-feat>＋ Add archetype feat</button></div></div>
             <div class="fw-repeater fw-bundle-repeater" data-fw-bundle-feats></div>
           </section>
 
@@ -416,5 +416,5 @@
 <div class="fw-token-modal hidden" data-fw-latex-modal aria-hidden="true"><div class="fw-token-card fw-latex-card"><header><div><span class="eyebrow">LATEX EXPORT</span><h2>Seeker source block</h2><p>Generate the same feat/action/item as a native Seeker LaTeX command.</p></div><button class="fw-token-close" type="button" data-fw-latex-close>×</button></header><div class="fw-token-workspace"><section class="fw-token-controls"><label><span>Project .tex file</span><select data-fw-latex-path>{% for f in project_tex_files %}<option value="{{ f|e }}">{{ f }}</option>{% endfor %}</select></label><p class="fw-field-help">Writing uses stable markers, so exporting this entry again updates the same block instead of duplicating it.</p><div class="fw-token-actions"><button class="quiet-btn" type="button" data-fw-latex-copy>Copy</button><button class="primary-button" type="button" data-fw-latex-write>Write to source</button></div></section><section class="fw-token-preview"><textarea data-fw-latex-text rows="18" style="width:100%;height:100%;min-height:340px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></section></div></div></div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7403">{% endblock %}
-{% block scripts %}<script src="/static/foundry-workshop.js?v=7403"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=8000">{% endblock %}
+{% block scripts %}<script src="/static/foundry-workshop.js?v=8000"></script>{% endblock %}

@@ -700,7 +700,7 @@ def sync_existing_entities(settings: Settings,campaign_id:int,wiki:dict|None=Non
             'kind':'lore','name':p.get('title') or p.get('slug') or 'Lore','subtitle':p.get('chapter') or '',
             'summary':p.get('excerpt') or '', 'body':p.get('plain_text') or '', 'visibility':'gm' if pres.get('visibility')=='hidden' else 'players',
             'image_ref':pres.get('hero_image_url') or pres.get('toc_image_url') or '', 'tags':[p.get('chapter')] if p.get('chapter') else [],
-            'data':{'slug':p.get('slug'),'chapter':p.get('chapter'),'legacy_source':'wiki'}
+            'data':{'slug':p.get('slug'),'chapter':p.get('chapter'),'source_path':p.get('source_file') or '', 'source_line':p.get('source_line') or 1,'legacy_source':'wiki'}
         });count+=1
     # Characters
     for r in _rows(settings,'SELECT id,name,pronouns,ancestry,class_name,summary,portrait_path,status,campaign_id FROM player_characters WHERE campaign_id=?',(int(campaign_id),)):

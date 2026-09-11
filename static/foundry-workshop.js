@@ -225,6 +225,18 @@
       (p.abilities||[]).forEach((a,i)=>{const row=$(`[data-ability-index="${i}"]`);const has=Object.values(a||{}).some(v=>String(v??'').trim());if(!has)return;if(!String(a.name||'').trim()){problems.push(`Ability ${i+1} needs a name.`);addRowProblem(row,'Add an ability name before saving.')}if(a.dc_type&&!String(a.dc??'').trim()){problems.push(`Ability ${i+1} has a check but no DC.`);addRowProblem(row,'This check shortcut needs a DC, or choose No check.')}if(String(a.dc??'').trim()&&!Number.isFinite(Number(a.dc))){problems.push(`Ability ${i+1} DC is invalid.`);addRowProblem(row,'DC must be a number.')}});
       (p.spells||[]).forEach((sp,i)=>{const row=$(`[data-spell-index="${i}"]`);const has=Object.values(sp||{}).some(v=>String(v??'').trim());if(!has)return;if(!String(sp.name||'').trim()){problems.push(`Spell ${i+1} needs a name.`);addRowProblem(row,'Add a spell name or remove this row.')}const rank=String(sp.rank??'').trim();if(rank&&(!Number.isInteger(Number(rank))||Number(rank)<0||Number(rank)>10)){problems.push(`Spell ${i+1} rank is invalid.`);addRowProblem(row,'Spell rank must be a whole number from 0 to 10.')}const dmg=String(sp.damage||'').trim();if(dmg&&!(/^[-+]?\d+$/.test(dmg)||/\d+d\d+/i.test(dmg))){problems.push(`Spell ${i+1} damage looks malformed.`);addRowProblem(row,'Damage should contain a roll such as 6d6, or leave it blank for an official compendium spell.')}});
     }
+    const bundleDoc=String(p.homebrew_document||'').toLowerCase();
+    if(data?.kind==='homebrew'&&['ancestry','archetype'].includes(bundleDoc)){
+      const feats=Array.isArray(p.bundle_feats)?p.bundle_feats:[], seen=new Map();
+      feats.forEach((f,i)=>{const row=$(`[data-bundle-feat-index="${i}"]`),title=String(f.title||'').trim(),level=Number(f.level);if(!title){problems.push(`Feat ${i+1} needs a name.`);addRowProblem(row,'Add a feat name or remove this row.')}if(!Number.isInteger(level)||level<1||level>30){problems.push(`${title||`Feat ${i+1}`} has an invalid level.`);addRowProblem(row,'PF2e feat level must be a whole number from 1 to 30.')}if(title){const key=title.toLowerCase();if(seen.has(key)){problems.push(`Duplicate feat name: ${title}.`);addRowProblem(row,'Another feat in this package has the same name.')}else seen.set(key,i)}});
+      if(bundleDoc==='ancestry'){
+        numberProblem('ancestry_hp','Ancestry HP',1,100);numberProblem('ancestry_speed','Speed',0,200);numberProblem('ancestry_reach','Reach',0,100);
+        if(!String(p.ancestry_traits||'').trim()){problems.push('Ancestry needs at least one ancestry trait.');field('ancestry_traits')?.closest('label')?.classList.add('has-validation-error')}
+        (p.heritages||[]).forEach((h,i)=>{const row=$(`[data-heritage-index="${i}"]`);if(!String(h.title||h.name||'').trim()){problems.push(`Heritage ${i+1} needs a name.`);addRowProblem(row,'Add a heritage name or remove this row.')}});
+      } else {
+        const dTitle=String(p.dedication_title||'').trim(), dLevel=Number(p.dedication_level||0);if(!dTitle){problems.push('Archetype needs a dedication feat name.');field('dedication_title')?.closest('label')?.classList.add('has-validation-error')}if(!Number.isInteger(dLevel)||dLevel<1||dLevel>30){problems.push('Dedication level is invalid.');field('dedication_level')?.closest('label')?.classList.add('has-validation-error')}
+      }
+    }
     if(data?.kind==='item'&&String(p.item_type||'')==='weapon'){
       numberProblem('weapon_damage_dice','Damage dice',0,8);numberProblem('weapon_damage_modifier','Damage modifier',-99,99);numberProblem('weapon_bonus','Item bonus',-20,20);numberProblem('weapon_range','Range',1,10000);numberProblem('weapon_reload','Reload',0,20);
       const die=String(p.weapon_damage_die||'');if(die&&!['d4','d6','d8','d10','d12'].includes(die)){problems.push('Weapon damage die is not a normal PF2e die.');field('weapon_damage_die')?.closest('label')?.classList.add('has-validation-error')}
@@ -379,6 +391,7 @@
   $('[data-fw-add-spell]')?.addEventListener('click',()=>{syncRepeaters();state.spells.push({name:'',rank:'1',actions:'2',uses:'1',range:'',target:'',save:'',basic:false,damage:'',damage_type:'fire',traits:'',duration:'',source_uuid:'',description:''});renderRepeaters();renderPreview();setDirty();$('[data-fw-spells] .fw-repeat-row:last-child input')?.focus()});
   $('[data-fw-add-heritage]')?.addEventListener('click',()=>{syncRepeaters();state.heritages.push({title:'',rarity:'common',traits:'',description:''});renderRepeaters();renderPreview();setDirty();$('[data-fw-heritages] .fw-repeat-row:last-child input')?.focus()});
   $$('[data-fw-add-bundle-feat]').forEach(b=>b.addEventListener('click',()=>{syncRepeaters();state.bundleFeats.push({title:'',level:fieldValue('kind')==='archetype'?'4':'1',action_cost:'',traits:fieldValue('kind')==='archetype'?'archetype':'',access:'',prerequisites:'',frequency:'',trigger:'',requirements:'',special:'',description:''});renderRepeaters();renderPreview();setDirty();const host=$('[data-fw-section="'+fieldValue('kind')+'"] [data-fw-bundle-feats]');$('.fw-repeat-row:last-child input',host)?.focus()}));
+  $$('[data-fw-sort-bundle-feats]').forEach(b=>b.addEventListener('click',()=>{syncRepeaters();state.bundleFeats=state.bundleFeats.map((x,i)=>({...x,__order:i})).sort((a,b)=>(Number(a.level||0)-Number(b.level||0))||(a.__order-b.__order)).map(({__order,...x})=>x);renderRepeaters();renderPreview();setDirty();toast('Feats grouped by level.')}));
   root.addEventListener('click',e=>{
     const ra=e.target.closest('[data-remove-attack]');if(ra){syncRepeaters();state.attacks.splice(+ra.dataset.removeAttack,1);renderRepeaters();renderPreview();setDirty();return}
     const rb=e.target.closest('[data-remove-ability]');if(rb){syncRepeaters();state.abilities.splice(+rb.dataset.removeAbility,1);renderRepeaters();renderPreview();setDirty();return}
@@ -595,8 +608,11 @@
 
   // Restore only a genuinely unsaved local draft. Saved Seeker entries always win.
   let draft=null;try{draft=JSON.parse(localStorage.getItem('seeker-foundry-workshop-draft')||'null')}catch{}
-  const requestedEntry=new URLSearchParams(location.search).get('entry');
+  const query=new URLSearchParams(location.search);
+  const requestedEntry=query.get('entry'), requestedNew=String(query.get('new')||'').toLowerCase();
   const requested=state.entries.find(x=>String(x.id)===String(requestedEntry||''));
-  if(requested){fillForm(requested)}else if(draft && !draft.id && (draft.title||draft.summary||draft.payload?.description)){fillForm(draft);state.currentId=null;state.savedSnapshot='';setDirty()}else{fillForm()}
+  if(requested){fillForm(requested)}
+  else if(['ancestry','archetype','feat','action','item','monster','npc','homebrew'].includes(requestedNew)){fillForm();state.currentId=null;setKind(requestedNew,{resetCollections:true});state.savedSnapshot='';setDirty()}
+  else if(draft && !draft.id && (draft.title||draft.summary||draft.payload?.description)){fillForm(draft);state.currentId=null;state.savedSnapshot='';setDirty()}else{fillForm()}
   renderLibrary();renderLog();renderPreview();
 })();

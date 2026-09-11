@@ -1,21 +1,30 @@
-# Seeker 7.4.3 — Source-linked Forge editing & mobile navigation polish
+# Seeker 8.0.0 — Campaign OS
 
+**One campaign, one source of truth.** Seeker 8 is a major integration release that connects the systems built across Seeker 7 into a shared campaign-object, relationship, source-mapping, revision, and session-workflow layer. LaTeX remains authoritative for source-backed campaign material; Foundry remains authoritative for live actor state; Seeker provides the connected workspace between them.
 
-## 7.4.3 highlights
+## Seeker 8 highlights
 
-Existing `.tex` ancestries and archetypes can now be opened in the Homebrew Forge, edited as structured Seeker homebrew, and saved back into the same authoritative LaTeX source. New feats are placed into the appropriate level section (creating the level heading when necessary), heritages and existing feats update in place, and repeated saves do not create duplicate rules.
+- **Campaign OS workspace** at `/app/v8`: a focused Dashboard, Session workspace, universal entity inspector, Source Map/Studio, Homebrew workbench, Foundry sync view, and Diagnostics Center. Modules can be hidden per campaign without removing their data.
+- **Universal campaign objects and relationships**: Codex/source entities can expose backlinks, related objects, source ownership, Foundry representations, handouts, map markers, and version history from one inspector. Existing V7 entities and relationships are reused rather than duplicated.
+- **Protected revisions and restore**: V8 snapshots LaTeX before Source Studio writes and exposes object/source restore controls. Source restore snapshots the current file first, so a rollback is itself reversible.
+- **Source Map + Source Studio**: Seeker reads LaTeX part/chapter/section structure, includes, feat/action counts, and object ownership. Source files can be inspected and edited with a protected revision created before every save and a rebuild afterward.
+- **Prep → Run → Chronicle**: session prep, live table state, run notes, touched campaign objects, and Chronicle review are one workflow. Starting/ending sessions updates their real session state; finishing can publish a Chronicle update.
+- **Live Table controls inside V8**: linked Foundry characters expose live HP, hero points, focus, conditions, active scene/combat context, clocks, and prepared encounters. Resource writes use Seeker's acknowledged Foundry command path instead of optimistic local-only changes.
+- **Foundry ownership/conflicts**: managed documents retain Seeker/Foundry sync state and conflict resolution. Foundry remains authoritative for live actor snapshots while Seeker can explicitly accept either representation for managed-document conflicts.
+- **PF2e Homebrew authoring**: the complete source-linked ancestry/archetype Forge remains intact, adds stronger ancestry/archetype validation and level sorting, and continues to write additions into the correct authoritative LaTeX source location without duplicate entries.
+- **Campaign-connected handouts and maps**: create a handout from an inspected entity or place that entity on an existing map while retaining the relationship in Seeker.
+- **Global command palette/search integration**: GM search now also resolves Campaign OS workspaces and campaign entities, making the growing toolset reachable without expanding permanent navigation.
+- **Player Portal** at `/portal`: a purpose-built player surface for the current session, owned characters, discoveries, handouts, recent sessions, and player-safe campaign links.
+- **Diagnostics Center**: database integrity, LaTeX/include/parser warnings, possible duplicate entities, Foundry delivery state, continuity warnings, and storage health are available from one system check.
+- **Mobile stays focused**: the single bottom bar remains **Codex · Session · Search · Chronicle · More**. V8 is available from More without reintroducing a second mobile toolbar.
 
-On phone layouts Seeker now uses one bottom navigation bar only. The More sheet has an internal touch scroller and locks the background while open, so long GM/tool menus remain fully reachable. Static/PWA generation is **7403**; Foundry Bridge remains **1.10.1**.
+## Upgrade notes
 
-Seeker's Homebrew Forge can now author a **complete Pathfinder 2e ancestry or archetype as one editable object**. An ancestry includes its player-facing lore, HP/size/speed/reach/vision, languages, traits, ability boosts/flaws, heritages, and an arbitrary ancestry-feat progression. An archetype includes its overview/access rules, a structured dedication feat, and its complete feat progression. Every child feat keeps its action cost, traits, prerequisites, frequency, trigger, requirements, Special text, and rules text as separate PF2e fields. Work can remain unpublished as a draft at any stage.
+Seeker 8 uses additive SQLite tables (`v8_*`) and reuses the existing V7 entity, Foundry, session, Homebrew, Atlas, Chronicle, and handout data. The release archive intentionally **does not contain `.data/`**, so deploying the application files cannot overwrite the live campaign database, credentials, or Railway volume data.
 
-Publishing places the whole object in Homebrew as one **Ancestry** or **Archetype** card rather than scattering its child feats across unrelated cards. Opening that card gives a rules-reference view with lore first and heritages/dedication/feats grouped cleanly below it. Standalone ancestry or archetype feats still group beneath their ancestry/archetype when used independently.
+Static/PWA generation is **8000**. **Foundry Bridge remains 1.10.1** because V8 consumes the live state and managed-document protocol already provided by that bridge; there is no V8-only bridge protocol migration. If your world is on an older bridge, update it through Seeker's normal manifest URL.
 
-The same object can be sent to Foundry and LaTeX. Foundry Bridge **1.10.1** creates a real PF2e Ancestry item plus linked Heritage and ancestry-feat items; archetypes are imported as one managed Items folder containing their dedication and feat line. LaTeX export writes the complete ancestry/archetype into a selected existing part/chapter/section/subsection, updates its stable Seeker marker on re-export, and detects an existing same-name source object to avoid duplicate Homebrew representations.
-
-Source-authored Homebrew remains first-class: the three-dot menu beside any `.tex` file can classify the entire source as an ancestry, archetype, class, general rules source, actions source, item source, or other Homebrew without moving or rewriting it. Native `\feat` / `\action` commands are still parsed into structured PF2e fields and the source remains exactly where it already participates in PDF compilation.
-
-This release also retains the 7.3 line's handout-template browser improvements and Foundry resource-write fixes. Static/PWA generation is **7403**.
+The V8 release suite contains **220 passing automated tests** plus Python and browser/Foundry JavaScript syntax validation.
 
 ## Seeker 7.0.4 — Codex & Relay
 

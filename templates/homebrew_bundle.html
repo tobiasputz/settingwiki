@@ -6,7 +6,7 @@
   {% if access or prerequisites or frequency or trigger or requirements or special %}<div class="homebrew-rule-meta">{% if access %}<span><b>Access</b> {{ access }}</span>{% endif %}{% if prerequisites %}<span><b>Prerequisites</b> {{ prerequisites }}</span>{% endif %}{% if frequency %}<span><b>Frequency</b> {{ frequency }}</span>{% endif %}{% if trigger %}<span><b>Trigger</b> {{ trigger }}</span>{% endif %}{% if requirements %}<span><b>Requirements</b> {{ requirements }}</span>{% endif %}{% if special %}<span><b>Special</b> {{ special }}</span>{% endif %}</div>{% endif %}
 {%- endmacro %}
 {% block title %}{{ entry.title }} · Homebrew · {{ wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/homebrew.css?v=7403">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/homebrew.css?v=8000">{% endblock %}
 {% block body %}
 <main class="homebrew-shell homebrew-detail-shell" data-structured-bundle="{{ entry.id }}">
   <nav class="homebrew-detail-back"><a href="/homebrew">← Homebrew</a><span>/</span><span>{{ 'Ancestries' if document=='ancestry' else 'Archetypes' }}</span></nav>
@@ -38,4 +38,4 @@
   <div id="homebrewToast" class="v6-toast"></div>
 </main>
 {% endblock %}
-{% block scripts %}{% if gm_view %}<script src="/static/homebrew-bundle.js?v=7403"></script>{% endif %}{% endblock %}
+{% block scripts %}{% if gm_view %}<script src="/static/homebrew-bundle.js?v=8000"></script>{% endif %}{% endblock %}

@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}Seeker 8 · {{ campaign.name or wiki.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v8.css?v=8000">{% endblock %}
+{% block body %}
+<main class="v8-shell" data-v8-root>
+  <header class="v8-hero">
+    <div><span class="eyebrow">SEEKER 8 · CAMPAIGN OS</span><h1>{{ campaign.name or wiki.title }}</h1><p>One campaign, one source of truth. Source, Homebrew, Foundry, sessions, maps and handouts stay connected through the same campaign objects.</p></div>
+    <div class="v8-hero-stats"><div><small>ENTITIES</small><strong>{{ entity_count }}</strong></div><div><small>SESSION</small><strong>{{ session.title if session else 'None prepared' }}</strong></div><div><small>FOUNDRY</small><strong class="{{ 'ok' if foundry.received_at else 'muted' }}">{{ 'Live' if foundry.received_at else 'Waiting' }}</strong></div></div>
+  </header>
+
+  <nav class="v8-workspace-nav" aria-label="V8 workspaces">
+    <button class="active" data-v8-tab="dashboard">✦ <span>Dashboard</span></button>
+    <button data-v8-tab="session">◉ <span>Session</span></button>
+    <button data-v8-tab="entities">◇ <span>Entities</span></button>
+    <button data-v8-tab="sources">⌘ <span>Sources</span></button>
+    <button data-v8-tab="homebrew">◆ <span>Homebrew</span></button>
+    <button data-v8-tab="foundry">∞ <span>Foundry</span></button>
+    <button data-v8-tab="diagnostics">⚙ <span>Diagnostics</span></button>
+  </nav>
+
+  <section class="v8-pane active" data-v8-pane="dashboard">
+    <div class="v8-dashboard" id="v8Dashboard"><div class="v8-loading">Loading campaign workspace…</div></div>
+  </section>
+
+  <section class="v8-pane" data-v8-pane="session">
+    <header class="v8-section-head"><div><span class="eyebrow">PREP → RUN → CHRONICLE</span><h2>Session workspace</h2><p>Prepare once, run from the same surface, then turn what actually happened into the Chronicle.</p></div><a class="v8-button ghost" href="/gm/prep">Open detailed prep</a></header>
+    <div id="v8Session"></div>
+  </section>
+
+  <section class="v8-pane" data-v8-pane="entities">
+    <header class="v8-section-head"><div><span class="eyebrow">UNIVERSAL INSPECTOR</span><h2>Campaign objects</h2><p>Relationships, backlinks, source ownership, Foundry status, maps, handouts and history in one inspector.</p></div><div class="v8-search"><span>⌕</span><input id="v8EntitySearch" placeholder="Search the campaign graph"></div></header>
+    <div id="v8EntityGrid" class="v8-entity-grid"></div>
+  </section>
+
+  <section class="v8-pane" data-v8-pane="sources">
+    <header class="v8-section-head"><div><span class="eyebrow">SOURCE MAP</span><h2>LaTeX source graph</h2><p>See how the PDF is structured, which Seeker objects come from each source, and edit source with revision protection.</p></div><a class="v8-button ghost" href="/admin">Classic Studio</a></header>
+    <div id="v8SourceMap" class="v8-source-layout"></div>
+  </section>
+
+  <section class="v8-pane" data-v8-pane="homebrew">
+    <header class="v8-section-head"><div><span class="eyebrow">PF2E AUTHORING</span><h2>Homebrew workbench</h2><p>Author complete rules objects while keeping the LaTeX file authoritative. Existing source-backed ancestries and archetypes remain editable in Forge.</p></div><a class="v8-button" href="/gm/foundry-workshop">Open Forge</a></header>
+    <div class="v8-homebrew-grid">
+      <a href="/gm/foundry-workshop?new=ancestry"><span>✦</span><h3>Ancestry</h3><p>Chassis → heritages → feats by 1 / 5 / 9 / 13 / 17.</p></a>
+      <a href="/gm/foundry-workshop?new=archetype"><span>⌘</span><h3>Archetype</h3><p>Overview → dedication → level-grouped archetype feats.</p></a>
+      <a href="/homebrew"><span>◆</span><h3>Homebrew Library</h3><p>Browse ancestries, heritages, archetypes, general/skill/class feats and other rules.</p></a>
+      <a href="/admin"><span>◇</span><h3>Source ownership</h3><p>Classify complete .tex files and preserve their exact PDF placement.</p></a>
+    </div>
+    <section class="v8-panel"><header><div><span class="eyebrow">AUTHORING SAFETY</span><h3>Source-linked by design</h3></div></header><p>Forge changes update the original source block, while V8 Source Studio keeps protected revisions. If Seeker cannot infer a safe source location, it leaves the source untouched instead of silently guessing.</p></section>
+  </section>
+
+  <section class="v8-pane" data-v8-pane="foundry">
+    <header class="v8-section-head"><div><span class="eyebrow">BIDIRECTIONAL SYNC</span><h2>Foundry state</h2><p>Live actor state stays in Foundry; Seeker tracks document ownership and exposes conflicts instead of duplicating items.</p></div><a class="v8-button ghost" href="/gm/foundry-workshop">Foundry Workshop</a></header>
+    <div id="v8Foundry"></div>
+  </section>
+
+  <section class="v8-pane" data-v8-pane="diagnostics">
+    <header class="v8-section-head"><div><span class="eyebrow">SYSTEM CHECK</span><h2>Diagnostics Center</h2><p>Bridge state, parser warnings, duplicate entities, continuity and Railway storage in one place.</p></div><button class="v8-button" id="v8RunDiagnostics">Run system check</button></header>
+    <div id="v8Diagnostics"></div>
+    <section class="v8-panel v8-module-panel"><header><div><span class="eyebrow">WORKSPACE MODULES</span><h3>Keep Seeker focused</h3></div><button class="v8-button small" id="v8SaveModules">Save layout</button></header><div id="v8Modules"></div></section>
+  </section>
+</main>
+
+<aside class="v8-inspector" id="v8Inspector" aria-hidden="true"><header><div><small>CAMPAIGN OBJECT</small><strong id="v8InspectorTitle">Inspector</strong></div><button type="button" data-v8-close-inspector>×</button></header><div id="v8InspectorBody"></div></aside>
+<div class="v8-modal" id="v8SourceEditor" aria-hidden="true"><div class="v8-modal-card"><header><div><small>SOURCE STUDIO</small><strong id="v8SourceTitle">LaTeX source</strong></div><button type="button" data-v8-source-close>×</button></header><div class="v8-source-editor-layout"><nav id="v8SourceOutline"></nav><textarea id="v8SourceText" spellcheck="false"></textarea></div><footer><span id="v8SourceStatus">Protected revisions are created before every save.</span><button class="v8-button ghost" data-v8-source-close>Cancel</button><button class="v8-button" id="v8SourceSave">Save + rebuild</button></footer></div></div>
+<div class="v8-toast" id="v8Toast"></div>
+{% endblock %}
+{% block scripts %}<script src="/static/v8.js?v=8000"></script>{% endblock %}

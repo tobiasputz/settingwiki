@@ -1,3 +1,24 @@
+# Changelog
+
+## 8.0.0 — Campaign OS
+
+- Added the **Seeker 8 Campaign OS** workspace at `/app/v8`, unifying Dashboard, Session, campaign objects, Sources, Homebrew, Foundry, and Diagnostics without removing the established specialist tools.
+- Added an additive V8 campaign-object layer for cross-representation links, protected revisions, module preferences, source mappings, session workflow state, entity-linked handouts, and session touches. Existing V7 entity IDs/relationships remain canonical and are reused rather than cloned.
+- Added a **universal entity inspector** with representations, relationships/backlinks, source ownership, maps, handouts, object history, Foundry sync status, and explicit conflict resolution.
+- Added **Source Map + Source Studio**. Seeker maps LaTeX structural headings and includes, associates source-backed entities with files, shows feat/action counts, creates a protected source revision before each write, rebuilds after save, and supports reversible source restore.
+- Added **Prep → Run → Chronicle** workflow state. V8 can start the real campaign session, expose live run/table information, record opened campaign objects, end the session, and prepare/publish the resulting Chronicle update.
+- Integrated the live Table surface into V8 with Foundry actor HP/hero/focus controls, conditions, scene/combat context, clocks, and V7 encounters. Resource edits use the acknowledged Foundry command path and refresh authoritative state afterward.
+- Added a dedicated **Player Portal** at `/portal` for current-session information, player-owned characters, discoveries, handouts, recent sessions, and player-safe campaign navigation.
+- Extended global GM search/command palette results with Campaign OS workspaces and campaign entities, reducing dependence on permanent navigation as Seeker grows.
+- Connected campaign entities to **Handouts** and **Atlas**: create a handout from an entity or place it on an existing map and retain the object relationship in the inspector.
+- Extended Homebrew Forge validation for complete ancestries/archetypes and added level-sorting controls while preserving the 7.4 source-linked edit contract: source-backed additions update the correct LaTeX block and remain de-duplicated in Homebrew/PDF output.
+- Added a **Diagnostics Center** covering DB foreign-key integrity, LaTeX/include/parser notices, possible duplicate objects, Foundry command/sync state, campaign-continuity warnings, and storage health.
+- Added per-campaign workspace module visibility. Dashboard and Diagnostics remain core so a campaign cannot hide every recovery/navigation surface.
+- Preserved the one-bar mobile information architecture: **Codex · Session · Search · Chronicle · More**. Seeker 8 is reachable from More and the player portal is exposed to players without adding another mobile toolbar.
+- V8 database changes are additive and release archives exclude `.data/`, protecting existing campaign DB/secrets during deployment.
+- Static/PWA cache generation is **8000**. Foundry Bridge remains **1.10.1**; V8 reuses its existing live-state and managed-document protocol.
+- Release verification: **220 automated tests pass**; Python modules and V8/global-search/Homebrew JavaScript pass syntax validation.
+
 ## 7.4.3 — Source-linked Forge editing & mobile navigation polish
 
 - Existing source-backed **ancestries and archetypes can now be opened directly in the Homebrew Forge**. Seeker hydrates the creator from the classified `.tex` source and keeps a link to that source rather than creating a detached duplicate.

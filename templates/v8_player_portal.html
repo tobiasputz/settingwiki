@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Campaign · {{ campaign.name or wiki.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v8.css?v=8000">{% endblock %}
+{% block body %}
+<main class="v8-player-portal">
+  <header class="v8-player-hero"><span class="eyebrow">{{ campaign.name or wiki.title }}</span><h1>Your campaign</h1><p>What your character knows, what the party has discovered, and what is happening next.</p></header>
+  {% if session %}<a class="v8-player-now" href="/session"><small>LIVE SESSION</small><strong>{{ session.title }}</strong><span>Open session mode →</span></a>{% endif %}
+  <section class="v8-player-grid">
+    <article class="v8-panel"><header><div><span class="eyebrow">YOUR CHARACTER{% if characters|length != 1 %}S{% endif %}</span><h2>Party</h2></div><a href="/characters">All →</a></header>{% for c in characters[:4] %}<a class="v8-player-row" href="/characters/{{ c.id }}"><strong>{{ c.name }}</strong><small>{{ c.ancestry }}{% if c.class_name %} · {{ c.class_name }}{% endif %}</small></a>{% else %}<p>No character linked yet.</p>{% endfor %}</article>
+    <article class="v8-panel"><header><div><span class="eyebrow">NEWLY KNOWN</span><h2>Discoveries</h2></div><a href="/updates">All →</a></header>{% for u in updates[:6] %}<div class="v8-player-row"><strong>{{ u.title }}</strong><small>{{ u.body[:100] }}</small></div>{% else %}<p>No recent discoveries.</p>{% endfor %}</article>
+    <article class="v8-panel"><header><div><span class="eyebrow">HANDOUTS</span><h2>Letters & relics</h2></div><a href="/handouts">All →</a></header>{% for h in handouts[:5] %}<a class="v8-player-row" href="/handout/{{ h.slug }}"><strong>{{ h.title }}</strong><small>{{ h.kind|title }}</small></a>{% else %}<p>No revealed handouts.</p>{% endfor %}</article>
+    <article class="v8-panel"><header><div><span class="eyebrow">CHRONICLE</span><h2>Recent sessions</h2></div><a href="/campaign">Open →</a></header>{% for s in sessions[-5:]|reverse %}<a class="v8-player-row" href="/campaign"><strong>{{ s.title }}</strong><small>{{ s.session_date }} · {{ s.status|title }}</small></a>{% else %}<p>No recorded sessions yet.</p>{% endfor %}</article>
+  </section>
+  <nav class="v8-player-actions"><a href="/">⌂ Codex</a><a href="/#atlas">⌖ Atlas</a><a href="/campaign">◇ Chronicle</a><a href="/homebrew">◆ Homebrew</a></nav>
+</main>
+{% endblock %}
