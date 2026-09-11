@@ -1,4 +1,4 @@
-# Seeker 7.2.0 — Compendium
+# Seeker 7.3.1 — Homebrew & Foundry reliability
 
 
 Compendium separates campaign lore from custom rules. The Monster Codex now uses a clean Seeker-native dossier with GM-controlled section disclosure, while custom feats, actions/activities, and items live in a dedicated Homebrew Library grouped by ancestry, archetype, class, category, and level. The Workshop can publish those entries to Foundry's world Items directory or give them to actors, and can export the same entry as native Seeker LaTeX. Studio can now create folders and safely move/rename project files and folders, rewriting ordinary project-local `\input`, `\include`, and `\subfile` references.
@@ -7,7 +7,7 @@ Compendium separates campaign lore from custom rules. The Monster Codex now uses
 
 The most important reliability change is **live Foundry reconciliation**. HP, temporary HP, Hero Points, Focus and item quantities update optimistically in Seeker, follow the exact queued Foundry command through acknowledgement, and reconcile against the confirmed value without a full-page reload. The Foundry ACK also projects confirmed resource/quantity changes into Seeker's cached character snapshot immediately, closing the race where Foundry had already changed but Seeker still showed stale values until another refresh. Multiple rapid taps are tracked independently and failed writes roll back visibly.
 
-Tempered also tightens PF2e Workshop validation before push, simplifies Token Forge through progressive disclosure, improves Encounter Builder budget legibility, makes Knowledge fidelity/certainty and effective permissions easier to scan, strengthens Foundry delivery-state presentation, improves Codex browsing and AoN batch confidence, makes relationship/front/change history easier to read, and reduces unnecessary work in hidden/reduced-motion maps. Compendium extends the Foundry protocol for first-class Action documents; Foundry Bridge **1.8.0** is required for the new world-Items/action workflow. Static/PWA cache generation is **7200**.
+Tempered also tightens PF2e Workshop validation before push, simplifies Token Forge through progressive disclosure, improves Encounter Builder budget legibility, makes Knowledge fidelity/certainty and effective permissions easier to scan, strengthens Foundry delivery-state presentation, improves Codex browsing and AoN batch confidence, makes relationship/front/change history easier to read, and reduces unnecessary work in hidden/reduced-motion maps. Compendium extends the Foundry protocol for first-class Action documents; Foundry Bridge **1.9.0** adds nonce-based command delivery, ancestry bundle import, and verified absolute resource writes. Static/PWA cache generation is **7301**.
 
 For the current Railway deployment the canonical public origin remains `https://seeker.up.railway.app`, with the Foundry module manifest at `https://seeker.up.railway.app/foundry/seeker-bridge/module.json`.
 

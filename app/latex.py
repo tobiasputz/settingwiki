@@ -53,6 +53,7 @@ class WikiPage:
     excerpt: str
     order: int
     heading_sources: list[dict] = field(default_factory=list)
+    pf2e_rules: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -274,6 +275,64 @@ def _read_braced(text: str, pos: int) -> tuple[str, int] | None:
                     return text[start:i], i + 1
         i += 1
     return None
+
+
+def _extract_balanced_commands(raw: str, name: str, nargs: int) -> list[list[str]]:
+    """Return balanced command arguments without changing the source text."""
+    pattern = re.compile(r"\\" + re.escape(name) + r"\b")
+    rows: list[list[str]] = []
+    cursor = 0
+    while True:
+        match = pattern.search(raw, cursor)
+        if not match:
+            break
+        pos = match.end()
+        args: list[str] = []
+        for _ in range(nargs):
+            parsed = _read_braced(raw, pos)
+            if not parsed:
+                args = []
+                break
+            value, pos = parsed
+            args.append(value)
+        if args:
+            rows.append(args)
+            cursor = pos
+        else:
+            cursor = match.end()
+    return rows
+
+
+def extract_pf2e_rules(raw: str, settings: Settings, analysis: dict | None = None) -> list[dict]:
+    """Extract structured PF2e rules from the existing LaTeX without rewriting it.
+
+    The web library and Foundry exporter consume this metadata, while PDF output
+    continues to compile the original source unchanged.
+    """
+    rows: list[dict] = []
+    for args in _extract_balanced_commands(raw, "feat", 4):
+        title, level_raw, traits_raw, body_raw = args
+        try:
+            level = int(re.search(r"-?\d+", clean_inline_text(level_raw)).group(0))
+        except (AttributeError, TypeError, ValueError):
+            level = 0
+        body_html, body_plain = latex_fragment_to_html(body_raw, settings, page_kind="feat", analysis=analysis, _allow_panels=False)
+        rows.append({
+            "kind": "feat", "title": clean_inline_text(title), "level": level,
+            "traits": [clean_inline_text(x) for x in traits_raw.split(",") if clean_inline_text(x)],
+            "html": body_html, "plain_text": body_plain.strip(),
+        })
+    for args in _extract_balanced_commands(raw, "action", 4):
+        title, action_raw, traits_raw, body_raw = args
+        action_text = clean_inline_text(action_raw).casefold()
+        action_cost = "reaction" if "reaction" in action_text else "free" if "free" in action_text else next((x for x in ("1", "2", "3") if x in action_text), "")
+        body_html, body_plain = latex_fragment_to_html(body_raw, settings, page_kind="action", analysis=analysis, _allow_panels=False)
+        rows.append({
+            "kind": "action", "title": clean_inline_text(title), "level": 0, "action_cost": action_cost,
+            "traits": [clean_inline_text(x) for x in traits_raw.split(",") if clean_inline_text(x)],
+            "html": body_html, "plain_text": body_plain.strip(),
+        })
+    return rows
 
 
 def _replace_balanced_command(raw: str, name: str, nargs: int, replacer) -> str:
@@ -587,6 +646,7 @@ def build_wiki(settings: Settings) -> dict:
             slug=unique_slug(current_title), title=current_title, chapter=chapter,
             level=current_level, html=body_html, plain_text=plain, source_file=current_source,
             source_line=current_line, excerpt=excerpt, order=order, heading_sources=heading_sources,
+            pf2e_rules=extract_pf2e_rules(raw, settings, analysis),
         ))
         order += 1
         buffer = []
@@ -689,6 +749,43 @@ def build_wiki(settings: Settings) -> dict:
         item["presentation"]["navigation_art_is_auto"] = False
         page_dicts.append(item)
 
+    # A Homebrew classification belongs to the LaTeX content, not to a folder.
+    # Mark one page (for example the Jotunari ancestry introduction) in Codex
+    # Studio and subsequent sections from the same source/chapter inherit that
+    # owner until another explicitly classified page starts. This keeps a normal
+    # jotunari.tex structure intact and lets level headings/feat sections follow it.
+    active_homebrew: dict[tuple[str, str], dict] = {}
+    for item in sorted(page_dicts, key=lambda x: int(x.get("order") or 0)):
+        presentation = item.get("presentation") or {}
+        explicit_kind = str(presentation.get("homebrew_kind") or "codex").lower()
+        key = (str(item.get("source_file") or ""), str(item.get("chapter") or ""))
+        if explicit_kind != "codex":
+            active_homebrew[key] = {"slug": item.get("slug"), "title": item.get("title"), "kind": explicit_kind}
+        owner = active_homebrew.get(key)
+        if owner:
+            item["homebrew_kind"] = owner["kind"]
+            item["homebrew_owner_slug"] = owner["slug"]
+            item["homebrew_owner_title"] = owner["title"]
+        elif str(item.get("source_file") or "").replace("\\", "/").lower().split("/", 1)[0] in {"homebrew", "home-brew", "custom"}:
+            # Preserve the old folder convention as a migration fallback. New
+            # projects do not need to move files: Codex Studio metadata wins.
+            legacy_parts = [p for p in str(item.get("source_file") or "").replace("\\", "/").lower().split("/") if p]
+            legacy_bucket = legacy_parts[1] if len(legacy_parts) > 1 else ""
+            legacy_kind = {
+                "ancestry": "ancestry", "ancestries": "ancestry",
+                "archetype": "archetype", "archetypes": "archetype",
+                "class": "class", "classes": "class",
+                "action": "actions", "actions": "actions", "activities": "actions",
+                "item": "items", "items": "items", "equipment": "items",
+            }.get(legacy_bucket, "other")
+            item["homebrew_kind"] = legacy_kind
+            item["homebrew_owner_slug"] = item.get("slug")
+            item["homebrew_owner_title"] = item.get("title")
+        else:
+            item["homebrew_kind"] = "codex"
+            item["homebrew_owner_slug"] = ""
+            item["homebrew_owner_title"] = ""
+
     # Turn ordinary mentions of unique codex entry names into links. This is
     # intentionally conservative: generic headings and ambiguous duplicate names
     # are ignored, and only the first mention of each target is linked per article.
@@ -763,7 +860,7 @@ def build_wiki(settings: Settings) -> dict:
         bucket["presentation"]["navigation_art_is_auto"] = bool(auto_navigation_art and auto_cover and not bucket["presentation"].get("toc_image_url"))
 
     payload = {
-        "renderer_version": 6100,
+        "renderer_version": 7301,
         "title": get_setting(settings, "site_title", "") or analysis["title"],
         "tagline": get_setting(settings, "tagline", "Follow the people, places, histories, and secrets of the world."),
         "author": analysis["author"],

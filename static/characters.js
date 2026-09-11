@@ -48,6 +48,12 @@ async function queueFoundryAction(body,button){
   }catch(err){foundryLive?.rollback(op);toast(err.message||'Could not reach Foundry.',true)}
   finally{if(button){delete button.dataset.busy;button.removeAttribute('aria-busy')}}
 }
+foundryRoot?.addEventListener('submit',e=>{
+  const form=e.target.closest('[data-foundry-set-form]');if(!form)return;e.preventDefault();
+  const input=form.querySelector('input[type="number"]'),button=form.querySelector('button[type="submit"]');
+  const value=Number.parseInt(input?.value||'',10);if(!Number.isFinite(value))return toast('Enter a whole-number resource value.',true);
+  queueFoundryAction({action:'set_resource',resource:form.dataset.foundrySetForm,value},button);
+});
 foundryRoot?.addEventListener('click',e=>{
   const resource=e.target.closest('[data-foundry-resource]');
   if(resource){

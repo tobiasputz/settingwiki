@@ -43,6 +43,21 @@ def source_homebrew_bucket(path: str | None) -> tuple[str, str]:
     return section, group.replace("-", " ").replace("_", " ").strip().title() or "Source files"
 
 
+
+def page_homebrew_kind(page: dict | None) -> str:
+    page = page or {}
+    kind = str(page.get("homebrew_kind") or (page.get("presentation") or {}).get("homebrew_kind") or "codex").strip().lower()
+    if kind != "codex":
+        return kind if kind in HOME_BREW_SECTIONS else "other"
+    if is_homebrew_source_path(page.get("source_file")):
+        section, _ = source_homebrew_bucket(page.get("source_file"))
+        return section
+    return "codex"
+
+
+def is_homebrew_page(page: dict | None) -> bool:
+    return page_homebrew_kind(page) != "codex"
+
 def _traits(payload: dict) -> list[str]:
     return [x.strip() for x in str(payload.get("traits") or "").split(",") if x.strip()]
 

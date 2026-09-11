@@ -88,7 +88,7 @@ def test_v61_public_foundry_manifest_and_install_zip(tmp_path: Path, monkeypatch
     client=TestClient(main.app)
     manifest=client.get('/foundry/seeker-bridge/module.json')
     assert manifest.status_code==200
-    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.8.0'
+    data=manifest.json();assert data['id']=='seeker-bridge' and data['version']=='1.9.0'
     assert data['manifest'].endswith('/foundry/seeker-bridge/module.json')
     assert data['download'].endswith('/foundry/seeker-bridge/seeker-bridge.zip')
     package=client.get('/foundry/seeker-bridge/seeker-bridge.zip')
@@ -168,7 +168,7 @@ def test_v61_scroll_contract_and_foundry_frontend_assets():
     assert 'data-foundry-manifest' in integrations and 'Automatically announce confirmed session dates' in integrations
     assert '/api/v61/characters/' in chars and 'data-foundry-tab' in chars
     assert 'data-notification-pref="spotlight"' not in base
-    assert 'seeker-static-v7200' in sw
+    assert 'seeker-static-v7301' in sw
 
 
 def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
@@ -192,7 +192,7 @@ def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
 def test_v61_foundry_bridge_has_connection_diagnostics_and_https_repair():
     root=Path(__file__).resolve().parents[1]
     bridge=(root/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.8.0"' in bridge
+    assert 'const BRIDGE_VERSION = "1.9.0"' in bridge
     assert 'function normalizedEndpoint' in bridge
     assert 'u.protocol === "http:" && !local' in bridge
     assert 'processCommands(endpoint, body?.commands || [])' in bridge
@@ -228,12 +228,24 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     assert safe.status_code==200 and safe.json()['command']['command_type']=='adjust_resource'
     pending=claim_foundry_commands(s,cid,cfg['foundry_bridge_token'])
     assert pending and pending[0]['payload']['resource']=='hero_points'
+    assert pending[0]['payload']['command_nonce']
     assert complete_foundry_commands(s,cid,cfg['foundry_bridge_token'],[{'id':pending[0]['id'],'status':'done','result':{'message':'ok'}}])['ok']
+
+    # Large HP adjustments and absolute edits are intentional: high-level/homebrew
+    # actors can have hundreds of HP and should not require dozens of clicks.
+    big=player.post(f'/api/v61/characters/{char["id"]}/foundry/action',json={'action':'adjust_resource','resource':'hp','delta':-100})
+    direct=player.post(f'/api/v61/characters/{char["id"]}/foundry/action',json={'action':'set_resource','resource':'hp','value':347})
+    assert big.status_code==200 and direct.status_code==200
+    more=claim_foundry_commands(s,cid,cfg['foundry_bridge_token'])
+    payloads=[c['payload'] for c in more if c['command_type']=='adjust_resource']
+    assert any(p.get('mode')=='adjust' and p.get('delta')==-100 for p in payloads)
+    assert any(p.get('mode')=='set' and p.get('value')==347 for p in payloads)
+    assert len({p.get('command_nonce') for p in payloads})==len(payloads)
 
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200
     assert 'Homebrew Forge' in workshop.text and 'foundryWorkshopForm' in workshop.text
-    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=7200' in workshop.text
+    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=7301' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})

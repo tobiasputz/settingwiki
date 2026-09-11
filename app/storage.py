@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS codex_presentation (
     article_layout TEXT NOT NULL DEFAULT 'standard',
     visibility TEXT NOT NULL DEFAULT 'public',
     featured INTEGER NOT NULL DEFAULT 0,
+    homebrew_kind TEXT NOT NULL DEFAULT 'codex',
     updated_at REAL NOT NULL,
     PRIMARY KEY(target_type, target_key)
 );
@@ -128,6 +129,9 @@ def init_db(settings: Settings) -> None:
             conn.execute("ALTER TABLE player_invites ADD COLUMN max_devices INTEGER")
         if invite_columns and "role" not in invite_columns:
             conn.execute("ALTER TABLE player_invites ADD COLUMN role TEXT NOT NULL DEFAULT 'player'")
+        codex_columns = {row[1] for row in conn.execute("PRAGMA table_info(codex_presentation)").fetchall()}
+        if codex_columns and "homebrew_kind" not in codex_columns:
+            conn.execute("ALTER TABLE codex_presentation ADD COLUMN homebrew_kind TEXT NOT NULL DEFAULT 'codex'")
 
 
 def get_setting(settings: Settings, key: str, default: str = "") -> str:
@@ -417,6 +421,9 @@ def _normalize_codex_presentation(payload: dict | None = None) -> dict:
     article_layout = str(payload.get("article_layout") or "standard").lower()
     if article_layout not in {"standard", "wide", "cinematic"}:
         article_layout = "standard"
+    homebrew_kind = str(payload.get("homebrew_kind") or "codex").strip().lower()
+    if homebrew_kind not in {"codex", "ancestry", "archetype", "class", "general", "actions", "items", "other"}:
+        homebrew_kind = "codex"
     return {
         "toc_image": str(payload.get("toc_image") or "").strip(),
         "hero_image": str(payload.get("hero_image") or "").strip(),
@@ -428,6 +435,7 @@ def _normalize_codex_presentation(payload: dict | None = None) -> dict:
         "article_layout": article_layout,
         "visibility": visibility,
         "featured": bool(payload.get("featured", False)),
+        "homebrew_kind": homebrew_kind,
     }
 
 
@@ -466,19 +474,19 @@ def save_codex_presentation(settings: Settings, target_type: str, target_key: st
             """
             INSERT INTO codex_presentation(
                 target_type,target_key,toc_image,hero_image,background_image,background_opacity,
-                background_x,background_y,hero_style,article_layout,visibility,featured,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                background_x,background_y,hero_style,article_layout,visibility,featured,homebrew_kind,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(target_type,target_key) DO UPDATE SET
                 toc_image=excluded.toc_image, hero_image=excluded.hero_image,
                 background_image=excluded.background_image, background_opacity=excluded.background_opacity,
                 background_x=excluded.background_x, background_y=excluded.background_y,
                 hero_style=excluded.hero_style, article_layout=excluded.article_layout,
-                visibility=excluded.visibility, featured=excluded.featured, updated_at=excluded.updated_at
+                visibility=excluded.visibility, featured=excluded.featured, homebrew_kind=excluded.homebrew_kind, updated_at=excluded.updated_at
             """,
             (
                 target_type, target_key, data["toc_image"], data["hero_image"], data["background_image"],
                 data["background_opacity"], data["background_x"], data["background_y"], data["hero_style"],
-                data["article_layout"], data["visibility"], int(data["featured"]), now,
+                data["article_layout"], data["visibility"], int(data["featured"]), data["homebrew_kind"], now,
             ),
         )
     return data

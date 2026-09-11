@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.8.0";
+const BRIDGE_VERSION = "1.9.0";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 
 function seekerSlugify(value) {
@@ -237,9 +237,18 @@ function processedCommandIds() {
     return new Set(Array.isArray(raw) ? raw.map(x => String(x)) : []);
   } catch { return new Set(); }
 }
-async function rememberProcessedCommandId(id) {
+function commandDedupeKey(command, endpoint = "") {
+  const nonce = String(command?.payload?.command_nonce || "").trim();
+  if (nonce) return `nonce:${nonce}`;
+  // Legacy commands predate nonces. Scope their numeric IDs to this endpoint so
+  // switching/restoring a Seeker instance cannot collide with another queue.
+  let origin = "seeker";
+  try { origin = new URL(normalizedEndpoint(endpoint)).origin + new URL(normalizedEndpoint(endpoint)).pathname; } catch (_) {}
+  return `legacy:${origin}:${String(command?.id || "")}`;
+}
+async function rememberProcessedCommandId(key) {
   const out = Array.from(processedCommandIds());
-  const value = String(id || "");
+  const value = String(key || "");
   if (!value || out.includes(value)) return;
   out.push(value);
   while (out.length > 250) out.shift();
@@ -337,7 +346,7 @@ function buildPreparedItem(payload, endpoint = "") {
   const data = payload?.data || {};
   const kind = String(payload?.prepared_kind || "item").toLowerCase();
   const type = kind === "feat" ? "feat" : kind === "action" ? "action" : kind === "homebrew" ? (String(data.homebrew_document || data.item_type || "equipment") || "equipment") : (String(data.item_type || "equipment") || "equipment");
-  const description = htmlDescription(payload?.summary, data.description) + preparedDetailsHtml(payload);
+  const description = (String(data.description_html || "").trim() || htmlDescription(payload?.summary, data.description)) + preparedDetailsHtml(payload);
   const traitChoices = type === "weapon" ? globalThis.CONFIG?.PF2E?.weaponTraits
     : type === "feat" ? globalThis.CONFIG?.PF2E?.featTraits
     : type === "action" ? globalThis.CONFIG?.PF2E?.actionTraits
@@ -1103,6 +1112,48 @@ async function importCreatureBundle(payload, endpoint = "") {
   const failed = items.filter(x => x.status === "failed").length;
   return { message: `${done} creature${done === 1 ? "" : "s"} prepared in Foundry folder “${folderName}”${failed ? `; ${failed} failed` : ""}.`, folder_id: folder?.id || "", items };
 }
+async function importAncestryBundle(payload, endpoint = "") {
+  const title = String(payload?.title || "Custom Ancestry").trim() || "Custom Ancestry";
+  const folderName = String(payload?.folder_name || `Seeker · ${title}`).slice(0, 180);
+  let folder = (game.folders?.contents || []).find(f => f.type === "Item" && f.name === folderName && f.flags?.seeker?.ancestryBundle);
+  if (!folder) folder = await Folder.create({ name: folderName, type: "Item", flags: { seeker: { ancestryBundle: true, ownerSlug: payload?.owner_slug || "" } } });
+
+  const baseFlag = { seeker: { managed: true, ancestryBundle: true, ownerSlug: payload?.owner_slug || "", sourceFile: payload?.source_file || "" } };
+  const ancestrySource = {
+    name: title, type: "ancestry", folder: folder?.id || null, img: "icons/svg/book.svg", flags: baseFlag,
+    system: {
+      description: { value: String(payload?.description_html || "").trim() || htmlDescription("", payload?.description || "") }, items: {},
+      traits: { value: [], rarity: "common" }, additionalLanguages: { count: 0, value: [], custom: "" },
+      boosts: {}, flaws: {}, hp: 8, languages: { value: ["common"], custom: "" },
+      speed: 25, size: "med", hands: 2, reach: 5, vision: "normal"
+    }
+  };
+  let ancestry = (game.items?.contents || []).find(i => i.type === "ancestry" && i.folder?.id === folder?.id && i.flags?.seeker?.ownerSlug === payload?.owner_slug);
+  if (ancestry) await ancestry.update({ name: ancestrySource.name, system: ancestrySource.system, flags: ancestrySource.flags });
+  else ancestry = await Item.create(ancestrySource);
+
+  const reports = [];
+  for (const rule of (Array.isArray(payload?.rules) ? payload.rules : []).slice(0, 250)) {
+    try {
+      const kind = String(rule?.kind || "feat").toLowerCase();
+      if (!['feat','action'].includes(kind)) continue;
+      const source = buildPreparedItem({
+        title: rule?.title || "Untitled", prepared_kind: kind, summary: "",
+        data: { level: Math.max(1, numericOr(rule?.level, 1)), traits: (rule?.traits || []).join(", "), description_html: rule?.description_html || "", description: rule?.description || "", action_cost: rule?.action_cost || "", feat_category: "ancestry" }
+      }, endpoint);
+      source.folder = folder?.id || null;
+      source.flags = { ...(source.flags || {}), seeker: { ...((source.flags || {}).seeker || {}), ancestryBundle: true, ownerSlug: payload?.owner_slug || "", sourcePageSlug: rule?.source_page_slug || "" } };
+      const match = (game.items?.contents || []).find(i => i.type === source.type && i.folder?.id === folder?.id && i.name === source.name && i.flags?.seeker?.ownerSlug === payload?.owner_slug);
+      const doc = match ? (await match.update({ name: source.name, system: source.system, flags: source.flags }), match) : await Item.create(source);
+      reports.push({ status: "done", name: doc?.name || source.name, uuid: doc?.uuid || "", type: source.type });
+    } catch (error) {
+      reports.push({ status: "failed", name: rule?.title || "Rule", message: error?.message || String(error) });
+    }
+  }
+  const failed = reports.filter(x => x.status === "failed").length;
+  return { message: `${title} imported with ${reports.length - failed} linked rule${reports.length - failed === 1 ? "" : "s"}${failed ? `; ${failed} failed` : ""}.`, folder_id: folder?.id || "", ancestry_uuid: ancestry?.uuid || "", items: reports };
+}
+
 async function resolveCommandActor(command, payload = {}) {
   const actorId = String(command?.actor_id || "").trim();
   if (actorId) {
@@ -1133,15 +1184,18 @@ async function runFoundryCommand(command, endpoint = "") {
   }
   if (type === "adjust_resource") {
     const resource = String(payload.resource || "").toLowerCase();
+    const mode = String(payload.mode || "adjust").toLowerCase();
     const delta = numericOr(payload.delta, 0);
-    if (!delta) throw new Error("Delta cannot be zero.");
-    let path = ""; let current = 0; let max = 999;
-    if (resource === "hp") { path = "system.attributes.hp.value"; current = numericOr(actor.system?.attributes?.hp?.value, 0); max = Math.max(current, numericOr(actor.system?.attributes?.hp?.max, current)); }
-    else if (resource === "temp_hp") { path = "system.attributes.hp.temp"; current = numericOr(actor.system?.attributes?.hp?.temp, 0); max = 999; }
+    const requested = numericOr(payload.value, NaN);
+    if (mode !== "set" && !delta) throw new Error("Delta cannot be zero.");
+    if (mode === "set" && !Number.isFinite(requested)) throw new Error("A numeric resource value is required.");
+    let path = ""; let current = 0; let max = 999999;
+    if (resource === "hp") { path = "system.attributes.hp.value"; current = numericOr(actor.system?.attributes?.hp?.value, 0); max = Math.max(0, numericOr(actor.system?.attributes?.hp?.max, current)); }
+    else if (resource === "temp_hp") { path = "system.attributes.hp.temp"; current = numericOr(actor.system?.attributes?.hp?.temp, 0); max = 999999; }
     else if (resource === "hero_points") { path = "system.resources.heroPoints.value"; current = numericOr(actor.system?.resources?.heroPoints?.value, 0); max = Math.max(0, numericOr(actor.system?.resources?.heroPoints?.max, 3)); }
     else if (resource === "focus") { path = "system.resources.focus.value"; current = numericOr(actor.system?.resources?.focus?.value, 0); max = Math.max(0, numericOr(actor.system?.resources?.focus?.max, 3)); }
     else throw new Error("Unsupported resource.");
-    const next = clamp(current + delta, 0, max);
+    const next = clamp(mode === "set" ? requested : current + delta, 0, max);
     // Use an absolute source update for character resources. PF2e explicitly
     // validates/clamps these fields in CreaturePF2e._preUpdate; using the token
     // bar helper here would treat negative HP deltas as damage and can consume
@@ -1154,7 +1208,7 @@ async function runFoundryCommand(command, endpoint = "") {
     if (!Number.isFinite(readBack) || readBack !== next) {
       throw new Error(`Foundry did not retain the requested ${resource.replace("_", " ")} value (wanted ${next}, read back ${Number.isFinite(readBack) ? readBack : "unknown"}).`);
     }
-    return { message: `${actor.name}: ${resource.replace("_", " ")} ${delta > 0 ? "increased" : "decreased"} to ${next}.`, before: current, after: next, actor_uuid: actor.uuid || "" };
+    return { message: `${actor.name}: ${resource.replace("_", " ")} ${mode === "set" ? "set" : (delta > 0 ? "increased" : "decreased")} to ${next}.`, before: current, after: next, actor_uuid: actor.uuid || "" };
   }
   if (type === "adjust_item_quantity") {
     const item = actor.items?.get(String(payload.item_id || ""));
@@ -1169,7 +1223,7 @@ async function runFoundryCommand(command, endpoint = "") {
     return { message: `${item.name}: quantity updated to ${next}.`, before: current, after: next, uuid: item.uuid || "" };
   }
   if (type === "grant_prepared_content") {
-    const commandId = String(command?.id || "");
+    const commandId = commandDedupeKey(command, endpoint);
     const already = (actor.items?.contents || []).find(i => String(i?.flags?.seeker?.commandId || "") === commandId);
     if (already) return { message: `${already.name} was already added to ${actor.name}.`, uuid: already.uuid || "", document_type: "Item", entity_id: payload.entity_id ?? null, idempotent: true };
     const source = buildPreparedItem(payload, endpoint);
@@ -1199,6 +1253,9 @@ async function runFoundryCommand(command, endpoint = "") {
     }
     const created = await Item.create(buildPreparedItem(payload, endpoint));
     return { message: `${created?.name || payload.title || "Prepared content"} created in the Items directory.`, uuid: created?.uuid || "", document_type: "Item", entity_id: payload.entity_id ?? null };
+  }
+  if (type === "push_ancestry_bundle") {
+    return await importAncestryBundle(payload, endpoint);
   }
   if (type === "push_content_bundle") {
     return importCreatureBundle(payload, endpoint);
@@ -1238,7 +1295,8 @@ async function processCommands(endpoint, commands = []) {
   for (const command of queue) {
     const id = String(command?.id || "");
     if (!id) continue;
-    if (seen.has(id)) {
+    const dedupeKey = commandDedupeKey(command, endpoint);
+    if (seen.has(dedupeKey)) {
       try { await acknowledgeCommands(endpoint, [{ id, status: "skipped", result: { message: "Command already processed on this Foundry world." } }]); }
       catch (error) { console.debug(`[${MODULE_ID}] Could not re-acknowledge command ${id}`, error); }
       continue;
@@ -1251,7 +1309,7 @@ async function processCommands(endpoint, commands = []) {
         console.debug(`[${MODULE_ID}] Could not mark command ${id} as executing`, startError);
       }
       const result = await runFoundryCommand(command, endpoint);
-      await rememberProcessedCommandId(id);
+      await rememberProcessedCommandId(dedupeKey);
       await acknowledgeCommands(endpoint, [{ id, status: "done", result }]);
     } catch (error) {
       console.warn(`[${MODULE_ID}] Command ${id} failed`, error);

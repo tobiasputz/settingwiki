@@ -68,7 +68,7 @@ from .semantic_search import semantic_search
 from .aon import sanitize_aon_summary
 from .homebrew import (
     NON_MONSTER_KINDS, HOME_BREW_SECTIONS, classify_homebrew, group_homebrew, homebrew_latex_snippet,
-    is_homebrew_source_path, source_homebrew_bucket, truthy, upsert_latex_block,
+    is_homebrew_page, page_homebrew_kind, is_homebrew_source_path, source_homebrew_bucket, truthy, upsert_latex_block,
 )
 
 from .v5 import (
@@ -348,7 +348,7 @@ def ensure_built() -> dict:
             pass
         return wiki
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 6100}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 7301}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -619,7 +619,7 @@ def _visible_wiki_cached(admin: bool, invite_id: int | None, player_label: str, 
         category["presentation"]=dict(source_category.get("presentation",{}))
         # Reuse the already filtered/mutated visible page objects so teaser
         # state and player-specific excerpts are consistent in sidebars/home.
-        category["pages"]=[by_slug[p.get("slug")] for p in source_category.get("pages",[]) if p.get("slug") in by_slug and not is_homebrew_source_path(by_slug[p.get("slug")].get("source_file"))]
+        category["pages"]=[by_slug[p.get("slug")] for p in source_category.get("pages",[]) if p.get("slug") in by_slug and not is_homebrew_page(by_slug[p.get("slug")])]
         if category["pages"]:
             clean_categories.append(category)
     wiki["categories"] = clean_categories
@@ -672,7 +672,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 6100
+                    needs_build=int(existing.get("renderer_version") or 0) < 7301
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -1071,7 +1071,7 @@ def public_search(request: Request, q: str = ""):
     qn = q.strip()
     if not qn: return []
     wiki = _visible_wiki(request)
-    pages=[p for p in wiki.get("pages",[]) if not is_homebrew_source_path(p.get("source_file"))]
+    pages=[p for p in wiki.get("pages",[]) if not is_homebrew_page(p)]
     ranked=[]
     # Local semantic retrieval runs only over the already spoiler-filtered Codex.
     for hit in semantic_search(pages,qn,limit=18):
@@ -3816,7 +3816,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.2.0 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.3.1 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -3990,16 +3990,29 @@ def v704_bestiary_remove(request:Request,entry_id:int):
 
 
 def _homebrew_source_sections(wiki:dict) -> list[dict]:
+    # Source Homebrew is driven by Codex metadata. Legacy homebrew/ paths remain
+    # supported, but a normal jotunari.tex can now be marked once and left alone.
+    bundles: dict[tuple[str, str], dict] = {}
+    for page in sorted(wiki.get('pages',[]), key=lambda x:int(x.get('order') or 0)):
+        section=page_homebrew_kind(page)
+        if section=='codex':continue
+        owner_slug=str(page.get('homebrew_owner_slug') or page.get('slug') or '')
+        owner_title=str(page.get('homebrew_owner_title') or page.get('title') or 'Homebrew')
+        key=(section,owner_slug)
+        bundle=bundles.setdefault(key,{'key':section,'name':owner_title,'owner_slug':owner_slug,'pages':[],'rules':[],'source_file':page.get('source_file') or ''})
+        bundle['pages'].append(page)
+        for rule in page.get('pf2e_rules') or []:
+            item=dict(rule);item['source_page_slug']=page.get('slug');item['source_page_title']=page.get('title');bundle['rules'].append(item)
     grouped={}
-    for page in wiki.get('pages',[]):
-        if not is_homebrew_source_path(page.get('source_file')):continue
-        section,group=source_homebrew_bucket(page.get('source_file'))
-        grouped.setdefault(section,{}).setdefault(group,[]).append(page)
+    for (section,_),bundle in bundles.items():
+        bundle['rules'].sort(key=lambda x:(int(x.get('level') or 0),str(x.get('title') or '').casefold()))
+        grouped.setdefault(section,[]).append(bundle)
     order=['ancestry','archetype','class','general','actions','items','other'];out=[]
     for section in order:
-        groups=grouped.get(section,{})
-        if not groups:continue
-        out.append({'key':section,'title':HOME_BREW_SECTIONS.get(section,'Other Homebrew'),'groups':[{'name':name,'pages':sorted(rows,key=lambda x:str(x.get('title') or '').casefold())} for name,rows in sorted(groups.items(),key=lambda kv:kv[0].casefold())]})
+        rows=grouped.get(section,[])
+        if not rows:continue
+        rows.sort(key=lambda x:x['name'].casefold())
+        out.append({'key':section,'title':HOME_BREW_SECTIONS.get(section,'Other Homebrew'),'groups':[{'name':row['name'],'pages':row['pages'],'rules':row['rules'],'owner_slug':row['owner_slug'],'source_file':row['source_file']} for row in rows]})
     return out
 
 
@@ -4014,6 +4027,41 @@ def homebrew_library_page(request:Request):
         'foundry_actors':foundry_actors(settings,cid) if gm else [],
         'project_tex_files':[f['path'] for f in list_project_files(settings) if f.get('suffix')=='.tex'] if gm else [],
     })
+
+
+def _source_homebrew_bundle_or_404(wiki:dict, owner_slug:str) -> dict:
+    for section in _homebrew_source_sections(wiki):
+        for group in section.get('groups',[]):
+            if str(group.get('owner_slug') or '')==str(owner_slug):
+                return {'section':section.get('key'),'section_title':section.get('title'),'group':group}
+    raise HTTPException(404,'Homebrew source entry not found.')
+
+
+@app.post('/api/homebrew/source/{owner_slug}/foundry')
+def homebrew_source_foundry_push(request:Request,owner_slug:str):
+    require_gm(request);cid=_active_campaign_id(request);wiki=_visible_wiki(request)
+    bundle=_source_homebrew_bundle_or_404(wiki,owner_slug)
+    if bundle['section']!='ancestry':
+        raise HTTPException(400,'Foundry ancestry bundle import is currently available for entries marked Homebrew — Ancestry.')
+    group=bundle['group'];pages=group.get('pages') or []
+    root=next((p for p in pages if str(p.get('slug') or '')==str(owner_slug)),pages[0] if pages else None)
+    if not root:raise HTTPException(404,'Ancestry source entry not found.')
+    rules=[]
+    for rule in group.get('rules') or []:
+        if str(rule.get('kind') or '') not in {'feat','action'}:continue
+        rules.append({
+            'kind':str(rule.get('kind') or 'feat'),'title':str(rule.get('title') or 'Untitled'),
+            'level':int(rule.get('level') or 0),'traits':list(rule.get('traits') or []),
+            'description_html':str(rule.get('html') or ''),'description':str(rule.get('plain_text') or ''),
+            'action_cost':str(rule.get('action_cost') or ''),'source_page_slug':str(rule.get('source_page_slug') or ''),
+        })
+    command=queue_foundry_command(settings,cid,'push_ancestry_bundle',{
+        'title':str(group.get('name') or root.get('title') or 'Custom Ancestry'),
+        'owner_slug':str(owner_slug),'source_file':str(group.get('source_file') or root.get('source_file') or ''),
+        'description_html':str(root.get('html') or ''),'description':str(root.get('plain_text') or ''),
+        'rules':rules,'folder_name':f"Seeker · {str(group.get('name') or root.get('title') or 'Custom Ancestry')}",
+    },scope='world',requested_by=requester_label(request))
+    return {'ok':True,'command':command,'rules':len(rules)}
 
 
 def _homebrew_entry_or_404(campaign_id:int,entry_id:int) -> dict:
@@ -4263,7 +4311,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.8.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.9.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -4271,7 +4319,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.8.0.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.9.0.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 
@@ -4365,13 +4413,20 @@ def v61_character_foundry_action(request:Request,character_id:int,payload:dict=B
     link=foundry_link_for_character(settings,character_id)
     if not link or not link.get('actor_id'): raise HTTPException(400,'This character is not linked to a Foundry actor.')
     action=str(payload.get('action') or '').strip().lower()
-    if action=='adjust_resource':
+    if action in {'adjust_resource','set_resource'}:
         resource=str(payload.get('resource') or '').strip().lower()
         if resource not in {'hp','temp_hp','hero_points','focus'}: raise HTTPException(400,'Unsupported resource.')
-        try: delta=max(-999,min(999,int(payload.get('delta') or 0)))
-        except Exception: raise HTTPException(400,'delta must be an integer.')
-        if delta==0: raise HTTPException(400,'delta cannot be zero.')
-        command=queue_foundry_command(settings,int(link['campaign_id']),'adjust_resource',{'resource':resource,'delta':delta,'character_id':int(character_id),'character_name':char.get('name'),'actor_uuid':str(link.get('actor_uuid') or '')},actor_id=str(link['actor_id']),requested_by=requester_label(request))
+        command_payload={'resource':resource,'character_id':int(character_id),'character_name':char.get('name'),'actor_uuid':str(link.get('actor_uuid') or '')}
+        if action=='set_resource':
+            try:value=max(0,min(999999,int(payload.get('value'))))
+            except Exception:raise HTTPException(400,'value must be an integer.')
+            command_payload.update({'mode':'set','value':value})
+        else:
+            try: delta=max(-999999,min(999999,int(payload.get('delta') or 0)))
+            except Exception: raise HTTPException(400,'delta must be an integer.')
+            if delta==0: raise HTTPException(400,'delta cannot be zero.')
+            command_payload.update({'mode':'adjust','delta':delta})
+        command=queue_foundry_command(settings,int(link['campaign_id']),'adjust_resource',command_payload,actor_id=str(link['actor_id']),requested_by=requester_label(request))
     elif action=='adjust_item_quantity':
         item_id=str(payload.get('item_id') or '').strip();
         if not item_id: raise HTTPException(400,'item_id is required.')

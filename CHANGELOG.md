@@ -1,3 +1,12 @@
+## 7.3.1 — Homebrew, handout, and Foundry reliability
+
+- Codex Studio can mark ordinary LaTeX pages as Homebrew ancestry/archetype/class/etc. entries without moving source files; the original LaTeX/PDF workflow is unchanged.
+- Source-backed ancestry entries inherit across their source/chapter, parse native `\feat` / `\action` commands, and group detected rules by level in Homebrew.
+- Added Foundry ancestry-bundle import: a custom ancestry and its detected ancestry feats/actions are created together in a managed Items folder.
+- Foundry Bridge 1.9.0 uses per-command nonces to prevent valid writes being discarded after database restore/ID reuse, and resource controls now support large deltas plus absolute values.
+- Handout presets now browse/preview before opening and use visibly distinct document treatments rather than a single shared parchment layout.
+- Renderer metadata schema moves to 7301 and static/PWA cache generation moves to 7301 so existing deployments rebuild and receive the new assets.
+
 ## 7.3.0 — Handout workshop
 
 - Added a dedicated GM handout workshop at `/gm/handouts`, linked from Handouts.

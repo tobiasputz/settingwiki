@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Homebrew · {{ wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/homebrew.css?v=7200">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/homebrew.css?v=7301">{% endblock %}
 {% block body %}
 <main class="homebrew-shell" data-homebrew-library>
   <header class="homebrew-hero">
@@ -27,8 +27,11 @@
     </div>{% endfor %}
   </section>{% endfor %}
 
-  {% if source_sections %}<section class="homebrew-section source-section" data-homebrew-section="source"><header><span class="homebrew-section-rune">⌁</span><div><span class="eyebrow">LATEX SOURCE</span><h2>Homebrew source chapters</h2><p>Pages whose .tex files live under <code>homebrew/</code>. They stay out of the main setting Codex and live here instead.</p></div></header>
-    {% for section in source_sections %}<div class="homebrew-source-kind"><h3>{{ section.title }}</h3>{% for group in section.groups %}<div class="homebrew-group"><div class="homebrew-group-head"><h4>{{ group.name }}</h4></div><div class="homebrew-source-grid">{% for page in group.pages %}<a class="homebrew-source-card" href="/wiki/{{ page.slug }}"><strong>{{ page.title }}</strong><small>{{ page.source_file }}</small><p>{{ page.excerpt or '' }}</p>{% if gm_view %}<span>Open page · edit source in Studio</span>{% endif %}</a>{% endfor %}</div></div>{% endfor %}</div>{% endfor %}
+  {% if source_sections %}<section class="homebrew-section source-section" data-homebrew-section="source"><header><span class="homebrew-section-rune">⌁</span><div><span class="eyebrow">LATEX SOURCE</span><h2>Homebrew source entries</h2><p>These entries are classified in Codex Studio. Their LaTeX stays exactly where it is; Seeker reads structured commands such as <code>\feat</code> and groups them here automatically.</p></div></header>
+    {% for section in source_sections %}<div class="homebrew-source-kind"><h3>{{ section.title }}</h3>{% for group in section.groups %}<div class="homebrew-group" data-source-homebrew-group="{{ group.owner_slug }}"><div class="homebrew-group-head"><div><h4>{{ group.name }}</h4><small>{{ group.source_file }}</small></div>{% if gm_view and section.key == 'ancestry' %}<button class="primary-button homebrew-source-foundry" type="button" data-homebrew-source-foundry="{{ group.owner_slug }}">Import ancestry + feats to Foundry</button>{% endif %}</div>
+      <div class="homebrew-source-grid">{% for page in group.pages %}<a class="homebrew-source-card" href="/wiki/{{ page.slug }}"><strong>{{ page.title }}</strong><small>{{ page.level|title }}</small><p>{{ page.excerpt or '' }}</p>{% if gm_view %}<span>Open source-backed page</span>{% endif %}</a>{% endfor %}</div>
+      {% if group.rules %}<div class="homebrew-source-rules"><div class="homebrew-source-rules-head"><strong>Detected PF2e rules</strong><span>{{ group.rules|length }} command{{ '' if group.rules|length==1 else 's' }} found</span></div>{% for level_group in group.rules|groupby('level') %}<div class="homebrew-level-band"><div class="homebrew-level-label">LEVEL {{ level_group.grouper }}</div><div class="homebrew-entry-list">{% for rule in level_group.list %}<article class="homebrew-entry source-rule" data-homebrew-entry="source-rule" data-search="{{ (rule.title ~ ' ' ~ (rule.traits|join(' ')) ~ ' ' ~ rule.plain_text ~ ' ' ~ group.name)|lower|e }}"><div class="homebrew-entry-main"><div class="homebrew-entry-title"><span class="homebrew-kind">{{ rule.kind|upper }}</span><h4>{{ rule.title }}</h4></div>{% if rule.traits %}<div class="homebrew-traits">{% for trait in rule.traits %}<span>{{ trait }}</span>{% endfor %}</div>{% endif %}<p class="homebrew-description">{{ rule.plain_text }}</p><small>From {{ rule.source_page_title }}</small></div></article>{% endfor %}</div></div>{% endfor %}</div>{% endif %}
+    </div>{% endfor %}</div>{% endfor %}
   </section>{% endif %}
   </div>
 
@@ -47,4 +50,4 @@
   {% endif %}
 </main>
 {% endblock %}
-{% block scripts %}{% if gm_view %}<script src="/static/homebrew.js?v=7200"></script>{% else %}<script src="/static/homebrew.js?v=7200"></script>{% endif %}{% endblock %}
+{% block scripts %}{% if gm_view %}<script src="/static/homebrew.js?v=7301"></script>{% else %}<script src="/static/homebrew.js?v=7301"></script>{% endif %}{% endblock %}

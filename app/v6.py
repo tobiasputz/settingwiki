@@ -283,7 +283,7 @@ def normalize_foundry_sheet(sheet: Any) -> dict:
 
 
 def _foundry_module_version() -> str:
-    return '1.8.0'
+    return '1.9.0'
 
 
 def _validate_foundry_token(settings: Settings, campaign_id: int, token: str) -> None:
@@ -345,15 +345,20 @@ def delete_foundry_prepared_content(settings: Settings, campaign_id: int, item_i
 
 def queue_foundry_command(settings: Settings, campaign_id: int, command_type: str, payload: dict, *, actor_id: str = '', scope: str = 'actor', requested_by: str = '') -> dict:
     ctype=str(command_type or '').strip().lower()
-    if ctype not in {'adjust_resource','adjust_item_quantity','grant_prepared_content','push_prepared_content','sync_entity_document','push_content_bundle'}:
+    if ctype not in {'adjust_resource','adjust_item_quantity','grant_prepared_content','push_prepared_content','sync_entity_document','push_content_bundle','push_ancestry_bundle'}:
         raise ValueError('Unsupported Foundry action.')
     sc=str(scope or 'actor').strip().lower()
     if sc not in {'actor','world'}:
         raise ValueError('Unsupported Foundry action scope.')
     now=time.time()
+    command_payload=dict(payload or {})
+    # Numeric queue IDs can repeat after a restored/recreated Seeker database.
+    # A random nonce gives the Foundry bridge a stable idempotency key that is
+    # unique across those restores, preventing legitimate writes being skipped.
+    command_payload.setdefault('command_nonce', secrets.token_urlsafe(18))
     with connect(settings) as conn:
         cur=conn.execute('INSERT INTO foundry_command_queue(campaign_id,actor_id,scope,command_type,payload_json,requested_by,status,result_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                         (int(campaign_id),str(actor_id or '')[:300],sc,ctype,json.dumps(payload or {},ensure_ascii=False),str(requested_by or '')[:160],'queued','{}',now,now))
+                         (int(campaign_id),str(actor_id or '')[:300],sc,ctype,json.dumps(command_payload,ensure_ascii=False),str(requested_by or '')[:160],'queued','{}',now,now))
         out=int(cur.lastrowid or 0)
     return get_foundry_command(settings,campaign_id,out) or {}
 
@@ -654,7 +659,7 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     query=urllib.parse.parse_qsl(parts.query,keep_blank_values=True)
     query=[(k,v) for k,v in query if k.lower()!='wait']+[('wait','true')]
     webhook_url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,parts.path,urllib.parse.urlencode(query),parts.fragment))
-    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.2.0'}, method='POST')
+    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.3.1'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             status=int(resp.status)

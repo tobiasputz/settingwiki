@@ -25,6 +25,7 @@
 
   async function worldPush(id,button){button.disabled=true;try{const out=await send(`/api/v61/foundry/content/${id}/push`,'POST',{target_type:'world'});toast(`Queued for Foundry Items · command #${out.command?.id||'—'}`)}catch(e){toast(e.message,true)}finally{button.disabled=false}}
   $$('[data-homebrew-world]').forEach(b=>b.addEventListener('click',()=>worldPush(b.dataset.homebrewWorld,b)));
+  $$('[data-homebrew-source-foundry]').forEach(b=>b.addEventListener('click',async()=>{b.disabled=true;try{const out=await send(`/api/homebrew/source/${encodeURIComponent(b.dataset.homebrewSourceFoundry)}/foundry`,'POST',{});toast(`Ancestry bundle queued · ${out.rules||0} detected rule${out.rules===1?'':'s'} · command #${out.command?.id||'—'}`)}catch(e){toast(e.message,true)}finally{b.disabled=false}}));
   $$('[data-homebrew-delete]').forEach(b=>b.addEventListener('click',async()=>{const e=byId(b.dataset.homebrewDelete);if(!confirm(`Delete ${e?.title||'this homebrew entry'} from Seeker?\n\nThis deletes the Homebrew Forge source. It does not delete copies already in Foundry.`))return;try{await api(`/api/homebrew/${b.dataset.homebrewDelete}`,{method:'DELETE'});b.closest('[data-homebrew-entry]')?.remove();toast('Homebrew entry deleted.')}catch(e){toast(e.message,true)}}));
 
   const giveDlg=$('[data-homebrew-give-dialog]');let giveId=null;

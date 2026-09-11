@@ -1,3 +1,4 @@
+from pathlib import Path
 from test_compendium import setup, seed, gm_client
 from fastapi.testclient import TestClient
 from app.handout_creator import PRESETS, normalize, render_body, metadata
@@ -77,3 +78,17 @@ def test_artwork_upload_and_preview(tmp_path,monkeypatch):
     d=document(image_ref=ref);row=gm.post('/api/admin/handouts',json=d).json()
     assert '/uploads/handouts/' in gm.get('/handout/'+row['slug']+'/export').text
     assert '/uploads/handouts/' in gm.post('/api/admin/handout-creator/preview',json=d).text
+
+
+def test_template_picker_is_preview_first_and_presets_have_distinct_visual_metadata(tmp_path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed(s);monkeypatch.setattr(main,'settings',s);gm=gm_client(main,s)
+    page=gm.get('/gm/handouts')
+    assert page.status_code==200
+    assert 'id="hc-use-preset"' in page.text and 'disabled' in page.text
+    assert 'Click a template to inspect it on the right' in page.text
+    assert len({p.get('theme') for p in PRESETS}) >= 4
+    assert len({p.get('visual') for p in PRESETS}) >= 10
+    js=(Path(__file__).resolve().parents[1]/'static/handout-creator.js').read_text(encoding='utf-8')
+    assert 'async function inspectPreset' in js
+    assert "$('#hc-use-preset').onclick" in js
