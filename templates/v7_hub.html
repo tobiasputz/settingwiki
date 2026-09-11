@@ -17,7 +17,7 @@
 
   <nav class="v7-modebar" aria-label="Living Table workspaces">
     <button class="active" data-v7-tab="cockpit"><span>✦</span><b>Table</b><small>Run now</small></button>
-    <button data-v7-tab="entities"><span>◇</span><b>Entities</b><small>Everything connected</small></button>
+    <button data-v7-tab="entities"><span>◇</span><b>Objects</b><small>People, places & things</small></button>
     <button data-v7-tab="creatures"><span>♜</span><b>Creature Vault</b><small>AoN & collections</small></button>
     <button data-v7-tab="encounters"><span>⚔</span><b>Encounters</b><small>Budget & prepare</small></button>
     <button data-v7-tab="loot"><span>◆</span><b>Loot</b><small>Claim & distribute</small></button>
@@ -74,12 +74,12 @@
   </section>
 
   <section class="v7-workspace" data-v7-pane="entities">
-    <header class="v7-section-head"><div><span class="eyebrow">UNIVERSAL ENTITY GRAPH</span><h2>Everything that matters, connected.</h2><p>Lore, characters, NPCs, monsters, items and factions share one relationship/history layer without replacing their original Seeker source.</p></div><button class="v7-button" data-v7-new-entity>＋ New entity</button></header>
+    <header class="v7-section-head"><div><span class="eyebrow">CAMPAIGN OBJECTS</span><h2>Track the things that actually need state.</h2><p>NPCs, places, factions, creatures, items and other deliberate objects can carry relationships, history and Foundry links. Ordinary Codex headings remain document structure and do not appear here.</p></div><button class="v7-button" data-v7-new-entity>＋ New object</button></header>
     <div class="v7-browser-layout">
       <aside class="v7-browser-sidebar">
-        <div class="v7-searchbox"><span>⌕</span><input data-v7-entity-search placeholder="Search entities"></div>
+        <div class="v7-searchbox"><span>⌕</span><input data-v7-entity-search placeholder="Search tracked objects"></div>
         <div id="v7EntityKinds" class="v7-filter-chips"></div>
-        <div class="v7-mini-card"><span class="eyebrow">GRAPH</span><strong id="v7RelationCount">—</strong><small>live entity connections</small></div>
+        <div class="v7-mini-card"><span class="eyebrow">GRAPH</span><strong id="v7RelationCount">—</strong><small>live object connections</small></div>
       </aside>
       <section><div id="v7EntityGrid" class="v7-entity-grid"></div></section>
     </div>
@@ -106,13 +106,13 @@
   <section class="v7-workspace" data-v7-pane="knowledge">
     <header class="v7-section-head"><div><span class="eyebrow">KNOWLEDGE LAYERS</span><h2>Reveal facts, not files.</h2><p>Give players rumors, discoveries and mechanical facts independently. Recall Knowledge can reveal only the information earned by that character.</p></div></header>
     <div class="v7-split-workspace">
-      <aside><div class="v7-searchbox"><span>⌕</span><input data-v7-knowledge-search placeholder="Find an entity"></div><div id="v7KnowledgeEntityList" class="v7-select-list"></div></aside>
-      <section id="v7KnowledgeEditor" class="v7-panel v7-knowledge-editor"><div class="v7-empty"><span>◉</span><h3>Select an entity</h3><p>Facts and Recall Knowledge controls will appear here.</p></div></section>
+      <aside><div class="v7-searchbox"><span>⌕</span><input data-v7-knowledge-search placeholder="Find an object"></div><div id="v7KnowledgeEntityList" class="v7-select-list"></div></aside>
+      <section id="v7KnowledgeEditor" class="v7-panel v7-knowledge-editor"><div class="v7-empty"><span>◉</span><h3>Select an object</h3><p>Facts and Recall Knowledge controls will appear here.</p></div></section>
     </div>
   </section>
 
   <section class="v7-workspace" data-v7-pane="memory">
-    <header class="v7-section-head"><div><span class="eyebrow">CAMPAIGN MEMORY</span><h2>Ask what actually happened.</h2><p>Search canon, entity records, session summaries and table events together. Results always link back to their source instead of inventing an answer.</p></div></header>
+    <header class="v7-section-head"><div><span class="eyebrow">CAMPAIGN MEMORY</span><h2>Ask what actually happened.</h2><p>Search canon, object records, session summaries and table events together. Results always link back to their source instead of inventing an answer.</p></div></header>
     <div class="v7-memory-search"><span>⌕</span><input id="v7MemoryQuery" placeholder="Where has the party encountered the Black Sun symbol?"><button class="v7-button" id="v7MemorySearch">Search campaign</button></div>
     <div id="v7MemoryResults" class="v7-memory-results"><div class="v7-empty"><span>⌕</span><h3>Your campaign, indexed.</h3><p>Try a name, symbol, faction, place or question.</p></div></div>
   </section>
@@ -123,8 +123,8 @@
   </section>
 
   <section class="v7-workspace" data-v7-pane="logic">
-    <header class="v7-section-head"><div><span class="eyebrow">WORLD STATE DEPENDENCIES</span><h2>Catch contradictions before the players do.</h2><p>Rules can watch an entity state and warn when session prep or another dependency conflicts with it. Seeker also automatically checks inactive/dead entities referenced by upcoming prep.</p></div><button class="v7-button" data-v7-new-dependency>＋ New rule</button></header>
-    <div class="v7-dashboard-grid"><section class="v7-panel v7-panel-large"><header class="v7-panel-head"><h2>Current warnings</h2></header><div id="v7LogicWarnings" class="v7-stack"></div></section><section class="v7-panel"><header class="v7-panel-head"><h2>Relationship evolution</h2></header><p class="v7-muted">Open any entity to record relationship states over time. Seeker preserves each transition by session instead of replacing the previous state.</p></section></div>
+    <header class="v7-section-head"><div><span class="eyebrow">WORLD STATE DEPENDENCIES</span><h2>Catch contradictions before the players do.</h2><p>Rules can watch an object state and warn when session prep or another dependency conflicts with it. Seeker also automatically checks inactive/dead objects referenced by upcoming prep.</p></div><button class="v7-button" data-v7-new-dependency>＋ New rule</button></header>
+    <div class="v7-dashboard-grid"><section class="v7-panel v7-panel-large"><header class="v7-panel-head"><h2>Current warnings</h2></header><div id="v7LogicWarnings" class="v7-stack"></div></section><section class="v7-panel"><header class="v7-panel-head"><h2>Relationship evolution</h2></header><p class="v7-muted">Open any object to record relationship states over time. Seeker preserves each transition by session instead of replacing the previous state.</p></section></div>
   </section>
 
   <section class="v7-workspace" data-v7-pane="assets">
@@ -145,5 +145,5 @@
 </main>
 <script id="v7State" type="application/json">{{ v7|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v7.css?v=8000">{% endblock %}
-{% block scripts %}<script src="/static/v7.js?v=8000"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v7.css?v=8001">{% endblock %}
+{% block scripts %}<script src="/static/v7.js?v=8001"></script>{% endblock %}

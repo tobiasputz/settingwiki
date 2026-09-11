@@ -20,7 +20,7 @@ from .living import list_fronts, list_threads
 from .v51 import list_clocks, list_scenes
 from .v6 import foundry_actors, foundry_state, recent_foundry_commands, foundry_link_for_character
 from .v7 import (
-    list_entities, sync_existing_entities, save_relation, mark_sync_resolved,
+    list_entities, sync_existing_entities, save_relation, mark_sync_resolved, promote_wiki_page, untrack_wiki_entity,
     sync_links_for_entities, dependency_warnings, list_encounters,
 )
 from .latex import build_wiki
@@ -53,13 +53,26 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
 
     def _sync_registry(cid:int,wiki:dict)->list[dict]:
         sync_existing_entities(settings,cid,wiki)
-        entities=list_entities(settings,cid)
+        entities=list_entities(settings,cid,tracked_only=True)
         refresh_source_mappings(settings,cid,entities)
         return entities
 
+    def _codex_candidates(wiki:dict,entities:list[dict])->list[dict]:
+        tracked={str((e.get('data') or {}).get('slug') or '') for e in entities if e.get('source_type')=='lore'}
+        out=[]
+        for page in wiki.get('pages',[]) or []:
+            slug=str(page.get('slug') or '')
+            if not slug or slug in tracked:continue
+            # Whole source-backed Homebrew is already represented by one object;
+            # its internal level/heritage headings should not reappear here.
+            if str(page.get('homebrew_kind') or 'codex').lower()!='codex':continue
+            out.append({'slug':slug,'title':page.get('title') or slug,'chapter':page.get('chapter') or '',
+                        'level':page.get('level') or '', 'source_file':page.get('source_file') or ''})
+        return out
+
     def _table_payload(cid:int,session:dict|None)->dict:
         actors=foundry_actors(settings,cid)
-        # Join actor snapshots back to Seeker characters so the V8 table surface can
+        # Join actor snapshots back to Seeker characters so the Campaign Workspace table surface can
         # write HP/resources through the same permission-checked endpoint as the
         # character sheet instead of inventing a second Foundry command path.
         by_actor={}
@@ -110,9 +123,9 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             compact.append({**e,'sync':syncs.get(int(e['id']))})
         wf=workflow(settings,cid,int(session['id'])) if session else None
         return {
-            'version':'8.0.0','campaign':get_campaign(settings,cid) or {},'modules':module_settings(settings,cid),
+            'version':'8.0.1','campaign':get_campaign(settings,cid) or {},'modules':module_settings(settings,cid),
             'session':session,'workflow':wf,'sessions':list_sessions(settings,public=False,campaign_id=cid),
-            'entities':compact,'table':_table_payload(cid,session),'maps':list_maps(settings,public=False),
+            'entities':compact,'codex_candidates':_codex_candidates(wiki,entities),'table':_table_payload(cid,session),'maps':list_maps(settings,public=False),
             'handouts':list_handouts(settings,admin=True,campaign_id=cid),'threads':list_threads(settings,admin=True,campaign_id=cid),
             'fronts':list_fronts(settings,admin=True,campaign_id=cid),'foundry':foundry_state(settings,cid),
             'foundry_commands':recent_foundry_commands(settings,cid,25),'warnings':dependency_warnings(settings,cid),
@@ -131,6 +144,21 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
                 if not low or low in s:allowed.append({'type':'codex','title':p.get('title') or p.get('slug'),'subtitle':p.get('chapter') or 'Codex','href':f"/lore/{p.get('slug')}"})
             return allowed[:30]
         return command_catalog(settings,cid,wiki,q)
+
+    @app.post('/api/v8/codex/track')
+    def v8_track_codex_page(request:Request,payload:dict=Body(...)):
+        require_gm(request);cid=active_campaign_id(request);wiki=visible_wiki(request)
+        try:
+            entity=promote_wiki_page(settings,cid,wiki,str(payload.get('slug') or ''),kind=str(payload.get('kind') or 'lore'),actor_label=requester_label(request))
+            refresh_source_mappings(settings,cid,list_entities(settings,cid,tracked_only=True))
+            return {'ok':True,'entity':entity}
+        except ValueError as exc:raise HTTPException(400,str(exc))
+
+    @app.post('/api/v8/entity/{entity_id}/untrack')
+    def v8_untrack_codex_page(request:Request,entity_id:int):
+        require_gm(request);cid=active_campaign_id(request)
+        try:return {'ok':True,'entity':untrack_wiki_entity(settings,cid,entity_id,actor_label=requester_label(request))}
+        except ValueError as exc:raise HTTPException(400,str(exc))
 
     @app.get('/api/v8/entity/{entity_id}/inspector')
     def v8_entity_inspector(request:Request,entity_id:int):
@@ -189,7 +217,7 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         require_admin(request);cid=active_campaign_id(request);path=str(payload.get('path') or '').strip();text=str(payload.get('text') or '')
         if not path:raise HTTPException(400,'Source path is required.')
         target=safe_project_path(settings,path)
-        if target.suffix.lower() not in {'.tex','.sty','.cls'}:raise HTTPException(400,'V8 Source Studio only writes LaTeX source files.')
+        if target.suffix.lower() not in {'.tex','.sty','.cls'}:raise HTTPException(400,'Source Studio only writes LaTeX source files.')
         snapshot_source(settings,cid,path,label=str(payload.get('label') or 'Before Source Studio edit'),created_by=requester_label(request))
         result=save_text_file(settings,path,text)
         build=None

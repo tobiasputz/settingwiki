@@ -1,17 +1,17 @@
 {% extends 'base.html' %}
-{% block title %}Seeker 8 · {{ campaign.name or wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v8.css?v=8000">{% endblock %}
+{% block title %}Campaign Workspace · {{ campaign.name or wiki.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v8.css?v=8001">{% endblock %}
 {% block body %}
 <main class="v8-shell" data-v8-root>
   <header class="v8-hero">
-    <div><span class="eyebrow">SEEKER 8 · CAMPAIGN OS</span><h1>{{ campaign.name or wiki.title }}</h1><p>One campaign, one source of truth. Source, Homebrew, Foundry, sessions, maps and handouts stay connected through the same campaign objects.</p></div>
-    <div class="v8-hero-stats"><div><small>ENTITIES</small><strong>{{ entity_count }}</strong></div><div><small>SESSION</small><strong>{{ session.title if session else 'None prepared' }}</strong></div><div><small>FOUNDRY</small><strong class="{{ 'ok' if foundry.received_at else 'muted' }}">{{ 'Live' if foundry.received_at else 'Waiting' }}</strong></div></div>
+    <div><span class="eyebrow">SEEKER · CAMPAIGN WORKSPACE</span><h1>{{ campaign.name or wiki.title }}</h1><p>Your campaign control center. Source, Homebrew, Foundry, sessions, maps and handouts stay connected without turning every document heading into an object.</p></div>
+    <div class="v8-hero-stats"><div><small>TRACKED OBJECTS</small><strong>{{ entity_count }}</strong></div><div><small>SESSION</small><strong>{{ session.title if session else 'None prepared' }}</strong></div><div><small>FOUNDRY</small><strong class="{{ 'ok' if foundry.received_at else 'muted' }}">{{ 'Live' if foundry.received_at else 'Waiting' }}</strong></div></div>
   </header>
 
-  <nav class="v8-workspace-nav" aria-label="V8 workspaces">
+  <nav class="v8-workspace-nav" aria-label="Campaign workspaces">
     <button class="active" data-v8-tab="dashboard">✦ <span>Dashboard</span></button>
     <button data-v8-tab="session">◉ <span>Session</span></button>
-    <button data-v8-tab="entities">◇ <span>Entities</span></button>
+    <button data-v8-tab="entities">◇ <span>Objects</span></button>
     <button data-v8-tab="sources">⌘ <span>Sources</span></button>
     <button data-v8-tab="homebrew">◆ <span>Homebrew</span></button>
     <button data-v8-tab="foundry">∞ <span>Foundry</span></button>
@@ -28,7 +28,8 @@
   </section>
 
   <section class="v8-pane" data-v8-pane="entities">
-    <header class="v8-section-head"><div><span class="eyebrow">UNIVERSAL INSPECTOR</span><h2>Campaign objects</h2><p>Relationships, backlinks, source ownership, Foundry status, maps, handouts and history in one inspector.</p></div><div class="v8-search"><span>⌕</span><input id="v8EntitySearch" placeholder="Search the campaign graph"></div></header>
+    <header class="v8-section-head"><div><span class="eyebrow">TRACKED CAMPAIGN OBJECTS</span><h2>People, places and things that actually matter</h2><p>Ordinary LaTeX headings stay document structure. Track only NPCs, places, factions, creatures, items, source-backed Homebrew and other things that need relationships, history, Foundry links, maps or handouts.</p></div><div class="v8-head-actions"><button class="v8-button ghost" id="v8TrackCodex">＋ Track Codex page</button><div class="v8-search"><span>⌕</span><input id="v8EntitySearch" placeholder="Search tracked objects"></div></div></header>
+    <div class="v8-object-note"><strong>What counts as an object?</strong><span>Characters, explicit object articles and whole source-backed Homebrew are tracked automatically. Sections such as “History”, “Culture” or “17th Level” are not.</span></div>
     <div id="v8EntityGrid" class="v8-entity-grid"></div>
   </section>
 
@@ -45,7 +46,7 @@
       <a href="/homebrew"><span>◆</span><h3>Homebrew Library</h3><p>Browse ancestries, heritages, archetypes, general/skill/class feats and other rules.</p></a>
       <a href="/admin"><span>◇</span><h3>Source ownership</h3><p>Classify complete .tex files and preserve their exact PDF placement.</p></a>
     </div>
-    <section class="v8-panel"><header><div><span class="eyebrow">AUTHORING SAFETY</span><h3>Source-linked by design</h3></div></header><p>Forge changes update the original source block, while V8 Source Studio keeps protected revisions. If Seeker cannot infer a safe source location, it leaves the source untouched instead of silently guessing.</p></section>
+    <section class="v8-panel"><header><div><span class="eyebrow">AUTHORING SAFETY</span><h3>Source-linked by design</h3></div></header><p>Forge changes update the original source block, while Source Studio keeps protected revisions. If Seeker cannot infer a safe source location, it leaves the source untouched instead of silently guessing.</p></section>
   </section>
 
   <section class="v8-pane" data-v8-pane="foundry">
@@ -54,14 +55,15 @@
   </section>
 
   <section class="v8-pane" data-v8-pane="diagnostics">
-    <header class="v8-section-head"><div><span class="eyebrow">SYSTEM CHECK</span><h2>Diagnostics Center</h2><p>Bridge state, parser warnings, duplicate entities, continuity and Railway storage in one place.</p></div><button class="v8-button" id="v8RunDiagnostics">Run system check</button></header>
+    <header class="v8-section-head"><div><span class="eyebrow">SYSTEM CHECK</span><h2>Diagnostics Center</h2><p>Bridge state, parser warnings, duplicate tracked objects, continuity and Railway storage in one place.</p></div><button class="v8-button" id="v8RunDiagnostics">Run system check</button></header>
     <div id="v8Diagnostics"></div>
     <section class="v8-panel v8-module-panel"><header><div><span class="eyebrow">WORKSPACE MODULES</span><h3>Keep Seeker focused</h3></div><button class="v8-button small" id="v8SaveModules">Save layout</button></header><div id="v8Modules"></div></section>
   </section>
 </main>
 
-<aside class="v8-inspector" id="v8Inspector" aria-hidden="true"><header><div><small>CAMPAIGN OBJECT</small><strong id="v8InspectorTitle">Inspector</strong></div><button type="button" data-v8-close-inspector>×</button></header><div id="v8InspectorBody"></div></aside>
+<aside class="v8-inspector" id="v8Inspector" aria-hidden="true"><header><div><small>TRACKED OBJECT</small><strong id="v8InspectorTitle">Inspector</strong></div><button type="button" data-v8-close-inspector>×</button></header><div id="v8InspectorBody"></div></aside>
 <div class="v8-modal" id="v8SourceEditor" aria-hidden="true"><div class="v8-modal-card"><header><div><small>SOURCE STUDIO</small><strong id="v8SourceTitle">LaTeX source</strong></div><button type="button" data-v8-source-close>×</button></header><div class="v8-source-editor-layout"><nav id="v8SourceOutline"></nav><textarea id="v8SourceText" spellcheck="false"></textarea></div><footer><span id="v8SourceStatus">Protected revisions are created before every save.</span><button class="v8-button ghost" data-v8-source-close>Cancel</button><button class="v8-button" id="v8SourceSave">Save + rebuild</button></footer></div></div>
+<div class="v8-modal" id="v8ObjectPicker" aria-hidden="true"><div class="v8-modal-card v8-picker-card"><header><div><small>TRACK A CODEX PAGE</small><strong>Add something meaningful to Campaign Objects</strong></div><button type="button" data-v8-picker-close>×</button></header><div class="v8-picker-body"><div class="v8-search"><span>⌕</span><input id="v8ObjectPickerSearch" placeholder="Search Codex pages"></div><label class="v8-picker-kind"><small>OBJECT TYPE</small><select id="v8ObjectPickerKind"><option value="lore">Lore / other</option><option value="npc">NPC / person</option><option value="place">Place</option><option value="faction">Faction</option><option value="organization">Organization</option><option value="item">Item</option><option value="monster">Creature</option></select></label><div id="v8ObjectPickerList" class="v8-picker-list"></div></div><footer><span>Tracking a page does not alter its LaTeX or move it in the Codex.</span><button class="v8-button ghost" type="button" data-v8-picker-close>Close</button></footer></div></div>
 <div class="v8-toast" id="v8Toast"></div>
 {% endblock %}
-{% block scripts %}<script src="/static/v8.js?v=8000"></script>{% endblock %}
+{% block scripts %}<script src="/static/v8.js?v=8001"></script>{% endblock %}

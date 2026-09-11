@@ -13,10 +13,10 @@
   <link rel="icon" href="/static/seeker-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Seeker' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=8000">
-  <link rel="stylesheet" href="/static/tour.css?v=8000">
+  <link rel="stylesheet" href="/static/wiki.css?v=8001">
+  <link rel="stylesheet" href="/static/tour.css?v=8001">
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/refinement.css?v=8000">
+  <link rel="stylesheet" href="/static/refinement.css?v=8001">
 </head>
 {% set campaign_ctx = campaign_context(request) %}
 <body data-campaign-id="{{ campaign_ctx.active_campaign_id }}" data-admin-view="{{ 'true' if request.session.get('admin') or request.session.get('co_gm') else 'false' }}" data-player-access-key="{{ wiki.player_access_key if wiki else '' }}">
@@ -60,7 +60,7 @@
       <button class="notification-open" data-open-notifications aria-label="Notifications" data-tour-target="notifications">✦<i id="notificationCount"></i></button>
       <button class="search-open" data-open-search aria-label="Open command palette" data-tour-target="search">⌕ <span>Search</span><kbd>⌘K</kbd></button>
       {% if request.session.get('admin') or request.session.get('co_gm') %}
-      <details class="nav-menu gm-nav-menu" data-nav-menu data-tour-target="gm-tools"><summary>GM <span>⌄</span></summary><div class="nav-menu-popover gm-menu-popover"><a href="/app/v8"><span>✦</span><div><strong>Seeker 8 · Campaign OS</strong><small>Dashboard · session · source · sync</small></div></a><a href="/gm/living-table"><span>✦</span><div><strong>Living Table</strong><small>Prepare · Run · Resolve · Remember</small></div></a><a href="/schedule"><span>◷</span><div><strong>Session Planner</strong><small>Find the next shared date</small></div></a><a href="/gm/prep"><span>✎</span><div><strong>Session Prep</strong><small>Build tonight's runbook</small></div></a><a href="/gm/session"><span>✦</span><div><strong>Session Console</strong><small>Run tonight's table</small></div></a><a href="/gm/continuity"><span>⌘</span><div><strong>Continuity Center</strong><small>Changes, knowledge & backups</small></div></a><a href="/gm/media"><span>▣</span><div><strong>Media Board</strong><small>Prepare the table display</small></div></a><a href="/gm/integrations"><span>∞</span><div><strong>Integrations</strong><small>Discord, Foundry & calendar</small></div></a><a href="/gm/foundry-workshop"><span>⬡</span><div><strong>Foundry Workshop</strong><small>Prep content & queue pushes</small></div></a><a href="/homebrew"><span>✦</span><div><strong>Homebrew Library</strong><small>Organize custom rules content</small></div></a>{% if request.session.get('admin') %}<a href="/admin"><span>✎</span><div><strong>Seeker Studio</strong><small>Edit the source</small></div></a>{% endif %}<a href="/admin/campaign"><span>⚙</span><div><strong>Worldcraft</strong><small>Canon, reveals & chronology</small></div></a><a href="/admin/living"><span>◔</span><div><strong>World State</strong><small>What is true right now</small></div></a></div></details>
+      <details class="nav-menu gm-nav-menu" data-nav-menu data-tour-target="gm-tools"><summary>GM <span>⌄</span></summary><div class="nav-menu-popover gm-menu-popover"><a href="/app/v8"><span>✦</span><div><strong>Campaign Workspace</strong><small>Dashboard · session · source · sync</small></div></a><a href="/gm/living-table"><span>✦</span><div><strong>Living Table</strong><small>Prepare · Run · Resolve · Remember</small></div></a><a href="/schedule"><span>◷</span><div><strong>Session Planner</strong><small>Find the next shared date</small></div></a><a href="/gm/prep"><span>✎</span><div><strong>Session Prep</strong><small>Build tonight's runbook</small></div></a><a href="/gm/session"><span>✦</span><div><strong>Session Console</strong><small>Run tonight's table</small></div></a><a href="/gm/continuity"><span>⌘</span><div><strong>Continuity Center</strong><small>Changes, knowledge & backups</small></div></a><a href="/gm/media"><span>▣</span><div><strong>Media Board</strong><small>Prepare the table display</small></div></a><a href="/gm/integrations"><span>∞</span><div><strong>Integrations</strong><small>Discord, Foundry & calendar</small></div></a><a href="/gm/foundry-workshop"><span>⬡</span><div><strong>Foundry Workshop</strong><small>Prep content & queue pushes</small></div></a><a href="/homebrew"><span>✦</span><div><strong>Homebrew Library</strong><small>Organize custom rules content</small></div></a>{% if request.session.get('admin') %}<a href="/admin"><span>✎</span><div><strong>Seeker Studio</strong><small>Edit the source</small></div></a>{% endif %}<a href="/admin/campaign"><span>⚙</span><div><strong>Worldcraft</strong><small>Canon, reveals & chronology</small></div></a><a href="/admin/living"><span>◔</span><div><strong>World State</strong><small>What is true right now</small></div></a></div></details>
       {% elif wiki and wiki.player_label %}<button type="button" class="nav-signout" data-player-logout title="Sign out of this campaign">Sign out</button>{% endif %}
     </nav>
   </header>
@@ -80,7 +80,7 @@
     <div class="mobile-sheet-scroll" data-mobile-sheet-scroll>
     <div class="mobile-sheet-primary">
       {% if request.session.get('admin') or request.session.get('co_gm') or (wiki and wiki.player_label) %}<a class="mobile-sheet-feature" href="/app"><span>✦</span><div><strong>Table App</strong><small>Character · inventory · journal · maps</small></div></a>{% endif %}
-      {% if request.session.get('admin') or request.session.get('co_gm') %}<a href="/app/v8"><span>◎</span><strong>Seeker 8 · Campaign OS</strong></a>{% elif wiki and wiki.player_label %}<a href="/portal"><span>◎</span><strong>Campaign Portal</strong></a>{% endif %}
+      {% if request.session.get('admin') or request.session.get('co_gm') %}<a href="/app/v8"><span>◎</span><strong>Campaign Workspace</strong></a>{% elif wiki and wiki.player_label %}<a href="/portal"><span>◎</span><strong>Campaign Portal</strong></a>{% endif %}
       <a href="/characters"><span>♟</span><strong>Characters</strong></a>
       <a href="/tables"><span>◎</span><strong>Tables</strong></a>
       {% if request.session.get('admin') or request.session.get('co_gm') or (wiki and wiki.player_label) %}<a href="/schedule"><span>◷</span><strong>Planner</strong></a>{% endif %}
@@ -93,7 +93,7 @@
     {% if request.session.get('admin') or request.session.get('co_gm') %}
     <details class="mobile-sheet-group">
       <summary><span>⚙</span><strong>GM tools</strong><small>Prep, Foundry, Studio & integrations</small></summary>
-      <div><a href="/app/v8">✦ Seeker 8 · Campaign OS</a><a href="/gm/living-table">✦ Living Table</a><a href="/gm/prep">✎ Session Prep</a><a href="/gm/session">⚙ Session Console</a><a href="/gm/continuity">⌘ Continuity Center</a><a href="/gm/media">▣ Media Board</a><a href="/gm/integrations">∞ Integrations</a><a href="/gm/foundry-workshop">⬡ Foundry Workshop</a><a href="/display" target="_blank">▰ Table Display</a>{% if request.session.get('admin') %}<a href="/admin">✎ Seeker Studio</a>{% endif %}<a href="/admin/campaign">✦ Worldcraft</a><a href="/admin/living">◔ World State</a></div>
+      <div><a href="/app/v8">✦ Campaign Workspace</a><a href="/gm/living-table">✦ Living Table</a><a href="/gm/prep">✎ Session Prep</a><a href="/gm/session">⚙ Session Console</a><a href="/gm/continuity">⌘ Continuity Center</a><a href="/gm/media">▣ Media Board</a><a href="/gm/integrations">∞ Integrations</a><a href="/gm/foundry-workshop">⬡ Foundry Workshop</a><a href="/display" target="_blank">▰ Table Display</a>{% if request.session.get('admin') %}<a href="/admin">✎ Seeker Studio</a>{% endif %}<a href="/admin/campaign">✦ Worldcraft</a><a href="/admin/living">◔ World State</a></div>
     </details>
     {% endif %}
     <details class="mobile-sheet-group compact">
@@ -103,7 +103,7 @@
     </div>
   </div>
 
-  {% if request.session.get('admin') or request.session.get('co_gm') %}<nav class="gm-view-switcher" aria-label="GM mode switcher"><span>{{ 'OWNER' if request.session.get('admin') else 'CO-GM' }}</span><a href="/app/v8">Seeker 8</a><a href="/gm/living-table">Living Table</a><a href="/">Player</a><a href="/gm/session">Session</a><a href="/gm/prep">Prep</a><a href="/gm/continuity">Continuity</a><a href="/gm/foundry-workshop">Foundry</a><a href="/homebrew">Homebrew</a>{% if request.session.get('admin') %}<a href="/admin">Studio</a>{% endif %}<a href="/admin/campaign">Worldcraft</a><a href="/admin/living">State</a></nav>{% endif %}
+  {% if request.session.get('admin') or request.session.get('co_gm') %}<nav class="gm-view-switcher" aria-label="GM mode switcher"><span>{{ 'OWNER' if request.session.get('admin') else 'CO-GM' }}</span><a href="/app/v8">Workspace</a><a href="/gm/living-table">Living Table</a><a href="/">Player</a><a href="/gm/session">Session</a><a href="/gm/prep">Prep</a><a href="/gm/continuity">Continuity</a><a href="/gm/foundry-workshop">Foundry</a><a href="/homebrew">Homebrew</a>{% if request.session.get('admin') %}<a href="/admin">Studio</a>{% endif %}<a href="/admin/campaign">Worldcraft</a><a href="/admin/living">State</a></nav>{% endif %}
 
   <aside class="notification-drawer" id="notificationDrawer" aria-hidden="true"><header><div><small>SEEKER FEED</small><strong>Notifications</strong></div><div class="notification-head-actions"><button type="button" data-notification-read-all title="Mark all read">✓ All read</button><button data-close-notifications>×</button></div></header>{% if wiki and wiki.player_label and not request.session.get('admin') and not request.session.get('co_gm') %}<details class="notification-prefs"><summary>What should Seeker notify me about?</summary><div><label><input type="checkbox" data-notification-pref="follow"> Followed lore</label><label><input type="checkbox" data-notification-pref="session"> Sessions</label><label><input type="checkbox" data-notification-pref="handout"> Handouts</label><label><input type="checkbox" data-notification-pref="reveal"> Reveals</label><label><input type="checkbox" data-notification-pref="comment"> Comments</label><label><input type="checkbox" data-notification-pref="notice"> General notices</label></div></details>{% endif %}<div id="notificationFeed"><div class="search-hint">No new revelations or table notices.</div></div></aside>
 
@@ -121,8 +121,8 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=8000"></script>
-  <script src="/static/tour.js?v=8000"></script>
+  <script src="/static/wiki.js?v=8001"></script>
+  <script src="/static/tour.js?v=8001"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

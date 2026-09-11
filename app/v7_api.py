@@ -197,7 +197,7 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         if not player_allowed(request):raise HTTPException(401)
         cid=active_campaign_id(request);gm=bool(has_permission(request,'edit_entities'))
         if gm:sync_existing_entities(settings,cid,visible_wiki(request))
-        rows=list_entities(settings,cid,include_hidden=gm,kind=kind,query=q)
+        rows=list_entities(settings,cid,include_hidden=gm,kind=kind,query=q,tracked_only=True)
         if gm:return rows
         return [player_entity_view(settings,e,invite_id(request),can_view_statblock=bool(has_permission(request,'view_statblocks'))) for e in rows]
 
@@ -626,9 +626,9 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         require_gm(request);cid=active_campaign_id(request);assets=asset_catalog(settings,cid)
         with connect(settings) as conn:
             queue={r['status']:r['n'] for r in conn.execute('SELECT status,COUNT(*) AS n FROM foundry_command_queue WHERE campaign_id=? GROUP BY status',(cid,)).fetchall()}
-            pages=int(conn.execute('SELECT COUNT(*) AS n FROM v7_entities WHERE campaign_id=?',(cid,)).fetchone()['n'])
+        tracked=len(list_entities(settings,cid,tracked_only=True))
         backups=settings.data_dir/'migration-backups'
-        return {'ok':True,'version':'8.0.0','campaign_id':cid,'entities':pages,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
+        return {'ok':True,'version':'8.0.1','campaign_id':cid,'entities':tracked,'objects':tracked,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
 
     @app.get('/entity/{entity_id}',response_class=HTMLResponse)
     def v7_entity_page(request:Request,entity_id:int):
@@ -651,7 +651,7 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         selected=next((c for c in chars if character_id and int(c['id'])==int(character_id)),chars[0] if chars else None)
         foundry=foundry_link_for_character(settings,int(selected['id'])) if selected else None
         loot=list_loot_pools(settings,cid,None,public=not gm)
-        entities=list_entities(settings,cid,include_hidden=gm)
+        entities=list_entities(settings,cid,include_hidden=gm,tracked_only=True)
         role='owner' if helpers.get('is_admin',lambda _r:False)(request) else player_role(request)
         perms=effective_permissions(settings,role,iid,cid)
         if not gm:

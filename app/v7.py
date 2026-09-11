@@ -586,7 +586,29 @@ def player_entity_view(settings: Settings,entity:dict,invite_id:int|None,*,can_v
     return out
 
 
-def list_entities(settings: Settings,campaign_id:int,*,include_hidden:bool=True,kind:str='',query:str='')->list[dict]:
+def entity_is_tracked(entity:dict)->bool:
+    """Return whether an internal entity row is a deliberate campaign object.
+
+    Seeker historically mirrored every generated Codex page into ``v7_entities``.
+    Because the LaTeX renderer emits pages for ordinary section headings, that
+    made the object browser look like a second table of contents. Keep those
+    mirror rows for backwards compatibility/search, but hide structural rows
+    from object-centric UI unless the GM explicitly promoted them or they carry
+    user-authored state.
+    """
+    data=entity.get('data') if isinstance(entity.get('data'),dict) else {}
+    role=str(data.get('registry_role') or '').strip().lower()
+    if role=='structure' and not bool(data.get('promoted')):
+        return False
+    # Databases created by older releases have no registry_role yet. Their
+    # ``lore`` rows were generated mechanically from every Codex heading, so
+    # treat them as structure until the first sync classifies deliberate ones.
+    if not role and str(entity.get('source_type') or '')=='lore' and str(data.get('legacy_source') or '')=='wiki' and not bool(data.get('promoted')):
+        return False
+    return True
+
+
+def list_entities(settings: Settings,campaign_id:int,*,include_hidden:bool=True,kind:str='',query:str='',tracked_only:bool=False)->list[dict]:
     sql='SELECT * FROM v7_entities WHERE campaign_id=?';args:[Any]=[int(campaign_id)]
     if not include_hidden:
         sql+=" AND visibility!='gm'"
@@ -595,8 +617,9 @@ def list_entities(settings: Settings,campaign_id:int,*,include_hidden:bool=True,
     q=str(query or '').strip().lower()
     if q:
         sql+=' AND (lower(name) LIKE ? OR lower(summary) LIKE ? OR lower(tags_json) LIKE ?)';like=f'%{q}%';args.extend([like,like,like])
-    sql+=' ORDER BY CASE status WHEN \'active\' THEN 0 ELSE 1 END, lower(name),id'
-    return [entity_payload(r) for r in _rows(settings,sql,tuple(args))]
+    sql+=" ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, lower(name),id"
+    rows=[entity_payload(r) for r in _rows(settings,sql,tuple(args))]
+    return [e for e in rows if entity_is_tracked(e)] if tracked_only else rows
 
 
 def get_entity(settings: Settings,campaign_id:int,entity_id:int)->dict|None:
@@ -691,26 +714,188 @@ def upsert_source_entity(settings: Settings,campaign_id:int,source_type:str,sour
     return save_entity(settings,campaign_id,data,actor_label='Seeker migration')
 
 
+def _entity_has_user_state(settings: Settings,entity_id:int)->bool:
+    """Protect legacy mirrored rows that the GM actually used as objects."""
+    eid=int(entity_id)
+    checks=[
+        ('SELECT 1 FROM v7_entity_relations WHERE source_entity_id=? OR target_entity_id=? LIMIT 1',(eid,eid)),
+        ('SELECT 1 FROM v7_entity_sessions WHERE entity_id=? LIMIT 1',(eid,)),
+        ('SELECT 1 FROM v7_entity_locations WHERE entity_id=? LIMIT 1',(eid,)),
+        ('SELECT 1 FROM v7_knowledge_facts WHERE entity_id=? LIMIT 1',(eid,)),
+        ('SELECT 1 FROM v7_foundry_sync_links WHERE entity_id=? LIMIT 1',(eid,)),
+        ('SELECT 1 FROM v7_dependencies WHERE source_entity_id=? LIMIT 1',(eid,)),
+        ("SELECT 1 FROM v7_entity_versions WHERE entity_id=? AND created_by NOT IN ('','Seeker migration') LIMIT 1",(eid,)),
+    ]
+    with connect(settings) as conn:
+        for sql,args in checks:
+            try:
+                if conn.execute(sql,args).fetchone():return True
+            except sqlite3.OperationalError:
+                continue
+        # V8 links are additive and may not exist in older V7-only databases.
+        try:
+            if conn.execute('SELECT 1 FROM v8_object_links WHERE entity_id=? LIMIT 1',(eid,)).fetchone():return True
+        except sqlite3.OperationalError:
+            pass
+    return False
+
+
+def _set_entity_registry_role(settings: Settings,entity:dict,role:str,*,promoted:bool|None=None,reason:str='')->None:
+    data=dict(entity.get('data') or {})
+    changed=data.get('registry_role')!=role
+    data['registry_role']=role
+    if promoted is not None:
+        changed=changed or bool(data.get('promoted'))!=bool(promoted)
+        data['promoted']=bool(promoted)
+    if reason and data.get('registry_reason')!=reason:
+        data['registry_reason']=reason;changed=True
+    if not changed:return
+    with connect(settings) as conn:
+        conn.execute('UPDATE v7_entities SET data_json=? WHERE id=?',(json.dumps(data,ensure_ascii=False),int(entity['id'])))
+
+
+def _wiki_page_payload(page:dict,*,kind:str='lore',promoted:bool=False,auto_object:bool=False)->dict:
+    pres=page.get('presentation') or {}
+    return {
+        'kind':kind or 'lore','name':page.get('title') or page.get('slug') or 'Lore','subtitle':page.get('chapter') or '',
+        'summary':page.get('excerpt') or '', 'body':page.get('plain_text') or '',
+        'visibility':'gm' if pres.get('visibility')=='hidden' else 'players',
+        'image_ref':pres.get('hero_image_url') or pres.get('toc_image_url') or '',
+        'tags':[page.get('chapter')] if page.get('chapter') else [],
+        'data':{'slug':page.get('slug'),'chapter':page.get('chapter'),'source_path':page.get('source_file') or '',
+                'source_line':page.get('source_line') or 1,'legacy_source':'wiki','registry_role':'object',
+                'promoted':bool(promoted),'manual_untracked':False,'auto_object':bool(auto_object),'page_level':page.get('level') or ''}
+    }
+
+
+def promote_wiki_page(settings: Settings,campaign_id:int,wiki:dict,slug:str,*,kind:str='lore',actor_label:str='')->dict:
+    """Track one Codex page as a campaign object without changing the LaTeX."""
+    page=next((p for p in (wiki or {}).get('pages',[]) or [] if str(p.get('slug') or '')==str(slug)),None)
+    if not page:raise ValueError('Codex page not found.')
+    existing=_row(settings,'SELECT * FROM v7_entities WHERE campaign_id=? AND source_type=? AND source_key=?',(int(campaign_id),'lore',str(slug)))
+    current=entity_payload(existing) if existing else None
+    payload=_wiki_page_payload(page,kind=(kind or (current or {}).get('kind') or 'lore'),promoted=True)
+    if current:
+        payload={**payload,'id':int(current['id']),'name':current.get('name') or payload['name'],'kind':kind or current.get('kind') or 'lore',
+                 'status':current.get('status') or 'active','visibility':current.get('visibility') or payload['visibility'],
+                 'tags':current.get('tags') or payload['tags'],'data':{**(current.get('data') or {}),**payload['data']},
+                 'source_type':'lore','source_key':str(slug)}
+        return save_entity(settings,campaign_id,payload,actor_label=actor_label or 'Track Codex page')
+    return save_entity(settings,campaign_id,{**payload,'source_type':'lore','source_key':str(slug)},actor_label=actor_label or 'Track Codex page')
+
+
+def untrack_wiki_entity(settings: Settings,campaign_id:int,entity_id:int,*,actor_label:str='')->dict:
+    entity=get_entity(settings,campaign_id,int(entity_id))
+    if not entity:raise ValueError('Campaign object not found.')
+    if entity.get('source_type')!='lore':raise ValueError('Only Codex-backed objects can be returned to document structure.')
+    data={**(entity.get('data') or {}),'registry_role':'structure','promoted':False,'manual_untracked':True,'registry_reason':'untracked by GM'}
+    out=save_entity(settings,campaign_id,{**entity,'data':data},actor_label=actor_label or 'Untrack Codex page')
+    return out
+
+
 def sync_existing_entities(settings: Settings,campaign_id:int,wiki:dict|None=None)->int:
-    """Populate the V7 registry from existing first-class Seeker objects without taking ownership of them."""
-    count=0
-    for p in (wiki or {}).get('pages',[]) or []:
-        pres=p.get('presentation') or {}
-        upsert_source_entity(settings,campaign_id,'lore',str(p.get('slug') or ''),{
-            'kind':'lore','name':p.get('title') or p.get('slug') or 'Lore','subtitle':p.get('chapter') or '',
-            'summary':p.get('excerpt') or '', 'body':p.get('plain_text') or '', 'visibility':'gm' if pres.get('visibility')=='hidden' else 'players',
-            'image_ref':pres.get('hero_image_url') or pres.get('toc_image_url') or '', 'tags':[p.get('chapter')] if p.get('chapter') else [],
-            'data':{'slug':p.get('slug'),'chapter':p.get('chapter'),'source_path':p.get('source_file') or '', 'source_line':p.get('source_line') or 1,'legacy_source':'wiki'}
+    """Mirror only *meaningful* first-class Seeker objects into the campaign graph.
+
+    Ordinary LaTeX headings remain Codex/document structure.  Explicit entity
+    roots (for example ``\\pon{...}``), source-scoped Homebrew objects, characters,
+    and Foundry-prepared documents become tracked campaign objects.  Legacy V7
+    rows for every heading are retained internally but marked ``structure`` so
+    relationships/history never disappear and old databases migrate safely.
+    """
+    count=0;pages=list((wiki or {}).get('pages',[]) or [])
+    existing_lore={str(e.get('source_key') or ''):e for e in list_entities(settings,campaign_id) if e.get('source_type')=='lore'}
+    tracked_page_slugs=set()
+
+    # Explicit entity-heading macros are intentional objects.  ``pon`` is the
+    # built-in example and represents a person/NPC article.
+    for p in pages:
+        slug=str(p.get('slug') or '')
+        if str(p.get('level') or '').lower()!='entity':continue
+        current=existing_lore.get(slug)
+        kind=(current or {}).get('kind') or 'npc'
+        payload=_wiki_page_payload(p,kind=kind,auto_object=True)
+        if current:payload['data']={**(current.get('data') or {}),**payload['data']}
+        upsert_source_entity(settings,campaign_id,'lore',slug,payload);tracked_page_slugs.add(slug);count+=1
+
+    # A classified Homebrew source is one object even when the file contains
+    # dozens of headings and feats.  Group by owner/source instead of mirroring
+    # each emitted Codex page.
+    homebrew_groups={}
+    for p in pages:
+        hb=str(p.get('homebrew_kind') or 'codex').lower();owner=str(p.get('homebrew_owner_slug') or '')
+        if hb=='codex' or not owner:continue
+        source=str(p.get('source_file') or '')
+        key=(str(p.get('homebrew_source_scope') or ''),source,owner)
+        homebrew_groups.setdefault(key,[]).append(p)
+    kind_map={'actions':'action','items':'item','other':'homebrew'}
+    for (_scope,source,owner),group in homebrew_groups.items():
+        root=group[0];hb=str(root.get('homebrew_kind') or 'homebrew').lower();kind=kind_map.get(hb,hb)
+        name=str(root.get('homebrew_owner_title') or root.get('title') or owner).strip()
+        body='\n\n'.join(str(x.get('plain_text') or '').strip() for x in group if str(x.get('plain_text') or '').strip())[:60000]
+        summary=next((str(x.get('excerpt') or '').strip() for x in group if str(x.get('excerpt') or '').strip()),'')
+        source_key=(source or owner)[:300]
+        upsert_source_entity(settings,campaign_id,'homebrew_source',source_key,{
+            'kind':kind,'name':name or 'Homebrew','subtitle':hb.title(),'summary':summary,'body':body,
+            'visibility':'players','tags':[hb],
+            'data':{'homebrew_kind':hb,'homebrew_owner_slug':owner,'source_path':source,'legacy_source':'homebrew_source',
+                    'registry_role':'object','auto_object':True}
         });count+=1
-    # Characters
+
+    # Existing Codex rows explicitly promoted by the GM remain synced to their
+    # page.  Used legacy rows are preserved as objects rather than being hidden.
+    by_slug={str(p.get('slug') or ''):p for p in pages}
+    for slug,entity in existing_lore.items():
+        data=entity.get('data') or {}
+        if slug in tracked_page_slugs:
+            _set_entity_registry_role(settings,entity,'object',promoted=bool(data.get('promoted')),reason='explicit entity heading')
+            continue
+        if bool(data.get('manual_untracked')):
+            _set_entity_registry_role(settings,entity,'structure',promoted=False,reason='untracked by GM')
+            continue
+        if bool(data.get('promoted')) and slug in by_slug:
+            p=by_slug[slug];payload=_wiki_page_payload(p,kind=entity.get('kind') or 'lore',promoted=True)
+            payload={**payload,'id':int(entity['id']),'name':entity.get('name') or payload['name'],'kind':entity.get('kind') or 'lore',
+                     'status':entity.get('status') or 'active','visibility':entity.get('visibility') or payload['visibility'],
+                     'tags':entity.get('tags') or payload['tags'],'data':{**data,**payload['data']},'source_type':'lore','source_key':slug}
+            save_entity(settings,campaign_id,payload,actor_label='Seeker migration');count+=1;continue
+        if _entity_has_user_state(settings,int(entity['id'])):
+            _set_entity_registry_role(settings,entity,'object',promoted=True,reason='preserved existing object data')
+        else:
+            _set_entity_registry_role(settings,entity,'structure',promoted=False,reason='Codex heading / document structure')
+
+    # Characters.
     for r in _rows(settings,'SELECT id,name,pronouns,ancestry,class_name,summary,portrait_path,status,campaign_id FROM player_characters WHERE campaign_id=?',(int(campaign_id),)):
-        upsert_source_entity(settings,campaign_id,'character',str(r['id']),{'kind':'character','name':r.get('name') or 'Character','subtitle':' · '.join(x for x in [r.get('ancestry'),r.get('class_name')] if x), 'summary':r.get('summary') or '', 'status':r.get('status') or 'active','image_ref':r.get('portrait_path') or '', 'visibility':'players','data':{'character_id':r['id'],'pronouns':r.get('pronouns') or ''}});count+=1
-    # Prepared content, including bestiary creatures and items.
+        upsert_source_entity(settings,campaign_id,'character',str(r['id']),{'kind':'character','name':r.get('name') or 'Character','subtitle':' · '.join(x for x in [r.get('ancestry'),r.get('class_name')] if x), 'summary':r.get('summary') or '', 'status':r.get('status') or 'active','image_ref':r.get('portrait_path') or '', 'visibility':'players','data':{'character_id':r['id'],'pronouns':r.get('pronouns') or '','registry_role':'object'}});count+=1
+    # Prepared content, including bestiary creatures and items.  A source-linked
+    # ancestry/archetype is already represented by its whole LaTeX source object;
+    # do not manufacture a second campaign object merely because Forge keeps a
+    # Foundry-prepared document for it.
     for r in _rows(settings,'SELECT * FROM foundry_prepared_content WHERE campaign_id=?',(int(campaign_id),)):
-        p=_json(r.get('payload_json'),{})
-        kind=str(r.get('kind') or 'item')
-        vis='players' if bool(p.get('publish_codex')) else 'gm'
-        upsert_source_entity(settings,campaign_id,'foundry_prepared',str(r['id']),{'kind':kind,'name':r.get('title') or 'Prepared content','subtitle':r.get('subtitle') or '', 'summary':r.get('summary') or '', 'body':p.get('description') or '', 'visibility':vis,'image_ref':p.get('img') or '', 'token_ref':p.get('token_img') or '', 'tags':[x.strip() for x in str(r.get('tags') or '').split(',') if x.strip()],'data':{**p,'prepared_content_id':r['id'],'legacy_source':'foundry_prepared'}});count+=1
+        p=_json(r.get('payload_json'),{});kind=str(r.get('kind') or 'item');vis='players' if bool(p.get('publish_codex')) else 'gm'
+        source_link=str(p.get('source_link_path') or '').replace('\\','/').strip('/') if bool(p.get('source_linked')) else ''
+        doc=str(p.get('homebrew_document') or '').strip().lower()
+        source_obj=None
+        if source_link and doc in {'ancestry','archetype'}:
+            source_obj=next((e for e in list_entities(settings,campaign_id)
+                             if e.get('source_type')=='homebrew_source'
+                             and str((e.get('data') or {}).get('source_path') or '').replace('\\','/').strip('/')==source_link
+                             and str((e.get('data') or {}).get('homebrew_kind') or '').strip().lower()==doc),None)
+        if source_obj:
+            merged={**(source_obj.get('data') or {}),'prepared_content_id':r['id'],'foundry_prepared_id':r['id'],
+                    'source_linked':True,'registry_role':'object'}
+            with connect(settings) as conn:
+                conn.execute('UPDATE v7_entities SET data_json=?,updated_at=? WHERE id=?',
+                             (json.dumps(merged,ensure_ascii=False),time.time(),int(source_obj['id'])))
+            # Hide an old mechanically-created duplicate from pre-workspace builds
+            # unless the GM actually attached state to that specific row.
+            old=_row(settings,'SELECT * FROM v7_entities WHERE campaign_id=? AND source_type=? AND source_key=?',
+                     (int(campaign_id),'foundry_prepared',str(r['id'])))
+            if old:
+                duplicate=entity_payload(old)
+                if not _entity_has_user_state(settings,int(duplicate['id'])):
+                    _set_entity_registry_role(settings,duplicate,'structure',promoted=False,reason=f'source-linked duplicate of object {source_obj["id"]}')
+            count+=1;continue
+        upsert_source_entity(settings,campaign_id,'foundry_prepared',str(r['id']),{'kind':kind,'name':r.get('title') or 'Prepared content','subtitle':r.get('subtitle') or '', 'summary':r.get('summary') or '', 'body':p.get('description') or '', 'visibility':vis,'image_ref':p.get('img') or '', 'token_ref':p.get('token_img') or '', 'tags':[x.strip() for x in str(r.get('tags') or '').split(',') if x.strip()],'data':{**p,'prepared_content_id':r['id'],'legacy_source':'foundry_prepared','registry_role':'object'}});count+=1
     return count
 
 
@@ -1350,7 +1535,7 @@ def dependency_warnings(settings: Settings,campaign_id:int)->list[dict]:
         ids=[int(x['id']) for x in upcoming];marks=','.join('?' for _ in ids)
         scenes=_rows(settings,f'SELECT * FROM gm_scene_cards WHERE campaign_id=? AND session_id IN ({marks})',(int(campaign_id),*ids))
         hay='\n'.join(' '.join(str(s.get(k) or '') for k in ('title','purpose','complication','fallback','notes')) for s in scenes).casefold()
-        for e in list_entities(settings,campaign_id):
+        for e in list_entities(settings,campaign_id,tracked_only=True):
             if str(e.get('status') or '').casefold() in {'dead','destroyed','gone','inactive'} and len(e.get('name') or '')>=4 and str(e['name']).casefold() in hay:
                 warnings.append({'id':f'auto-{e["id"]}','severity':'warning','message':f'{e["name"]} is marked {e["status"]} but is referenced in upcoming session prep.','entity':e,'target_type':'session','target_key':str(upcoming[0]['id']),'automatic':True})
     return warnings
@@ -1602,7 +1787,7 @@ def memory_search(settings: Settings,campaign_id:int,wiki:dict,query:str,limit:i
     docs=[]
     for p in wiki.get('pages',[]) or []:
         docs.append({'kind':'lore','key':p.get('slug'),'title':p.get('title') or p.get('slug'),'body':p.get('plain_text') or p.get('excerpt') or '','href':f"/lore/{p.get('slug')}"})
-    for e in list_entities(settings,campaign_id,include_hidden=gm):
+    for e in list_entities(settings,campaign_id,include_hidden=gm,tracked_only=True):
         view=e if gm else player_entity_view(settings,e,invite_id,can_view_statblock=can_view_statblocks)
         docs.append({'kind':view.get('kind'),'key':view.get('id'),'title':view.get('name'),'body':' '.join([view.get('summary') or '',view.get('body') or '',json.dumps(view.get('data') or {}), ' '.join((f.get('title','')+' '+f.get('body','')) for f in (view.get('facts') or []))]),'href':f"/entity/{view.get('id')}"})
     if gm:
@@ -1630,7 +1815,7 @@ def memory_search(settings: Settings,campaign_id:int,wiki:dict,query:str,limit:i
 
 def v7_dashboard(settings: Settings,campaign_id:int,wiki:dict,session:dict|None=None)->dict:
     sid=int(session['id']) if session else None
-    entities=list_entities(settings,campaign_id)
+    entities=list_entities(settings,campaign_id,tracked_only=True)
     encounters=list_encounters(settings,campaign_id,sid) if sid else list_encounters(settings,campaign_id)[:8]
     loot=list_loot_pools(settings,campaign_id,sid) if sid else list_loot_pools(settings,campaign_id)[:6]
     changes=session_changes(settings,campaign_id,sid) if sid else []

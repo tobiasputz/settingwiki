@@ -1,30 +1,34 @@
-# Seeker 8.0.0 — Campaign OS
+# Seeker — Campaign Workspace (8.0.1)
 
-**One campaign, one source of truth.** Seeker 8 is a major integration release that connects the systems built across Seeker 7 into a shared campaign-object, relationship, source-mapping, revision, and session-workflow layer. LaTeX remains authoritative for source-backed campaign material; Foundry remains authoritative for live actor state; Seeker provides the connected workspace between them.
+**One campaign, one source of truth.** This major release adds a connected **Campaign Workspace** without turning Seeker's document structure into another database you have to manage. LaTeX remains authoritative for source-backed campaign material; Foundry remains authoritative for live actor state; Seeker connects those systems to sessions, Chronicle, maps, handouts, Homebrew and campaign relationships.
 
-## Seeker 8 highlights
+## Campaign Workspace highlights
 
-- **Campaign OS workspace** at `/app/v8`: a focused Dashboard, Session workspace, universal entity inspector, Source Map/Studio, Homebrew workbench, Foundry sync view, and Diagnostics Center. Modules can be hidden per campaign without removing their data.
-- **Universal campaign objects and relationships**: Codex/source entities can expose backlinks, related objects, source ownership, Foundry representations, handouts, map markers, and version history from one inspector. Existing V7 entities and relationships are reused rather than duplicated.
-- **Protected revisions and restore**: V8 snapshots LaTeX before Source Studio writes and exposes object/source restore controls. Source restore snapshots the current file first, so a rollback is itself reversible.
-- **Source Map + Source Studio**: Seeker reads LaTeX part/chapter/section structure, includes, feat/action counts, and object ownership. Source files can be inspected and edited with a protected revision created before every save and a rebuild afterward.
-- **Prep → Run → Chronicle**: session prep, live table state, run notes, touched campaign objects, and Chronicle review are one workflow. Starting/ending sessions updates their real session state; finishing can publish a Chronicle update.
-- **Live Table controls inside V8**: linked Foundry characters expose live HP, hero points, focus, conditions, active scene/combat context, clocks, and prepared encounters. Resource writes use Seeker's acknowledged Foundry command path instead of optimistic local-only changes.
-- **Foundry ownership/conflicts**: managed documents retain Seeker/Foundry sync state and conflict resolution. Foundry remains authoritative for live actor snapshots while Seeker can explicitly accept either representation for managed-document conflicts.
-- **PF2e Homebrew authoring**: the complete source-linked ancestry/archetype Forge remains intact, adds stronger ancestry/archetype validation and level sorting, and continues to write additions into the correct authoritative LaTeX source location without duplicate entries.
-- **Campaign-connected handouts and maps**: create a handout from an inspected entity or place that entity on an existing map while retaining the relationship in Seeker.
-- **Global command palette/search integration**: GM search now also resolves Campaign OS workspaces and campaign entities, making the growing toolset reachable without expanding permanent navigation.
-- **Player Portal** at `/portal`: a purpose-built player surface for the current session, owned characters, discoveries, handouts, recent sessions, and player-safe campaign links.
-- **Diagnostics Center**: database integrity, LaTeX/include/parser warnings, possible duplicate entities, Foundry delivery state, continuity warnings, and storage health are available from one system check.
-- **Mobile stays focused**: the single bottom bar remains **Codex · Session · Search · Chronicle · More**. V8 is available from More without reintroducing a second mobile toolbar.
+- **Campaign Workspace** at `/app/v8`: Dashboard, Session, Campaign Objects, Source Map/Studio, Homebrew, Foundry, and Diagnostics in one focused workspace. The route remains `/app/v8` for compatibility, but the feature is simply called **Campaign Workspace** in Seeker.
+- **Meaningful Campaign Objects instead of every heading**: ordinary `\chapter`, `\section`, level headings such as “17th Level”, and other document structure stay in the Codex only. Characters, explicit object articles such as `\pon{...}`, whole source-backed Homebrew, and normal Foundry/Seeker objects are tracked automatically. Any Codex page can be deliberately promoted with **Track Codex page**.
+- **Safe migration from the old entity mirror**: legacy heading rows are retained internally rather than deleted. Unused mechanical heading mirrors are classified as structure and disappear from object-centric UI; rows that already have relationships, knowledge, map/session links, Foundry sync or other user state are preserved as tracked objects.
+- **Campaign Object inspector**: relationships/backlinks, source ownership, Foundry representations, handouts, map markers and version history are available from one place. A promoted Codex page can be returned to document structure without altering its LaTeX.
+- **Protected revisions and restore**: Source Studio snapshots LaTeX before writes and exposes reversible object/source history.
+- **Source Map + Source Studio**: Seeker reads LaTeX part/chapter/section structure, includes, feat/action counts and object ownership while keeping headings separate from objects.
+- **Prep → Run → Chronicle**: preparation, live table state, run notes, touched campaign objects and Chronicle review are one workflow.
+- **Live Table controls**: linked Foundry characters expose live HP, hero points, focus, conditions, scene/combat context, clocks and prepared encounters through the existing acknowledged Foundry command path.
+- **Foundry ownership/conflicts**: managed documents retain Seeker/Foundry sync state and explicit conflict resolution instead of silently overwriting whichever side happens to be newer. Source-linked ancestry/archetype Forge documents are folded into their source-backed Campaign Object instead of creating a duplicate object.
+- **PF2e Homebrew authoring**: complete source-linked ancestry/archetype editing, validation and level-aware LaTeX placement remain intact.
+- **Campaign-connected handouts and maps**: create a handout from an object or place it on a map while retaining the relationship.
+- **Global command palette/search integration** keeps the growing feature set reachable without adding permanent navigation.
+- **Player Portal** at `/portal` provides current session, characters, discoveries, handouts, recent sessions and player-safe campaign links.
+- **Diagnostics Center** checks database integrity, LaTeX/include/parser notices, duplicate tracked objects, Foundry delivery, continuity and storage.
+- **Mobile stays focused** with one bottom bar: **Codex · Session · Search · Chronicle · More**.
 
 ## Upgrade notes
 
-Seeker 8 uses additive SQLite tables (`v8_*`) and reuses the existing V7 entity, Foundry, session, Homebrew, Atlas, Chronicle, and handout data. The release archive intentionally **does not contain `.data/`**, so deploying the application files cannot overwrite the live campaign database, credentials, or Railway volume data.
+The new workspace uses additive SQLite tables (`v8_*`) and reuses existing V7 records, Foundry links, sessions, Homebrew, Atlas, Chronicle and handout data. The release archive intentionally **does not contain `.data/`**, so deploying application files cannot overwrite the live campaign database, credentials or Railway volume data.
 
-Static/PWA generation is **8000**. **Foundry Bridge remains 1.10.1** because V8 consumes the live state and managed-document protocol already provided by that bridge; there is no V8-only bridge protocol migration. If your world is on an older bridge, update it through Seeker's normal manifest URL.
+On first use, the object registry classifies old automatically mirrored Codex headings. It does **not** delete them. This is specifically intended to turn installations with hundreds of heading-derived “entities” into a small, useful list of actual campaign objects without sacrificing anything you had already attached data to.
 
-The V8 release suite contains **220 passing automated tests** plus Python and browser/Foundry JavaScript syntax validation.
+Static/PWA generation is **8001**. **Foundry Bridge remains 1.10.1**; no bridge protocol migration is required.
+
+Release verification: **224 automated tests pass**, plus Python compilation and browser JavaScript syntax validation.
 
 ## Seeker 7.0.4 — Codex & Relay
 

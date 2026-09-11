@@ -245,12 +245,15 @@ def source_structure(text: str) -> list[dict]:
 
 
 def source_map(settings: Settings, campaign_id: int, entities: list[dict] | None = None) -> dict:
-    entity_rows=entities if entities is not None else list_entities(settings,campaign_id)
+    entity_rows=entities if entities is not None else list_entities(settings,campaign_id,tracked_only=True)
     by_source={}
     for e in entity_rows:
-        if e.get('source_type')=='lore':
-            data=e.get('data') or {}; path=str(data.get('source_path') or '')
-            if path: by_source.setdefault(path,[]).append(e)
+        # Source ownership is a property of the object, not of one particular
+        # backend source_type.  This also keeps a source-linked Forge/Foundry
+        # representation attached to the same LaTeX file instead of duplicating
+        # the object merely to make Source Map work.
+        data=e.get('data') or {}; path=str(data.get('source_path') or data.get('source_link_path') or '').replace('\\','/').strip('/')
+        if path: by_source.setdefault(path,[]).append(e)
     files=[]; warnings=[]; include_targets=set()
     for path in sorted(settings.project_dir.rglob('*.tex')):
         rel=path.relative_to(settings.project_dir).as_posix()
@@ -274,7 +277,7 @@ def source_map(settings: Settings, campaign_id: int, entities: list[dict] | None
 
 
 def refresh_source_mappings(settings: Settings, campaign_id: int, entities: list[dict] | None = None) -> int:
-    entities=entities if entities is not None else list_entities(settings,campaign_id)
+    entities=entities if entities is not None else list_entities(settings,campaign_id,tracked_only=True)
     smap=source_map(settings,campaign_id,entities)
     entity_by_id={int(e['id']):e for e in entities}; count=0; now=time.time()
     with connect(settings) as conn:
@@ -366,9 +369,22 @@ def session_touches(settings: Settings, campaign_id: int, session_id: int) -> li
 
 
 def duplicates(settings: Settings, campaign_id: int) -> list[dict]:
-    rows=_rows(settings,'''SELECT lower(trim(name)) AS key,COUNT(*) AS n,GROUP_CONCAT(id) AS ids,GROUP_CONCAT(kind) AS kinds,MIN(name) AS name
-                           FROM v7_entities WHERE campaign_id=? GROUP BY lower(trim(name)) HAVING COUNT(*)>1 ORDER BY n DESC,name''',(int(campaign_id),))
-    for r in rows:r['ids']=[int(x) for x in str(r.get('ids') or '').split(',') if x]
+    """Duplicate names among deliberate campaign objects only.
+
+    Structural Codex headings are intentionally excluded; otherwise a repeated
+    heading such as "History" or "Culture" produces meaningless warnings.
+    """
+    buckets={}
+    for e in list_entities(settings,campaign_id,tracked_only=True):
+        key=str(e.get('name') or '').strip().casefold()
+        if not key:continue
+        buckets.setdefault(key,[]).append(e)
+    rows=[]
+    for key,items in buckets.items():
+        if len(items)<2:continue
+        rows.append({'key':key,'n':len(items),'ids':[int(x['id']) for x in items],
+                     'kinds':','.join(str(x.get('kind') or '') for x in items),'name':items[0].get('name') or key})
+    rows.sort(key=lambda r:(-int(r['n']),str(r['name']).casefold()))
     return rows
 
 
@@ -379,9 +395,9 @@ def diagnostics(settings: Settings, campaign_id: int, *, foundry: dict | None = 
             conn.execute('SELECT 1').fetchone(); fk=conn.execute('PRAGMA foreign_key_check').fetchall()
         checks.append({'id':'database','label':'Database','status':'ok' if not fk else 'warning','detail':'SQLite healthy.' if not fk else f'{len(fk)} foreign-key issue(s).'})
     except Exception as exc: checks.append({'id':'database','label':'Database','status':'error','detail':str(exc)})
-    sm=source_map(settings,campaign_id,list_entities(settings,campaign_id)); sw=sm['warnings']
+    sm=source_map(settings,campaign_id,list_entities(settings,campaign_id,tracked_only=True)); sw=sm['warnings']
     checks.append({'id':'sources','label':'LaTeX sources','status':'warning' if any(x['severity']=='warning' for x in sw) else 'ok','detail':f"{sm['count']} .tex files · {len(sw)} parser notice(s)."})
-    dup=duplicates(settings,campaign_id);checks.append({'id':'duplicates','label':'Duplicate entities','status':'warning' if dup else 'ok','detail':f'{len(dup)} duplicate name group(s).' if dup else 'No duplicate entity names detected.'})
+    dup=duplicates(settings,campaign_id);checks.append({'id':'duplicates','label':'Duplicate tracked objects','status':'warning' if dup else 'ok','detail':f'{len(dup)} duplicate name group(s).' if dup else 'No duplicate tracked-object names detected.'})
     failed=_row(settings,"SELECT COUNT(*) AS n FROM foundry_command_queue WHERE campaign_id=? AND status='failed'",(int(campaign_id),)) or {'n':0}
     fs=foundry or {};last=float(fs.get('updated_at') or fs.get('received_at') or 0);age=max(0,time.time()-last) if last else None
     if not fs: fstatus='warning';fdetail='No Foundry bridge state received yet.'
@@ -392,14 +408,14 @@ def diagnostics(settings: Settings, campaign_id: int, *, foundry: dict | None = 
     checks.append({'id':'storage','label':'Storage','status':'warning' if free_pct<10 else 'ok','detail':f"{store['project_bytes']//1024//1024} MB campaign · {free_pct:.0f}% disk free."})
     warnings=dependency_warnings(settings,campaign_id)
     checks.append({'id':'continuity','label':'Continuity','status':'warning' if warnings else 'ok','detail':f'{len(warnings)} dependency warning(s).' if warnings else 'No active dependency warnings.'})
-    version=(settings.root_dir/'VERSION').read_text(encoding='utf-8').strip() if (settings.root_dir/'VERSION').exists() else '8.0.0'
+    version=(settings.root_dir/'VERSION').read_text(encoding='utf-8').strip() if (settings.root_dir/'VERSION').exists() else '8.0.1'
     return {'version':version,'checks':checks,'source_warnings':sw,'duplicates':dup,'storage':store,'dependency_warnings':warnings,'audit':recent_audit(settings,campaign_id,20)}
 
 
 def command_catalog(settings: Settings, campaign_id: int, wiki: dict, query: str = '') -> list[dict]:
     q=str(query or '').strip().casefold(); items=[]
     commands=[
-        ('Open V8 workspace','Campaign OS dashboard','/app/v8','workspace dashboard command'),
+        ('Open Campaign Workspace','Campaign dashboard','/app/v8','workspace dashboard command'),
         ('Start / run session','Prep → Run → Chronicle','/app/v8#session','session run start'),
         ('Open Table App','Live party resources and table tools','/app','table life hp'),
         ('Create Homebrew','Ancestry, archetype, feat, item or action','/gm/foundry-workshop','homebrew forge create ancestry archetype'),
@@ -409,7 +425,7 @@ def command_catalog(settings: Settings, campaign_id: int, wiki: dict, query: str
         ('Open Atlas','Interactive campaign maps','/#atlas','map atlas world region city dungeon'),
     ]
     for title,sub,href,keywords in commands:items.append({'type':'command','title':title,'subtitle':sub,'href':href,'search':f'{title} {sub} {keywords}'.casefold()})
-    for e in list_entities(settings,campaign_id):items.append({'type':e.get('kind') or 'entity','title':e.get('name') or 'Entity','subtitle':e.get('subtitle') or e.get('summary') or 'Campaign entity','href':f"/entity/{e['id']}",'search':f"{e.get('name','')} {e.get('subtitle','')} {e.get('summary','')} {' '.join(e.get('tags') or [])}".casefold()})
+    for e in list_entities(settings,campaign_id,tracked_only=True):items.append({'type':e.get('kind') or 'object','title':e.get('name') or 'Campaign object','subtitle':e.get('subtitle') or e.get('summary') or 'Tracked campaign object','href':f"/entity/{e['id']}",'search':f"{e.get('name','')} {e.get('subtitle','')} {e.get('summary','')} {' '.join(e.get('tags') or [])}".casefold()})
     for p in wiki.get('pages',[]) or []:items.append({'type':'codex','title':p.get('title') or p.get('slug'),'subtitle':p.get('chapter') or 'Codex','href':f"/lore/{p.get('slug')}",'search':f"{p.get('title','')} {p.get('chapter','')} {p.get('excerpt','')}".casefold()})
     for r in _rows(settings,'SELECT id,title,session_number,session_date,status FROM campaign_sessions WHERE campaign_id=? ORDER BY updated_at DESC',(int(campaign_id),)):
         items.append({'type':'session','title':r.get('title') or f"Session {r.get('session_number') or ''}",'subtitle':f"{r.get('status','')} · {r.get('session_date','')}",'href':f"/app/v8#session/{r['id']}",'search':f"session {r.get('title','')} {r.get('session_number','')} {r.get('status','')}".casefold()})

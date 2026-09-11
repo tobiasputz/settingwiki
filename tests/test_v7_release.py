@@ -47,8 +47,8 @@ def seed_wiki(s: Settings):
 
 def test_v7_release_identity_assets_and_bridge():
     root=Path(__file__).resolve().parents[1]
-    assert (root/'VERSION').read_text().strip()=='8.0.0'
-    assert 'seeker-static-v8000' in (root/'static/sw.js').read_text(encoding='utf-8')
+    assert (root/'VERSION').read_text().strip()=='8.0.1'
+    assert 'seeker-static-v8001' in (root/'static/sw.js').read_text(encoding='utf-8')
     assert (root/'app/v7.py').exists() and (root/'app/v7_api.py').exists()
     assert (root/'templates/v7_hub.html').exists() and (root/'templates/v7_player.html').exists()
     assert (root/'static/v7.css').exists() and (root/'static/v7.js').exists()
@@ -84,8 +84,21 @@ def test_v7_migration_mirroring_is_idempotent(tmp_path: Path):
     sync_existing_entities(s,cid,wiki)
     with connect(s) as conn:
         second=(conn.execute('SELECT COUNT(*) n FROM v7_entities WHERE campaign_id=?',(cid,)).fetchone()['n'],conn.execute('SELECT COUNT(*) n FROM v7_entity_versions').fetchone()['n'])
-    assert first==second and first[0]>=3
+    assert first==second and first[0]==2
+    assert len(list_entities(s,cid,tracked_only=True))==2
 
+
+
+def test_v7_legacy_heading_rows_are_hidden_but_used_objects_are_preserved(tmp_path: Path):
+    s=setup(tmp_path);wiki=seed_wiki(s);cid=default_campaign_id(s)
+    structural=save_entity(s,cid,{'kind':'lore','source_type':'lore','source_key':'legacy-heading-history','name':'History','data':{'legacy_source':'wiki','slug':'legacy-heading-history'}})
+    used=save_entity(s,cid,{'kind':'npc','source_type':'lore','source_key':'legacy-heading-corvina','name':'Corvina','data':{'legacy_source':'wiki','slug':'legacy-heading-corvina'}})
+    anchor_obj=save_entity(s,cid,{'kind':'faction','name':'Anchor Faction'})
+    save_relation(s,cid,{'source_entity_id':used['id'],'target_entity_id':anchor_obj['id'],'relation':'knows'})
+    sync_existing_entities(s,cid,wiki)
+    tracked={e['id']:e for e in list_entities(s,cid,tracked_only=True)}
+    assert structural['id'] not in tracked
+    assert used['id'] in tracked and tracked[used['id']]['data']['promoted'] is True
 
 def test_v7_entity_history_relations_and_cross_campaign_guards(tmp_path: Path):
     s=setup(tmp_path);a=default_campaign_id(s);b=save_campaign(s,{'name':'B'})['id']
@@ -220,7 +233,7 @@ def test_v7_http_gm_and_player_privacy(tmp_path: Path,monkeypatch):
     pool=save_loot_pool(s,cid,{'title':'Player Cache','visibility':'players'});save_loot_item(s,cid,pool['id'],{'name':'Healing Potion','description':'Restorative draught','quantity':1,'visibility':'players'})
     gm=TestClient(main.app);assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     assert gm.get('/gm/v7').status_code==200 and 'Prepare. Run. Resolve. Remember.' in gm.get('/gm/v7').text
-    assert gm.get('/api/v7/health').json()['version']=='8.0.0'
+    assert gm.get('/api/v7/health').json()['version']=='8.0.1'
     saved=gm.post('/api/v7/entities',json={'kind':'npc','name':'Test NPC','summary':'v1'}).json();gm.post('/api/v7/entities',json={**saved,'summary':'v2'})
     versions=gm.get(f"/api/v7/entities/{saved['id']}/versions").json();assert len(versions)>=2
     assert gm.post(f"/api/v7/entities/{saved['id']}/versions/{versions[-1]['id']}/restore").status_code==200

@@ -89,13 +89,13 @@ def test_v4_player_qol_assets_and_compact_nav_are_shipped():
     tour=(root/'static'/'tour.js').read_text(encoding='utf-8')
     sw=(root/'static'/'sw.js').read_text(encoding='utf-8')
     assert 'gm-nav-menu' in base and '<summary>GM ' in base
-    assert 'data-start-tour' in base and '/static/tour.js?v=8000' in base
+    assert 'data-start-tour' in base and '/static/tour.js?v=8001' in base
     assert 'data-session-character' in session and 'SESSION IDENTITY' in session
     assert 'loreforge.journal.draft.v4' in living_js and 'data-journal-filter' in living_js
     assert "editing?(j.character_id||null)" in living_js  # editing a player-wide note must not silently rescope it
     assert 'Recently viewed' in wiki_js and 'Quick jumps' in wiki_js
     assert 'loreforge.quickTour.v4' in tour and 'Enter as your character' in tour
-    assert "seeker-static-v8000" in sw and '/static/tour.js?v=8000' in sw
+    assert "seeker-static-v8001" in sw and '/static/tour.js?v=8001' in sw
 
 def test_v3_journal_table_is_migrated_without_losing_notes(tmp_path: Path):
     from app.storage import connect
