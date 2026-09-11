@@ -2,7 +2,7 @@
   const root=document.querySelector('[data-foundry-workshop]');
   if(!root) return;
   const initial=(()=>{try{return JSON.parse(document.getElementById('foundryWorkshopState')?.textContent||'{}')}catch{return {}}})();
-  const state={actors:initial.actors||[],entries:initial.prepared_content||[],commands:initial.commands||[],filter:'all',query:'',attacks:[],abilities:[],spells:[],savedSnapshot:'',currentId:null,tokenImage:null,cropImage:null};
+  const state={actors:initial.actors||[],entries:initial.prepared_content||[],commands:initial.commands||[],filter:'all',query:'',attacks:[],abilities:[],spells:[],heritages:[],bundleFeats:[],savedSnapshot:'',currentId:null,tokenImage:null,cropImage:null};
   const form=document.getElementById('foundryWorkshopForm');
   const list=document.getElementById('foundryPrepList');
   const log=document.getElementById('foundryCommandLog');
@@ -16,8 +16,10 @@
   const slugList=s=>String(s||'').split(',').map(v=>v.trim()).filter(Boolean);
   const num=(v,f='—')=>String(v??'').trim()===''?f:String(v);
   const signed=v=>{const s=String(v??'').trim();if(!s)return '—';const n=Number(s);return Number.isFinite(n)?`${n>=0?'+':''}${n}`:esc(s)};
-  const kindName=k=>({monster:'Creature',npc:'NPC',item:'Item',feat:'Feat',action:'Action',homebrew:'Freeform'}[k]||'Homebrew');
-  const kindIcon=k=>({monster:'♜',npc:'♟',item:'◇',feat:'✦',action:'◆',homebrew:'⌘'}[k]||'◇');
+  const kindName=k=>({monster:'Creature',npc:'NPC',item:'Item',feat:'Feat',action:'Action',ancestry:'Ancestry',archetype:'Archetype',homebrew:'Freeform'}[k]||'Homebrew');
+  const kindIcon=k=>({monster:'♜',npc:'♟',item:'◇',feat:'✦',action:'◆',ancestry:'♜',archetype:'⌘',homebrew:'◇'}[k]||'◇');
+  const displayKind=e=>{const doc=String(e?.payload?.homebrew_document||'').toLowerCase();return e?.kind==='homebrew'&&['ancestry','archetype'].includes(doc)?doc:(e?.kind||'homebrew')};
+  const bundleKind=k=>k==='ancestry'||k==='archetype';
   const creatureKind=k=>k==='monster'||k==='npc';
   const relativeTime=epoch=>{const sec=Math.max(0,Math.round(Date.now()/1000-Number(epoch||0)));if(!epoch)return 'unknown time';if(sec<8)return 'just now';if(sec<60)return `${sec}s ago`;if(sec<3600)return `${Math.floor(sec/60)}m ago`;if(sec<86400)return `${Math.floor(sec/3600)}h ago`;return `${Math.floor(sec/86400)}d ago`};
   const jsonFetch=async(url,opts={})=>{const r=await fetch(url,opts),b=await r.json().catch(()=>({}));if(!r.ok)throw Error(b.detail||'Request failed');return b};
@@ -36,20 +38,22 @@
     try{localStorage.setItem('seeker-foundry-workshop-draft',snapshot)}catch{}
   }
   function setKind(kind,{resetCollections=false}={}){
-    const k=['monster','npc','item','feat','action','homebrew'].includes(kind)?kind:'monster';
+    const k=['monster','npc','item','feat','action','ancestry','archetype','homebrew'].includes(kind)?kind:'monster';
     setField('kind',k);
+    if(k==='ancestry'){setField('homebrew_document','ancestry');setField('library_section','ancestry')}
+    else if(k==='archetype'){setField('homebrew_document','archetype');setField('library_section','archetype')}
     $$('[data-fw-kind]').forEach(b=>b.classList.toggle('active',b.dataset.fwKind===k));
     const tokenVisible=token=>String(token||'').split(/\s+/).some(t=>t==='creature'?creatureKind(k):t==='noncreature'?!creatureKind(k):t===k);
     $$('[data-fw-show]').forEach(el=>el.classList.toggle('fw-hidden',!tokenVisible(el.dataset.fwShow)));
     $$('[data-fw-section]').forEach(el=>el.classList.toggle('fw-hidden',!tokenVisible(el.dataset.fwSection)));
     const give=$('[data-fw-push-actor]'), target=$('.fw-actor-target');
-    const canGive=!creatureKind(k) && (k==='item'||k==='feat'||k==='action'||k==='homebrew');
+    const canGive=!creatureKind(k) && !bundleKind(k) && (k==='item'||k==='feat'||k==='action'||k==='homebrew');
     if(give){give.disabled=!canGive;give.title=canGive?'Save and add this item/feat/action to the selected actor':'Creatures and NPCs are created in the Foundry world directory'}
     target?.classList.toggle('fw-disabled',!canGive);
-    const worldPush=$('[data-fw-push-world]');if(worldPush)worldPush.textContent=creatureKind(k)?'Save & push to Foundry Actors':'Save & add to Foundry Items';
+    const worldPush=$('[data-fw-push-world]');if(worldPush)worldPush.textContent=creatureKind(k)?'Save & push to Foundry Actors':k==='ancestry'?'Save & import ancestry package':k==='archetype'?'Save & import archetype package':'Save & add to Foundry Items';
     const latexBtn=$('[data-fw-latex]');if(latexBtn)latexBtn.disabled=creatureKind(k);
     $$('[data-fw-template]').forEach(b=>b.classList.toggle('visible',b.dataset.fwTemplateKind===k));
-    if(resetCollections){state.attacks=[];state.abilities=[];renderRepeaters()}
+    if(resetCollections){state.attacks=[];state.abilities=[];state.spells=[];state.heritages=[];state.bundleFeats=[];renderRepeaters()}
     editingLabel.textContent=`${state.currentId?'EDITING':'NEW'} ${kindName(k).toUpperCase()}`;
     updateItemSubtype();updateToolbar();renderPreview();setDirty();
   }
@@ -147,24 +151,54 @@
       <textarea data-rkey="description" placeholder="Homebrew spell effect / rules text… (ignored when an official compendium spell is matched)">${esc(row.description||'')}</textarea>
     </div>`;
   }
+  function heritageRow(row={},index=0){
+    return `<div class="fw-repeat-row fw-bundle-card" data-heritage-index="${index}">
+      <div class="fw-repeat-card-head"><label class="fw-ability-name"><span>Heritage name</span><input data-rkey="title" value="${esc(row.title||row.name||'')}" placeholder="Cloudborn Jotunari"></label><button class="fw-remove-row" type="button" data-remove-heritage="${index}" title="Remove heritage">×</button></div>
+      <div class="fw-repeat-grid"><label><span>Rarity</span><select data-rkey="rarity">${['common','uncommon','rare'].map(x=>`<option value="${x}" ${String(row.rarity||'common')===x?'selected':''}>${x}</option>`).join('')}</select></label><label><span>Traits</span><input data-rkey="traits" value="${esc(row.traits||'')}" placeholder="jotunari"></label></div>
+      <label class="fw-repeat-wide"><span>Heritage rules</span><textarea data-rkey="description" rows="5" placeholder="Describe the heritage benefit and any special rules.">${esc(row.description||'')}</textarea></label>
+    </div>`;
+  }
+  function bundleFeatRow(row={},index=0){
+    const action=String(row.action_cost||'');
+    return `<div class="fw-repeat-row fw-bundle-card" data-bundle-feat-index="${index}">
+      <div class="fw-repeat-card-head"><label class="fw-ability-name"><span>Feat name</span><input data-rkey="title" value="${esc(row.title||'')}" placeholder="Titanic Fortitude"></label><button class="fw-remove-row" type="button" data-remove-bundle-feat="${index}" title="Remove feat">×</button></div>
+      <div class="fw-repeat-grid">
+        <label><span>Level</span><input data-rkey="level" type="number" min="1" max="30" step="1" value="${esc(row.level??1)}"></label>
+        <label><span>Action cost</span><select data-rkey="action_cost"><option value="" ${!action?'selected':''}>Passive</option><option value="1" ${action==='1'?'selected':''}>◆ One</option><option value="2" ${action==='2'?'selected':''}>◆◆ Two</option><option value="3" ${action==='3'?'selected':''}>◆◆◆ Three</option><option value="reaction" ${action==='reaction'?'selected':''}>↺ Reaction</option><option value="free" ${action==='free'?'selected':''}>◇ Free</option></select></label>
+        <label class="span-2"><span>Traits</span><input data-rkey="traits" value="${esc(row.traits||'')}" placeholder="jotunari, ancestry"></label>
+        <label class="span-2"><span>Access</span><input data-rkey="access" value="${esc(row.access||'')}" placeholder="Members of a specific culture, school, or organization…"></label>
+        <label class="span-2"><span>Prerequisites</span><input data-rkey="prerequisites" value="${esc(row.prerequisites||'')}"></label>
+        <label><span>Frequency</span><input data-rkey="frequency" value="${esc(row.frequency||'')}"></label><label><span>Trigger</span><input data-rkey="trigger" value="${esc(row.trigger||'')}"></label>
+        <label class="span-2"><span>Requirements</span><input data-rkey="requirements" value="${esc(row.requirements||'')}"></label>
+        <label class="span-2"><span>Special</span><input data-rkey="special" value="${esc(row.special||'')}"></label>
+      </div>
+      <label class="fw-repeat-wide"><span>Rules text</span><textarea data-rkey="description" rows="6" placeholder="Write the feat rules in normal Pathfinder language.">${esc(row.description||'')}</textarea></label>
+    </div>`;
+  }
   function renderRepeaters(){
-    const a=$('[data-fw-attacks]'),b=$('[data-fw-abilities]'),s=$('[data-fw-spells]');
+    const a=$('[data-fw-attacks]'),b=$('[data-fw-abilities]'),s=$('[data-fw-spells]'),h=$('[data-fw-heritages]'),f=$('[data-fw-bundle-feats]');
     if(a)a.innerHTML=state.attacks.length?state.attacks.map(attackRow).join(''):'<div class="fw-repeater-empty">No strikes yet. Add only the attacks you expect to use.</div>';
     if(b)b.innerHTML=state.abilities.length?state.abilities.map(abilityRow).join(''):'<div class="fw-repeater-empty">No special abilities yet. Add reactions, passive abilities, activated powers, or signature tricks here.</div>';
     if(s)s.innerHTML=state.spells.length?state.spells.map(spellRow).join(''):'<div class="fw-repeater-empty">No structured spells yet. Add spells here if you want them to appear as real Foundry spells.</div>';
+    if(h)h.innerHTML=state.heritages.length?state.heritages.map(heritageRow).join(''):'<div class="fw-repeater-empty">No heritages yet. The ancestry itself can still be saved as a draft.</div>';
+    $$('[data-fw-bundle-feats]').forEach(host=>host.innerHTML=state.bundleFeats.length?state.bundleFeats.map(bundleFeatRow).join(''):'<div class="fw-repeater-empty">No feats yet. Add the progression whenever you are ready.</div>');
   }
   function syncRepeaters(){
     $$('[data-attack-index]').forEach(row=>{const i=+row.dataset.attackIndex;state.attacks[i] ||= {};$$('[data-rkey]',row).forEach(el=>state.attacks[i][el.dataset.rkey]=el.type==='checkbox'?el.checked:el.value)});
     $$('[data-ability-index]').forEach(row=>{const i=+row.dataset.abilityIndex;state.abilities[i] ||= {};$$('[data-rkey]',row).forEach(el=>state.abilities[i][el.dataset.rkey]=el.type==='checkbox'?el.checked:el.value)});
     $$('[data-spell-index]').forEach(row=>{const i=+row.dataset.spellIndex;state.spells[i] ||= {};$$('[data-rkey]',row).forEach(el=>state.spells[i][el.dataset.rkey]=el.type==='checkbox'?el.checked:el.value)});
+    $$('[data-heritage-index]').forEach(row=>{const i=+row.dataset.heritageIndex;state.heritages[i] ||= {};$$('[data-rkey]',row).forEach(el=>state.heritages[i][el.dataset.rkey]=el.type==='checkbox'?el.checked:el.value)});
+    const currentBundle=fieldValue('kind');const featHost=bundleKind(currentBundle)?$(`[data-fw-section="${currentBundle}"] [data-fw-bundle-feats]`):null;const featRows=featHost?$$('[data-bundle-feat-index]',featHost):[];featRows.forEach(row=>{const i=+row.dataset.bundleFeatIndex;state.bundleFeats[i] ||= {};$$('[data-rkey]',row).forEach(el=>state.bundleFeats[i][el.dataset.rkey]=el.type==='checkbox'?el.checked:el.value)});
   }
 
-  const payloadFields=['img','token_img','level','rarity','size','actor_role','traits','item_type','feat_category','homebrew_document','price','bulk','usage','hands','quantity','item_category','action_cost','frequency','prerequisites','trigger','requirements','activation_actions','activation_frequency','activation_trigger','activation_requirements','homebrew_actions','homebrew_frequency','homebrew_trigger','perception','speed','senses','languages','skills','ac','fortitude','reflex','will','hp','immunities','weaknesses','resistances','str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod','description','spellcasting','spell_tradition','spell_mode','spell_dc','spell_attack','gm_notes','codex_visibility','codex_category','codex_blurb','weapon_category','weapon_group','weapon_damage_dice','weapon_damage_die','weapon_damage_type','weapon_damage_modifier','weapon_bonus','weapon_usage','weapon_range','weapon_reload','weapon_potency','weapon_striking','weapon_base','library_section','library_group','ancestry_trait','archetype_name','class_name'];
+  const payloadFields=['img','token_img','level','rarity','size','actor_role','traits','item_type','feat_category','homebrew_document','price','bulk','usage','hands','quantity','item_category','action_cost','frequency','access','prerequisites','trigger','requirements','special','activation_actions','activation_frequency','activation_trigger','activation_requirements','homebrew_actions','homebrew_frequency','homebrew_trigger','perception','speed','senses','languages','skills','ac','fortitude','reflex','will','hp','immunities','weaknesses','resistances','str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod','description','spellcasting','spell_tradition','spell_mode','spell_dc','spell_attack','gm_notes','codex_visibility','codex_category','codex_blurb','weapon_category','weapon_group','weapon_damage_dice','weapon_damage_die','weapon_damage_type','weapon_damage_modifier','weapon_bonus','weapon_usage','weapon_range','weapon_reload','weapon_potency','weapon_striking','weapon_base','library_section','library_group','ancestry_trait','archetype_name','class_name','ancestry_hp','ancestry_size','ancestry_speed','ancestry_reach','ancestry_vision','ancestry_languages','ancestry_additional_languages','ancestry_traits','ancestry_boosts','ancestry_free_boosts','ancestry_flaws','archetype_access','archetype_traits','dedication_title','dedication_level','dedication_action_cost','dedication_traits','dedication_prerequisites','dedication_frequency','dedication_trigger','dedication_requirements','dedication_special','dedication_description'];
   function collectData(sync=true){
     if(sync)syncRepeaters();
-    const kind=fieldValue('kind')||'monster';
-    const payload={};payloadFields.forEach(k=>payload[k]=fieldValue(k));payload.codex_publish=!!field('codex_publish')?.checked;payload.homebrew_publish=!!field('homebrew_publish')?.checked;payload.attacks=state.attacks;payload.abilities=state.abilities;payload.spells=state.spells;
-    return {id:fieldValue('id')||undefined,kind,target_type:'world',title:fieldValue('title').trim(),subtitle:fieldValue('subtitle').trim(),summary:fieldValue('summary'),tags:fieldValue('traits'),payload};
+    const uiKind=fieldValue('kind')||'monster';
+    const kind=bundleKind(uiKind)?'homebrew':uiKind;
+    const payload={};payloadFields.forEach(k=>payload[k]=fieldValue(k));payload.codex_publish=!!field('codex_publish')?.checked;payload.homebrew_publish=!!field('homebrew_publish')?.checked;payload.attacks=state.attacks;payload.abilities=state.abilities;payload.spells=state.spells;payload.heritages=state.heritages;payload.bundle_feats=state.bundleFeats;
+    if(bundleKind(uiKind)){payload.homebrew_document=uiKind;payload.library_section=uiKind;payload.library_group=fieldValue('title').trim();if(uiKind==='ancestry')payload.ancestry_trait=payload.ancestry_trait||fieldValue('title').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-');if(uiKind==='archetype')payload.archetype_name=fieldValue('title').trim()}
+    return {id:fieldValue('id')||undefined,kind,target_type:'world',title:fieldValue('title').trim(),subtitle:fieldValue('subtitle').trim(),summary:fieldValue('summary'),tags:bundleKind(uiKind)?(uiKind==='ancestry'?fieldValue('ancestry_traits'):fieldValue('archetype_traits')):fieldValue('traits'),payload};
   }
 
   function clearValidation(){
@@ -199,13 +233,14 @@
     return problems;
   }
   function fillForm(entry=null){
-    form.reset();state.currentId=entry?.id||null;state.attacks=[];state.abilities=[];state.spells=[];
+    form.reset();state.currentId=entry?.id||null;state.attacks=[];state.abilities=[];state.spells=[];state.heritages=[];state.bundleFeats=[];
     setField('id',entry?.id||'');setField('title',entry?.title||'');setField('subtitle',entry?.subtitle||'');setField('summary',entry?.summary||'');
     const p=entry?.payload||{};payloadFields.forEach(k=>setField(k,p[k]??''));
-    if(!entry){setField('level','1');setField('rarity','common');setField('size','med');setField('quantity','1');setField('weapon_category','simple');setField('weapon_damage_dice','1');setField('weapon_damage_die','d6');setField('weapon_damage_type','slashing');setField('weapon_damage_modifier','0');setField('weapon_bonus','0');setField('weapon_usage','held-in-one-hand');setField('weapon_potency','0');setField('weapon_striking','0');['str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod'].forEach(k=>setField(k,'0'))}
+    if(!entry){setField('level','1');setField('rarity','common');setField('size','med');setField('quantity','1');setField('ancestry_hp','8');setField('ancestry_size','med');setField('ancestry_speed','25');setField('ancestry_reach','5');setField('ancestry_vision','normal');setField('ancestry_languages','common');setField('ancestry_additional_languages','0');setField('ancestry_free_boosts','2');setField('dedication_level','2');setField('dedication_traits','archetype, dedication');setField('weapon_category','simple');setField('weapon_damage_dice','1');setField('weapon_damage_die','d6');setField('weapon_damage_type','slashing');setField('weapon_damage_modifier','0');setField('weapon_bonus','0');setField('weapon_usage','held-in-one-hand');setField('weapon_potency','0');setField('weapon_striking','0');['str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod'].forEach(k=>setField(k,'0'))}
     if(field('codex_publish'))field('codex_publish').checked=!!p.codex_publish;if(field('homebrew_publish'))field('homebrew_publish').checked=!!p.homebrew_publish;
-    state.attacks=Array.isArray(p.attacks)?structuredClone(p.attacks):[];state.abilities=Array.isArray(p.abilities)?structuredClone(p.abilities):[];state.spells=Array.isArray(p.spells)?structuredClone(p.spells):[];
-    setKind(entry?.kind||'monster');renderRepeaters();updateItemSubtype();updateArtStatus();updateToolbar();renderPreview();
+    state.attacks=Array.isArray(p.attacks)?structuredClone(p.attacks):[];state.abilities=Array.isArray(p.abilities)?structuredClone(p.abilities):[];state.spells=Array.isArray(p.spells)?structuredClone(p.spells):[];state.heritages=Array.isArray(p.heritages)?structuredClone(p.heritages):[];state.bundleFeats=Array.isArray(p.bundle_feats)?structuredClone(p.bundle_feats):[];
+    const inferred=entry?.kind==='homebrew'&&['ancestry','archetype'].includes(String(p.homebrew_document||'').toLowerCase())?String(p.homebrew_document).toLowerCase():(entry?.kind||'monster');
+    setKind(inferred);renderRepeaters();updateItemSubtype();updateArtStatus();updateToolbar();renderPreview();
     state.savedSnapshot=JSON.stringify(collectData());
     setDirty();
     $('[data-fw-duplicate]').disabled=!entry;
@@ -213,11 +248,11 @@
     document.querySelector('.fw-form-scroll')?.scrollTo({top:0,behavior:'smooth'});
   }
 
-  function libraryMeta(e){const p=e.payload||{};const lv=String(p.level??'').trim();return [kindName(e.kind),lv!==''?`Level ${lv}`:'',p.rarity&&p.rarity!=='common'?p.rarity:''].filter(Boolean)}
+  function libraryMeta(e){const p=e.payload||{},k=displayKind(e);if(k==='ancestry')return ['Ancestry',`${(p.heritages||[]).length} heritages`,`${(p.bundle_feats||[]).length} feats`];if(k==='archetype')return ['Archetype',`Dedication ${p.dedication_level||2}`,`${(p.bundle_feats||[]).length} feats`];const lv=String(p.level??'').trim();return [kindName(k),lv!==''?`Level ${lv}`:'',p.rarity&&p.rarity!=='common'?p.rarity:''].filter(Boolean)}
   function renderLibrary(){
     const q=state.query.trim().toLowerCase();
-    const rows=state.entries.filter(e=>(state.filter==='all'||e.kind===state.filter)&&(!q||`${e.title} ${e.subtitle} ${e.tags} ${e.kind}`.toLowerCase().includes(q)));
-    list.innerHTML=rows.length?rows.map(e=>`<button class="fw-library-entry ${String(e.id)===String(state.currentId)?'active':''}" type="button" data-fw-open="${e.id}"><span class="fw-library-entry-icon">${kindIcon(e.kind)}</span><span><strong>${esc(e.title||'Untitled')}</strong><small>${esc(e.subtitle||kindName(e.kind))}</small><span class="fw-library-entry-meta">${libraryMeta(e).map(m=>`<span>${esc(m)}</span>`).join('')}</span></span></button>`).join(''):'<div class="fw-library-empty">Nothing matches this view yet.<br>Create something worth surprising your players with.</div>';
+    const rows=state.entries.filter(e=>{const k=displayKind(e);return (state.filter==='all'||k===state.filter)&&(!q||`${e.title} ${e.subtitle} ${e.tags} ${k}`.toLowerCase().includes(q))});
+    list.innerHTML=rows.length?rows.map(e=>`<button class="fw-library-entry ${String(e.id)===String(state.currentId)?'active':''}" type="button" data-fw-open="${e.id}"><span class="fw-library-entry-icon">${kindIcon(displayKind(e))}</span><span><strong>${esc(e.title||'Untitled')}</strong><small>${esc(e.subtitle||kindName(displayKind(e)))}</small><span class="fw-library-entry-meta">${libraryMeta(e).map(m=>`<span>${esc(m)}</span>`).join('')}</span></span></button>`).join(''):'<div class="fw-library-empty">Nothing matches this view yet.<br>Create something worth surprising your players with.</div>';
   }
   function renderLog(){
     const rows=state.commands||[];
@@ -252,10 +287,13 @@
   }
   function featPreview(d){const p=d.payload||{},act=actionGlyph(p.action_cost);return `${p.img?`<img class="fw-preview-image" src="${esc(p.img)}" alt="">`:''}<header class="fw-stat-top fw-feat-top"><h3>${esc(d.title||'Untitled feat')} ${act?`<span class="fw-action-glyphs">${act}</span>`:''}</h3><span class="fw-stat-level">FEAT ${esc(num(p.level,'1'))}</span></header>${d.subtitle?`<div class="fw-stat-subtitle">${esc(d.subtitle)}</div>`:''}${traitHtml('feat',p)}<div class="fw-stat-body">${p.prerequisites?`<p><strong>Prerequisites</strong> ${esc(p.prerequisites)}</p>`:''}${p.frequency?`<p><strong>Frequency</strong> ${esc(p.frequency)}</p>`:''}${p.trigger?`<p><strong>Trigger</strong> ${esc(p.trigger)}</p>`:''}${p.requirements?`<p><strong>Requirements</strong> ${esc(p.requirements)}</p>`:''}${(p.prerequisites||p.frequency||p.trigger||p.requirements)?'<hr class="fw-stat-divider">':''}${p.description?`<p class="fw-stat-desc">${lines(p.description)}</p>`:'<p class="fw-stat-desc">Describe what the feat does.</p>'}${abilityPreview(p.abilities)}${d.summary?`<div class="fw-preview-note">${lines(d.summary)}</div>`:''}</div>`}
   function homebrewPreview(d){const p=d.payload||{},act=actionGlyph(p.homebrew_actions);return `${p.img?`<img class="fw-preview-image" src="${esc(p.img)}" alt="">`:''}<header class="fw-stat-top fw-free-top"><h3>${esc(d.title||'Untitled homebrew')} ${act?`<span class="fw-action-glyphs">${act}</span>`:''}</h3><span class="fw-stat-level">${esc(String(p.homebrew_document||'HOMEBREW').toUpperCase())} ${esc(num(p.level,''))}</span></header>${d.subtitle?`<div class="fw-stat-subtitle">${esc(d.subtitle)}</div>`:''}${traitHtml('homebrew',p)}<div class="fw-stat-body">${p.homebrew_frequency?`<p><strong>Frequency</strong> ${esc(p.homebrew_frequency)}</p>`:''}${p.homebrew_trigger?`<p><strong>Trigger</strong> ${esc(p.homebrew_trigger)}</p>`:''}${p.description?`<p class="fw-stat-desc">${lines(p.description)}</p>`:'<p class="fw-stat-desc">Freeform rules text goes here.</p>'}${abilityPreview(p.abilities)}${d.summary?`<div class="fw-preview-note">${lines(d.summary)}</div>`:''}</div>`}
+  function bundleRuleMetaHtml(rule={}){return [['Access','access'],['Prerequisites','prerequisites'],['Frequency','frequency'],['Trigger','trigger'],['Requirements','requirements'],['Special','special']].map(([label,key])=>rule[key]?`<p><strong>${label}</strong> ${esc(rule[key])}</p>`:'').join('')}
+  function ancestryPreview(d){const p=d.payload||{},heritages=p.heritages||[],feats=p.bundle_feats||[];const stats=[['HP',p.ancestry_hp||8],['Size',p.ancestry_size||'med'],['Speed',`${p.ancestry_speed||25} ft`],['Vision',String(p.ancestry_vision||'normal').replaceAll('-',' ')]];return `<header class="fw-stat-top fw-feat-top"><h3>${esc(d.title||'Untitled ancestry')}</h3><span class="fw-stat-level">ANCESTRY</span></header>${d.subtitle?`<div class="fw-stat-subtitle">${esc(d.subtitle)}</div>`:''}<div class="fw-preview-traits fw-feat-traits">${slugList(p.ancestry_traits).map(t=>`<span>${esc(t)}</span>`).join('')}</div><div class="fw-stat-body"><div class="fw-bundle-preview-stats">${stats.map(([k,v])=>`<span><strong>${esc(k)}</strong>${esc(v)}</span>`).join('')}</div>${p.ancestry_languages?`<p><strong>Languages</strong> ${esc(p.ancestry_languages)}</p>`:''}${p.ancestry_boosts?`<p><strong>Boosts</strong> ${esc(p.ancestry_boosts)}${p.ancestry_free_boosts?` + ${esc(p.ancestry_free_boosts)} free`:''}</p>`:''}${p.ancestry_flaws?`<p><strong>Flaws</strong> ${esc(p.ancestry_flaws)}</p>`:''}${p.description?`<p class="fw-stat-desc">${lines(p.description)}</p>`:''}<hr class="fw-stat-divider"><h4>Heritages · ${heritages.length}</h4>${heritages.slice(0,6).map(h=>`<div class="fw-stat-action"><h4>${esc(h.title||h.name||'Heritage')}</h4>${h.traits?`<small>${esc(h.traits)}</small>`:''}<p>${lines(h.description||'')}</p></div>`).join('')||'<p class="muted">No heritages yet.</p>'}<hr class="fw-stat-divider"><h4>Ancestry feats · ${feats.length}</h4>${feats.slice().sort((a,b)=>Number(a.level||0)-Number(b.level||0)).slice(0,10).map(f=>`<div class="fw-stat-action"><h4>${esc(f.title||'Feat')} <span class="fw-action-glyphs">${actionGlyph(String(f.action_cost||''))}</span></h4><small>Level ${esc(f.level||1)}${f.traits?` · ${esc(f.traits)}`:''}</small>${bundleRuleMetaHtml(f)}<p>${lines(f.description||'')}</p></div>`).join('')||'<p class="muted">No ancestry feats yet.</p>'}${d.summary?`<div class="fw-preview-note">${lines(d.summary)}</div>`:''}</div>`}
+  function archetypePreview(d){const p=d.payload||{},feats=p.bundle_feats||[];return `<header class="fw-stat-top fw-free-top"><h3>${esc(d.title||'Untitled archetype')}</h3><span class="fw-stat-level">ARCHETYPE</span></header>${d.subtitle?`<div class="fw-stat-subtitle">${esc(d.subtitle)}</div>`:''}<div class="fw-preview-traits fw-free-traits">${slugList(p.archetype_traits).map(t=>`<span>${esc(t)}</span>`).join('')}</div><div class="fw-stat-body">${p.archetype_access?`<p><strong>Access</strong> ${esc(p.archetype_access)}</p>`:''}${p.description?`<p class="fw-stat-desc">${lines(p.description)}</p>`:''}<div class="fw-stat-action"><h4>${esc(p.dedication_title||`${d.title||'Archetype'} Dedication`)} ${actionGlyph(String(p.dedication_action_cost||''))}</h4><small>Feat ${esc(p.dedication_level||2)} · ${esc(p.dedication_traits||'archetype, dedication')}</small>${bundleRuleMetaHtml({access:p.archetype_access,prerequisites:p.dedication_prerequisites,frequency:p.dedication_frequency,trigger:p.dedication_trigger,requirements:p.dedication_requirements,special:p.dedication_special})}<p>${lines(p.dedication_description||'Describe the dedication benefit.')}</p></div><hr class="fw-stat-divider"><h4>Archetype feats · ${feats.length}</h4>${feats.slice().sort((a,b)=>Number(a.level||0)-Number(b.level||0)).slice(0,12).map(f=>`<div class="fw-stat-action"><h4>${esc(f.title||'Feat')} <span class="fw-action-glyphs">${actionGlyph(String(f.action_cost||''))}</span></h4><small>Level ${esc(f.level||1)}${f.traits?` · ${esc(f.traits)}`:''}</small>${bundleRuleMetaHtml(f)}<p>${lines(f.description||'')}</p></div>`).join('')||'<p class="muted">No archetype feats yet.</p>'}${d.summary?`<div class="fw-preview-note">${lines(d.summary)}</div>`:''}</div>`}
   function renderPreview(){
     syncRepeaters();const d=collectData(false);updateToolbar();
     if(!d.title && !d.summary && !(d.payload.description||'').trim() && !state.attacks.length && !state.abilities.length){preview.innerHTML='<div class="fw-statblock-empty"><span>✦</span><h3>Start with a name</h3><p>Your Pathfinder-style preview updates while you type.</p></div>';return}
-    preview.innerHTML=creatureKind(d.kind)?creaturePreview(d):d.kind==='item'?itemPreview(d):d.kind==='feat'?featPreview(d):d.kind==='action'?homebrewPreview({...d,payload:{...d.payload,homebrew_document:'action',homebrew_actions:d.payload?.action_cost}}):homebrewPreview(d);
+    const k=fieldValue('kind');preview.innerHTML=k==='ancestry'?ancestryPreview(d):k==='archetype'?archetypePreview(d):creatureKind(d.kind)?creaturePreview(d):d.kind==='item'?itemPreview(d):d.kind==='feat'?featPreview(d):d.kind==='action'?homebrewPreview({...d,payload:{...d.payload,homebrew_document:'action',homebrew_actions:d.payload?.action_cost}}):homebrewPreview(d);
   }
 
   async function refresh(){const data=await jsonFetch('/api/v61/foundry/workshop');state.actors=data.actors||[];state.entries=data.prepared_content||[];state.commands=data.commands||[];renderLibrary();renderLog()}
@@ -294,7 +332,7 @@
 
   form.addEventListener('submit',async e=>{e.preventDefault();try{await saveCurrent()}catch(err){if(!String(err.message||'').startsWith('Fix the highlighted'))toast(err.message||'Could not save.',true)}});
   let validationTimer=null;
-  const onWorkshopEdit=()=>{renderPreview();setDirty();clearTimeout(validationTimer);validationTimer=setTimeout(()=>validateData(collectData(),{announce:false}),180)};
+  const onWorkshopEdit=()=>{if(fieldValue('kind')==='archetype'&&!fieldValue('dedication_title').trim()&&fieldValue('title').trim())setField('dedication_title',`${fieldValue('title').trim()} Dedication`);renderPreview();setDirty();clearTimeout(validationTimer);validationTimer=setTimeout(()=>validateData(collectData(),{announce:false}),180)};
   form.addEventListener('input',onWorkshopEdit);form.addEventListener('change',e=>{if(e.target?.name==='item_type')updateItemSubtype();onWorkshopEdit()});
   $$('[data-fw-kind]').forEach(b=>b.addEventListener('click',()=>setKind(b.dataset.fwKind)));
   $$('[data-fw-template]').forEach(b=>b.addEventListener('click',()=>{
@@ -312,21 +350,29 @@
       'action-feat':{feat_category:'class',action_cost:'1',summary:'A one-action feat with a clear tactical purpose.'},
       'reaction-feat':{feat_category:'class',action_cost:'reaction',summary:'A reaction feat built around a precise trigger.'},
       'free-action':{action_cost:'1',summary:'A custom action or activity with structured action economy and rules text.'},
+      'ancestry-standard':{ancestry_hp:'8',ancestry_size:'med',ancestry_speed:'25',ancestry_reach:'5',ancestry_vision:'normal',ancestry_languages:'common',ancestry_additional_languages:'0',ancestry_free_boosts:'2',ancestry_traits:'humanoid',summary:'A complete playable ancestry with a core chassis, heritages, and ancestry feats.'},
+      'archetype-standard':{dedication_level:'2',dedication_traits:'archetype, dedication',summary:'A complete archetype with an entry dedication and a coherent feat progression.'},
       'free-item':{homebrew_document:'equipment',summary:'A custom item or rules object that does not fit another template.'},
     };
     const preset=presets[key]||{};Object.entries(preset).forEach(([k,v])=>setField(k,v));
     if(key==='brute' && !state.attacks.length)state.attacks=[{name:'Heavy Strike',type:'melee',bonus:'',damage:'',damage_type:'bludgeoning',range:'',traits:'',effects:''}];
     if(key==='skirmisher' && !state.attacks.length)state.attacks=[{name:'Agile Strike',type:'melee',bonus:'',damage:'',damage_type:'slashing',range:'',traits:'agile',effects:''}];
     if(key==='caster' && !state.abilities.length)state.abilities=[{name:'Signature Magic',actions:'2',traits:'magical',description:''}];
+    if(key==='ancestry-standard'){if(!state.heritages.length)state.heritages=[{title:'',rarity:'common',traits:'',description:''}];if(!state.bundleFeats.length)state.bundleFeats=[{title:'',level:'1',action_cost:'',traits:'',access:'',prerequisites:'',frequency:'',trigger:'',requirements:'',special:'',description:''}]}
+    if(key==='archetype-standard'&&!state.bundleFeats.length)state.bundleFeats=[{title:'',level:'4',action_cost:'',traits:'archetype',access:'',prerequisites:'',frequency:'',trigger:'',requirements:'',special:'',description:''}];
     updateItemSubtype();renderRepeaters();renderPreview();setDirty();toast('Quick-start template applied. Fill in level-appropriate numbers.');
   }));
   $('[data-fw-add-attack]')?.addEventListener('click',()=>{syncRepeaters();state.attacks.push({name:'',type:'melee',bonus:'',damage:'',damage_type:'slashing',range:'',traits:'',effects:''});renderRepeaters();renderPreview();setDirty();$('[data-fw-attacks] .fw-repeat-row:last-child input')?.focus()});
   $('[data-fw-add-ability]')?.addEventListener('click',()=>{syncRepeaters();state.abilities.push({name:'',actions:'',category:'offensive',traits:'',trigger:'',requirements:'',dc_type:'',dc:'',dc_basic:false,dc_show:'owner',damage:'',damage_type:'fire',frequency_max:'',frequency_per:'',description:''});renderRepeaters();renderPreview();setDirty();$('[data-fw-abilities] .fw-repeat-row:last-child input')?.focus()});
   $('[data-fw-add-spell]')?.addEventListener('click',()=>{syncRepeaters();state.spells.push({name:'',rank:'1',actions:'2',uses:'1',range:'',target:'',save:'',basic:false,damage:'',damage_type:'fire',traits:'',duration:'',source_uuid:'',description:''});renderRepeaters();renderPreview();setDirty();$('[data-fw-spells] .fw-repeat-row:last-child input')?.focus()});
+  $('[data-fw-add-heritage]')?.addEventListener('click',()=>{syncRepeaters();state.heritages.push({title:'',rarity:'common',traits:'',description:''});renderRepeaters();renderPreview();setDirty();$('[data-fw-heritages] .fw-repeat-row:last-child input')?.focus()});
+  $$('[data-fw-add-bundle-feat]').forEach(b=>b.addEventListener('click',()=>{syncRepeaters();state.bundleFeats.push({title:'',level:fieldValue('kind')==='archetype'?'4':'1',action_cost:'',traits:fieldValue('kind')==='archetype'?'archetype':'',access:'',prerequisites:'',frequency:'',trigger:'',requirements:'',special:'',description:''});renderRepeaters();renderPreview();setDirty();const host=$('[data-fw-section="'+fieldValue('kind')+'"] [data-fw-bundle-feats]');$('.fw-repeat-row:last-child input',host)?.focus()}));
   root.addEventListener('click',e=>{
     const ra=e.target.closest('[data-remove-attack]');if(ra){syncRepeaters();state.attacks.splice(+ra.dataset.removeAttack,1);renderRepeaters();renderPreview();setDirty();return}
     const rb=e.target.closest('[data-remove-ability]');if(rb){syncRepeaters();state.abilities.splice(+rb.dataset.removeAbility,1);renderRepeaters();renderPreview();setDirty();return}
     const rs=e.target.closest('[data-remove-spell]');if(rs){syncRepeaters();state.spells.splice(+rs.dataset.removeSpell,1);renderRepeaters();renderPreview();setDirty();return}
+    const rh=e.target.closest('[data-remove-heritage]');if(rh){syncRepeaters();state.heritages.splice(+rh.dataset.removeHeritage,1);renderRepeaters();renderPreview();setDirty();return}
+    const rf=e.target.closest('[data-remove-bundle-feat]');if(rf){syncRepeaters();state.bundleFeats.splice(+rf.dataset.removeBundleFeat,1);renderRepeaters();renderPreview();setDirty();return}
     const cost=e.target.closest('[data-ability-cost]');if(cost){syncRepeaters();const i=+cost.dataset.abilityI;state.abilities[i].actions=cost.dataset.abilityCost||'';renderRepeaters();renderPreview();setDirty();return}
     const dtype=e.target.closest('[data-ability-dc-type]');if(dtype){syncRepeaters();const i=+dtype.dataset.abilityI;state.abilities[i].dc_type=dtype.dataset.abilityDcType||'';renderRepeaters();renderPreview();setDirty();return}
     const clear=e.target.closest('[data-ability-clear-dc]');if(clear){syncRepeaters();const i=+clear.dataset.abilityI;state.abilities[i].dc_type='';state.abilities[i].dc='';renderRepeaters();renderPreview();setDirty();return}
@@ -340,7 +386,7 @@
   $('[data-fw-copy-json]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(JSON.stringify(collectData(),null,2));toast('Homebrew JSON copied.')}catch{toast('Could not access the clipboard.',true)}});
   const latexModal=$('[data-fw-latex-modal]'),latexText=$('[data-fw-latex-text]'),latexPath=$('[data-fw-latex-path]');
   async function openLatex(){
-    if(creatureKind(fieldValue('kind')))return toast('LaTeX export is for feats, actions and items.',true);
+    if(creatureKind(fieldValue('kind')))return toast('LaTeX export is for rules content, ancestries, and archetypes.',true);
     try{const saved=await saveCurrent({silent:true});const out=await jsonFetch(`/api/homebrew/${saved.id}/latex`);latexText.value=out.snippet||'';if(out.suggested_path&&!$$('option',latexPath).some(o=>o.value===out.suggested_path)){const o=document.createElement('option');o.value=out.suggested_path;o.textContent=`${out.suggested_path} · new`;latexPath.prepend(o)}latexPath.value=out.suggested_path||latexPath.value;latexModal?.classList.remove('hidden');latexModal?.setAttribute('aria-hidden','false')}catch(err){toast(err.message||'Could not generate LaTeX.',true)}
   }
   $('[data-fw-latex]')?.addEventListener('click',openLatex);$('[data-fw-latex-close]')?.addEventListener('click',()=>{latexModal?.classList.add('hidden');latexModal?.setAttribute('aria-hidden','true')});
@@ -537,6 +583,8 @@
 
   // Restore only a genuinely unsaved local draft. Saved Seeker entries always win.
   let draft=null;try{draft=JSON.parse(localStorage.getItem('seeker-foundry-workshop-draft')||'null')}catch{}
-  if(draft && !draft.id && (draft.title||draft.summary||draft.payload?.description)){fillForm(draft);state.currentId=null;state.savedSnapshot='';setDirty()}else{fillForm()}
+  const requestedEntry=new URLSearchParams(location.search).get('entry');
+  const requested=state.entries.find(x=>String(x.id)===String(requestedEntry||''));
+  if(requested){fillForm(requested)}else if(draft && !draft.id && (draft.title||draft.summary||draft.payload?.description)){fillForm(draft);state.currentId=null;state.savedSnapshot='';setDirty()}else{fillForm()}
   renderLibrary();renderLog();renderPreview();
 })();

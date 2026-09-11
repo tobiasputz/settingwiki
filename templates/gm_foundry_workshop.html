@@ -6,7 +6,7 @@
     <div>
       <span class="eyebrow">GM · FOUNDRY WORKSHOP</span>
       <h1>Homebrew Forge</h1>
-      <p>Build Pathfinder 2e-ready creatures, NPCs, items and feats with a live statblock preview, then send them to Foundry when you need them.</p>
+      <p>Build Pathfinder 2e-ready creatures, items, feats, complete ancestries, and complete archetypes with live previews, draft saving, LaTeX export, and Foundry delivery.</p>
     </div>
     <div class="fw-head-actions">
       <div class="fw-bridge-pill {{ 'online' if foundry.received_at else 'offline' }}">
@@ -38,6 +38,7 @@
         <button type="button" data-fw-filter="npc">NPCs</button>
         <button type="button" data-fw-filter="item">Items</button>
         <button type="button" data-fw-filter="feat">Feats</button><button type="button" data-fw-filter="action">Actions</button>
+        <button type="button" data-fw-filter="ancestry">Ancestries</button><button type="button" data-fw-filter="archetype">Archetypes</button>
       </div>
       <div id="foundryPrepList" class="fw-library-list"></div>
       <div class="fw-library-footer">
@@ -69,7 +70,9 @@
           <button type="button" data-fw-kind="item"><span>◇</span><strong>Item</strong><small>Gear & treasure</small></button>
           <button type="button" data-fw-kind="feat"><span>✦</span><strong>Feat</strong><small>Feats & abilities</small></button>
           <button type="button" data-fw-kind="action"><span>◆</span><strong>Action</strong><small>Actions & activities</small></button>
-          <button type="button" data-fw-kind="homebrew"><span>⌘</span><strong>Freeform</strong><small>Anything else</small></button>
+          <button type="button" data-fw-kind="ancestry"><span>♜</span><strong>Ancestry</strong><small>Full ancestry package</small></button>
+          <button type="button" data-fw-kind="archetype"><span>⌘</span><strong>Archetype</strong><small>Dedication + feat line</small></button>
+          <button type="button" data-fw-kind="homebrew"><span>◇</span><strong>Freeform</strong><small>Anything else</small></button>
         </section>
 
         <div class="fw-quick-start">
@@ -87,6 +90,8 @@
             <button type="button" data-fw-template="action-feat" data-fw-template-kind="feat">Action feat</button>
             <button type="button" data-fw-template="reaction-feat" data-fw-template-kind="feat">Reaction</button>
             <button type="button" data-fw-template="free-action" data-fw-template-kind="action">Custom action</button>
+            <button type="button" data-fw-template="ancestry-standard" data-fw-template-kind="ancestry">Standard ancestry</button>
+            <button type="button" data-fw-template="archetype-standard" data-fw-template-kind="archetype">Standard archetype</button>
             <button type="button" data-fw-template="free-item" data-fw-template-kind="homebrew">Custom item</button>
           </div>
         </div>
@@ -96,14 +101,14 @@
             <div class="fw-section-heading"><span>01</span><div><h2>Identity</h2><p>The information players see first.</p></div></div>
             <div class="fw-field-grid identity-grid">
               <label class="span-2"><span>Name</span><input name="title" maxlength="180" required placeholder="Ashen Warden"></label>
-              <label><span>Level</span><input name="level" type="number" min="-1" max="30" step="1" value="1"></label>
-              <label><span>Rarity</span><select name="rarity"><option value="common">Common</option><option value="uncommon">Uncommon</option><option value="rare">Rare</option><option value="unique">Unique</option></select></label>
+              <label data-fw-show="creature item feat action homebrew"><span>Level</span><input name="level" type="number" min="-1" max="30" step="1" value="1"></label>
+              <label data-fw-show="creature item feat action homebrew"><span>Rarity</span><select name="rarity"><option value="common">Common</option><option value="uncommon">Uncommon</option><option value="rare">Rare</option><option value="unique">Unique</option></select></label>
               <label data-fw-show="creature"><span>Size</span><select name="size"><option value="tiny">Tiny</option><option value="sm">Small</option><option value="med" selected>Medium</option><option value="lg">Large</option><option value="huge">Huge</option><option value="grg">Gargantuan</option></select></label>
               <label data-fw-show="creature"><span>Disposition</span><select name="actor_role"><option value="npc">Opposition / neutral</option><option value="ally">Party ally</option></select></label>
               <label data-fw-show="item"><span>Item category</span><select name="item_type"><option value="equipment">Equipment</option><option value="consumable">Consumable</option><option value="weapon">Weapon</option><option value="armor">Armor</option><option value="shield">Shield</option><option value="treasure">Treasure</option><option value="backpack">Container</option></select></label>
               <label data-fw-show="feat"><span>Feat category</span><select name="feat_category"><option value="general">General</option><option value="skill">Skill</option><option value="class">Class</option><option value="ancestry">Ancestry</option><option value="archetype">Archetype</option><option value="bonus">Bonus</option></select></label>
               <label data-fw-show="homebrew"><span>Foundry document</span><select name="homebrew_document"><option value="equipment">Item / equipment</option><option value="feat">Feat</option><option value="action">Action</option><option value="npc">NPC / creature</option></select></label>
-              <label class="span-2"><span>Traits</span><input name="traits" placeholder="human, humanoid, fire"></label>
+              <label class="span-2" data-fw-show="creature item feat action homebrew"><span>Traits</span><input name="traits" placeholder="human, humanoid, fire"></label>
               <label class="span-2"><span>Subtitle / source line</span><input name="subtitle" maxlength="180" placeholder="Elite guardian of the Cinder Gate"></label>
               <label class="span-2"><span>Portrait artwork</span><div class="fw-art-field"><input name="img" inputmode="url" placeholder="https://… or upload below"><button class="quiet-btn" type="button" data-fw-art-import>Import link</button><label class="quiet-btn fw-upload-button">Upload art<input type="file" accept="image/png,image/jpeg,image/webp" data-fw-art-upload hidden></label><button class="quiet-btn" type="button" data-fw-art-crop>Crop / frame</button></div><small class="fw-field-help" data-fw-art-status>Uploaded/imported art is automatically resized, compressed to WebP, and deduplicated in Seeker.</small></label>
               <label class="span-2" data-fw-show="creature"><span>Prototype token</span><div class="fw-art-field"><input name="token_img" inputmode="url" placeholder="Separate token image URL (optional)"><button class="quiet-btn" type="button" data-fw-token-maker>Make token from art</button></div><small class="fw-field-help">If left empty, Foundry uses the portrait. The token maker saves a compact WebP and assigns it to the creature's prototype token.</small></label>
@@ -189,9 +194,11 @@
             <div class="fw-field-grid">
               <label><span>Action cost</span><select name="action_cost"><option value="">Passive</option><option value="1">◆ One action</option><option value="2">◆◆ Two actions</option><option value="3">◆◆◆ Three actions</option><option value="reaction">↺ Reaction</option><option value="free">◇ Free action</option></select></label>
               <label><span>Frequency</span><input name="frequency" placeholder="once per hour"></label>
+              <label class="span-2"><span>Access</span><input name="access" placeholder="Members of the Pathfinder Society…"></label>
               <label class="span-2"><span>Prerequisites</span><input name="prerequisites" placeholder="expert in Athletics"></label>
               <label class="span-2"><span>Trigger</span><input name="trigger" placeholder="A creature within reach moves away from you"></label>
               <label class="span-2"><span>Requirements</span><input name="requirements" placeholder="You are wielding a melee weapon"></label>
+              <label class="span-2"><span>Special</span><input name="special" placeholder="Additional restrictions or repeat-selection rules"></label>
             </div>
           </section>
 
@@ -205,6 +212,52 @@
             </div>
           </section>
 
+          <section class="fw-form-section fw-bundle-section" data-fw-section="ancestry">
+            <div class="fw-section-heading"><span>02</span><div><h2>Ancestry chassis</h2><p>Create the ancestry itself, not just its feats. These fields become a real PF2e Ancestry item in Foundry.</p></div></div>
+            <div class="fw-field-grid">
+              <label><span>Hit Points</span><input name="ancestry_hp" type="number" min="1" max="30" step="1" value="8"></label>
+              <label><span>Size</span><select name="ancestry_size"><option value="tiny">Tiny</option><option value="sm">Small</option><option value="med" selected>Medium</option><option value="lg">Large</option><option value="huge">Huge</option><option value="grg">Gargantuan</option></select></label>
+              <label><span>Speed</span><input name="ancestry_speed" type="number" min="5" max="100" step="5" value="25"></label>
+              <label><span>Reach</span><input name="ancestry_reach" type="number" min="0" max="30" step="5" value="5"></label>
+              <label><span>Vision</span><select name="ancestry_vision"><option value="normal">Normal</option><option value="low-light-vision">Low-light vision</option><option value="darkvision">Darkvision</option></select></label>
+              <label><span>Additional languages</span><input name="ancestry_additional_languages" type="number" min="0" max="20" step="1" value="0"></label>
+              <label class="span-2"><span>Languages</span><input name="ancestry_languages" placeholder="common, jotun"></label>
+              <label class="span-2"><span>Ancestry traits</span><input name="ancestry_traits" placeholder="humanoid, jotunari"></label>
+              <label class="span-2"><span>Fixed ability boosts</span><input name="ancestry_boosts" placeholder="Strength, Constitution"></label>
+              <label><span>Free ability boosts</span><input name="ancestry_free_boosts" type="number" min="0" max="4" step="1" value="2"></label>
+              <label><span>Ability flaws</span><input name="ancestry_flaws" placeholder="Wisdom"></label>
+            </div>
+            <div class="fw-bundle-help">Use the main description below for ancestry lore, physiology, society, naming conventions, and any other player-facing information. Heritages and feats stay attached to this same ancestry entry.</div>
+            <div class="fw-section-heading fw-nested-heading"><span>H</span><div><h2>Heritages</h2><p>Each heritage becomes its own PF2e Heritage item linked to this ancestry.</p></div><button class="quiet-btn" type="button" data-fw-add-heritage>＋ Add heritage</button></div>
+            <div class="fw-repeater fw-bundle-repeater" data-fw-heritages></div>
+            <div class="fw-section-heading fw-nested-heading"><span>F</span><div><h2>Ancestry feats</h2><p>Create the entire feat progression here. Level grouping happens automatically in Seeker and LaTeX.</p></div><button class="quiet-btn" type="button" data-fw-add-bundle-feat>＋ Add ancestry feat</button></div>
+            <div class="fw-repeater fw-bundle-repeater" data-fw-bundle-feats></div>
+          </section>
+
+          <section class="fw-form-section fw-bundle-section" data-fw-section="archetype">
+            <div class="fw-section-heading"><span>02</span><div><h2>Archetype foundation</h2><p>Build the dedication and the complete feat line as one Homebrew object. Foundry imports them into one managed Items folder.</p></div></div>
+            <div class="fw-field-grid">
+              <label class="span-2"><span>Access <em>optional</em></span><input name="archetype_access" placeholder="Members of the Iron Concordance…"></label>
+              <label class="span-2"><span>Archetype traits</span><input name="archetype_traits" placeholder="archetype, uncommon"></label>
+            </div>
+            <div class="fw-dedication-card">
+              <div class="fw-repeat-card-head"><strong>Dedication feat</strong><small>The entry point for this archetype.</small></div>
+              <div class="fw-field-grid">
+                <label class="span-2"><span>Name</span><input name="dedication_title" placeholder="Stonebound Dedication"></label>
+                <label><span>Level</span><input name="dedication_level" type="number" min="1" max="30" step="1" value="2"></label>
+                <label><span>Action cost</span><select name="dedication_action_cost"><option value="">Passive</option><option value="1">◆ One action</option><option value="2">◆◆ Two actions</option><option value="3">◆◆◆ Three actions</option><option value="reaction">↺ Reaction</option><option value="free">◇ Free action</option></select></label>
+                <label class="span-2"><span>Traits</span><input name="dedication_traits" value="archetype, dedication" placeholder="archetype, dedication"></label>
+                <label class="span-2"><span>Prerequisites</span><input name="dedication_prerequisites"></label>
+                <label><span>Frequency</span><input name="dedication_frequency"></label><label><span>Trigger</span><input name="dedication_trigger"></label>
+                <label class="span-2"><span>Requirements</span><input name="dedication_requirements"></label>
+                <label class="span-2"><span>Special</span><input name="dedication_special" placeholder="You cannot select another dedication feat until…"></label>
+                <label class="span-2"><span>Rules text</span><textarea name="dedication_description" rows="6" placeholder="What the dedication grants and any archetype-specific rules."></textarea></label>
+              </div>
+            </div>
+            <div class="fw-section-heading fw-nested-heading"><span>F</span><div><h2>Archetype feats</h2><p>Add every feat in the archetype. The dedication above remains separate and is included automatically.</p></div><button class="quiet-btn" type="button" data-fw-add-bundle-feat>＋ Add archetype feat</button></div>
+            <div class="fw-repeater fw-bundle-repeater" data-fw-bundle-feats></div>
+          </section>
+
           <section class="fw-form-section" data-fw-section="homebrew">
             <div class="fw-section-heading"><span>02</span><div><h2>Freeform fields</h2><p>Keep unusual rules structured without forcing them into the wrong template.</p></div></div>
             <div class="fw-field-grid">
@@ -215,10 +268,10 @@
           </section>
 
           <section class="fw-form-section fw-library-placement" data-fw-section="noncreature">
-            <div class="fw-section-heading"><span>03</span><div><h2>Homebrew Library</h2><p>Publish this non-monster entry to Seeker and choose where it is grouped. Automatic grouping is a best effort and can always be overridden.</p></div></div>
+            <div class="fw-section-heading"><span>03</span><div><h2>Homebrew Library</h2><p>Publish this entry to Seeker. Complete ancestries and archetypes are automatically kept together as one library entry; ordinary feats/items can still be grouped manually.</p></div></div>
             <label class="fw-toggle-line"><input type="checkbox" name="homebrew_publish" value="1"><span><strong>Publish in Homebrew</strong><small>Players can browse it in the Homebrew section.</small></span></label>
             <div class="fw-field-grid">
-              <label><span>Library section</span><select name="library_section"><option value="auto">Automatic</option><option value="ancestry">Ancestry feats</option><option value="archetype">Archetype feats</option><option value="class">Class feats</option><option value="general">General & skill feats</option><option value="actions">Actions & activities</option><option value="items">Items & equipment</option><option value="other">Other homebrew</option></select></label>
+              <label><span>Library section</span><select name="library_section"><option value="auto">Automatic</option><option value="ancestry">Ancestries / ancestry feats</option><option value="archetype">Archetypes / archetype feats</option><option value="class">Class feats</option><option value="general">General & skill feats</option><option value="actions">Actions & activities</option><option value="items">Items & equipment</option><option value="other">Other homebrew</option></select></label>
               <label><span>Group / heading</span><input name="library_group" placeholder="Elf, Medic, Fighter…"></label>
               <label><span>Ancestry trait</span><input name="ancestry_trait" placeholder="elf"></label>
               <label><span>Archetype</span><input name="archetype_name" placeholder="Medic"></label>
@@ -227,12 +280,12 @@
           </section>
 
           <section class="fw-form-section">
-            <div class="fw-section-heading"><span data-fw-section-number>04</span><div><h2>Rules text & abilities</h2><p>Creature abilities become PF2e Action items. Each one can be passive, free, reaction, or 1–3 actions, with structured triggers, requirements, frequency, clickable checks/DCs, and damage rolls.</p></div><button class="quiet-btn" type="button" data-fw-add-ability>＋ Add ability</button></div>
+            <div class="fw-section-heading"><span data-fw-section-number>04</span><div><h2>Description & rules</h2><p>Write the player-facing overview and rules text here. Creature special abilities stay structured below; complete ancestries and archetypes keep their heritages, dedication, and feats in their dedicated editors above.</p></div><button class="quiet-btn" type="button" data-fw-add-ability data-fw-show="creature item feat action homebrew">＋ Add ability</button></div>
             <div class="fw-field-grid">
               <label class="span-2"><span>Short summary</span><textarea name="summary" rows="3" placeholder="One-sentence concept or GM-facing reminder."></textarea></label>
-              <label class="span-2"><span>Main rules text</span><textarea name="description" rows="7" placeholder="Write the rules text in normal Pathfinder language. This appears in the live preview and is carried into Foundry."></textarea></label>
+              <label class="span-2"><span>Main description / rules</span><textarea name="description" rows="7" placeholder="Write the lore, overview, and main rules in normal Pathfinder language. This appears in Seeker, LaTeX, and Foundry."></textarea></label>
             </div>
-            <div class="fw-repeater fw-ability-repeater" data-fw-abilities></div>
+            <div class="fw-repeater fw-ability-repeater" data-fw-abilities data-fw-show="creature item feat action homebrew"></div>
           </section>
 
           <section class="fw-form-section" data-fw-section="creature">
@@ -360,5 +413,5 @@
 <div class="fw-token-modal hidden" data-fw-latex-modal aria-hidden="true"><div class="fw-token-card fw-latex-card"><header><div><span class="eyebrow">LATEX EXPORT</span><h2>Seeker source block</h2><p>Generate the same feat/action/item as a native Seeker LaTeX command.</p></div><button class="fw-token-close" type="button" data-fw-latex-close>×</button></header><div class="fw-token-workspace"><section class="fw-token-controls"><label><span>Project .tex file</span><select data-fw-latex-path>{% for f in project_tex_files %}<option value="{{ f|e }}">{{ f }}</option>{% endfor %}</select></label><p class="fw-field-help">Writing uses stable markers, so exporting this entry again updates the same block instead of duplicating it.</p><div class="fw-token-actions"><button class="quiet-btn" type="button" data-fw-latex-copy>Copy</button><button class="primary-button" type="button" data-fw-latex-write>Write to source</button></div></section><section class="fw-token-preview"><textarea data-fw-latex-text rows="18" style="width:100%;height:100%;min-height:340px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></section></div></div></div>
 <script id="foundryWorkshopState" type="application/json">{{ {'actors': foundry_actors, 'prepared_content': prepared_content, 'commands': command_log}|tojson }}</script>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7320">{% endblock %}
-{% block scripts %}<script src="/static/foundry-workshop.js?v=7320"></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/foundry-workshop.css?v=7401">{% endblock %}
+{% block scripts %}<script src="/static/foundry-workshop.js?v=7401"></script>{% endblock %}

@@ -88,7 +88,7 @@ def test_studio_move_rewrites_tex_include_and_homebrew_leaves_main_codex(tmp_pat
 
 def test_bridge_has_first_class_action_item_support():
     bridge=(Path(__file__).resolve().parents[1]/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.9.1"' in bridge
+    assert 'const BRIDGE_VERSION = "1.10.1"' in bridge
     assert 'kind === "action" ? "action"' in bridge
     assert 'Item.create(' in bridge and 'createEmbeddedDocuments("Item"' in bridge
 
@@ -205,6 +205,7 @@ def test_source_scoped_archetypes_are_separate_from_ancestries(tmp_path: Path, m
 def test_pf2e_rule_metadata_is_structured_instead_of_flattened(tmp_path: Path):
     s=setup(tmp_path)
     raw=r'''\feat{Colossal Resilience}{1}{Jotunari}{%
+\textbf{Access:} Tomb Jotunari\\
 \textbf{Frequency:} once per day\\
 \textbf{Prerequisites:} Titan Fortitude\\
 \textbf{Trigger:} You would take physical damage\\
@@ -215,6 +216,7 @@ You brace for impact and steel your titanic resolve.
     rules=extract_pf2e_rules(raw,s,{"custom_macros":[]})
     assert len(rules)==1
     rule=rules[0]
+    assert rule['access']=='Tomb Jotunari'
     assert rule['frequency']=='once per day'
     assert rule['prerequisites']=='Titan Fortitude'
     assert rule['trigger']=='You would take physical damage'
@@ -291,3 +293,183 @@ def test_exported_forge_rule_merges_with_classified_source_in_homebrew(tmp_path:
     owner=next(p for p in codex if p['title']=='Ashen Customs')
     detail=gm.get(f"/homebrew/source/{owner['slug']}")
     assert detail.status_code==200 and detail.text.count('Ash Walker')>=1
+
+
+def test_forge_complete_ancestry_creator_roundtrips_homebrew_latex_and_foundry(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed(s);monkeypatch.setattr(main,'settings',s);gm=gm_client(main,s);cid=default_campaign_id(s)
+    created=gm.post('/api/v61/foundry/content',json={
+        'kind':'homebrew','title':'Jotunari','subtitle':'Children of the old mountains','summary':'Large stone-blooded people.',
+        'payload':{
+            'homebrew_document':'ancestry','homebrew_publish':True,'library_section':'ancestry','library_group':'Jotunari',
+            'description':'Jotunari remember the first mountains.\nTheir clans keep long oral histories.',
+            'ancestry_hp':'10','ancestry_size':'lg','ancestry_speed':'25','ancestry_reach':'10','ancestry_vision':'low-light-vision',
+            'ancestry_languages':'common, jotun','ancestry_additional_languages':'1','ancestry_traits':'humanoid, jotunari',
+            'ancestry_boosts':'Strength, Constitution','ancestry_free_boosts':'1','ancestry_flaws':'Dexterity',
+            'heritages':[
+                {'title':'Tomb Jotunari','rarity':'common','traits':'jotunari','description':'Your body carries funerary stone.'},
+                {'title':'Flame Jotunari','rarity':'uncommon','traits':'jotunari, fire','description':'An ember burns inside you.'},
+            ],
+            'bundle_feats':[
+                {'title':'Colossal Resilience','level':'1','traits':'jotunari, ancestry','access':'Jotunari of the Tomb Clans','prerequisites':'Tomb Jotunari','frequency':'once per day','trigger':'You would take physical damage','requirements':'You are conscious','special':'Tomb Jotunari reduce the initial damage.','description':'Brace for impact.'},
+                {'title':'Long Limbs','level':'13','traits':'jotunari, ancestry','description':'Your reach grows.'},
+            ],
+        }
+    })
+    assert created.status_code==200,created.text;eid=created.json()['id']
+    landing=gm.get('/homebrew');assert landing.status_code==200
+    assert 'Jotunari' in landing.text and '2 heritages' in landing.text and '2 feats' in landing.text
+    assert 'LEVEL 0' not in landing.text
+    detail=gm.get(f'/homebrew/entry/{eid}');assert detail.status_code==200
+    for needle in ('Children of the old mountains','Reach','10 ft','Tomb Jotunari','Flame Jotunari','Colossal Resilience','Access','Jotunari of the Tomb Clans','Prerequisites','once per day','You would take physical damage','Tomb Jotunari reduce the initial damage.'):
+        assert needle in detail.text
+
+    latex=gm.get(f'/api/homebrew/{eid}/latex');assert latex.status_code==200
+    snippet=latex.json()['snippet']
+    assert r'\section{Jotunari}' in snippet and r'\subsection{Ancestry Statistics}' in snippet
+    assert r'\textbf{Additional Languages:} 1' in snippet and r'\textbf{Traits:} humanoid, jotunari' in snippet
+    assert r'\subsection{Heritages}' in snippet and r'\subsubsection{Tomb Jotunari}' in snippet
+    assert r'\feat{Colossal Resilience}{1}' in snippet and r'\textbf{Access:} Jotunari of the Tomb Clans' in snippet and r'\textbf{Frequency:} once per day' in snippet
+
+    pushed=gm.post(f'/api/v61/foundry/content/{eid}/push',json={'target_type':'world'});assert pushed.status_code==200,pushed.text
+    commands=claim_foundry_commands(s,cid,integration_config(s,cid,include_secret=True)['foundry_bridge_token'])
+    command=next(c for c in commands if c['id']==pushed.json()['command']['id'])
+    assert command['command_type']=='push_ancestry_bundle'
+    assert command['payload']['ancestry']['hp']==10 and command['payload']['ancestry']['reach']==10
+    assert command['payload']['ancestry']['traits']=='humanoid, jotunari'
+    assert len(command['payload']['heritages'])==2 and len(command['payload']['rules'])==2
+
+
+def test_forge_complete_archetype_creator_roundtrips_homebrew_latex_and_foundry(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed(s);monkeypatch.setattr(main,'settings',s);gm=gm_client(main,s);cid=default_campaign_id(s)
+    created=gm.post('/api/v61/foundry/content',json={
+        'kind':'homebrew','title':'Stonebound','summary':'An archetype for characters who borrow the endurance of mountains.',
+        'payload':{
+            'homebrew_document':'archetype','homebrew_publish':True,'library_section':'archetype','library_group':'Stonebound',
+            'description':'Stonebound initiates learn to turn flesh toward living stone.','archetype_access':'You have survived a sacred burial rite.','archetype_traits':'archetype, uncommon',
+            'dedication_title':'Stonebound Dedication','dedication_level':'2','dedication_action_cost':'','dedication_traits':'archetype, dedication',
+            'dedication_prerequisites':'Constitution +2','dedication_special':'You cannot select another dedication feat until you have gained two other Stonebound feats.',
+            'dedication_description':'Your skin hardens and you gain the Stonebound training.',
+            'bundle_feats':[
+                {'title':'Granite Guard','level':'4','traits':'archetype','action_cost':'reaction','trigger':'You are hit by a Strike','frequency':'once per hour','description':'Harden your body against the blow.'},
+                {'title':'Walking Mountain','level':'8','traits':'archetype','description':'You become difficult to move.'},
+            ],
+        }
+    })
+    assert created.status_code==200,created.text;eid=created.json()['id']
+    landing=gm.get('/homebrew');assert landing.status_code==200 and 'Archetypes' in landing.text and 'Stonebound' in landing.text and 'Dedication 2' in landing.text
+    detail=gm.get(f'/homebrew/entry/{eid}');assert detail.status_code==200
+    for needle in ('ACCESS','sacred burial rite','Stonebound Dedication','Constitution +2','Granite Guard','once per hour','Walking Mountain'):
+        assert needle in detail.text
+
+    snippet=gm.get(f'/api/homebrew/{eid}/latex').json()['snippet']
+    assert r'\section{Stonebound}' in snippet and r'\textbf{Traits:} archetype, uncommon' in snippet
+    assert r'\textbf{Access:} You have survived a sacred burial rite.' in snippet
+    assert r'\subsection{Dedication}' in snippet and r'\feat{Stonebound Dedication}{2}' in snippet
+    assert r'\feat{Granite Guard}{4}' in snippet and r'\textbf{Trigger:} You are hit by a Strike' in snippet
+
+    pushed=gm.post(f'/api/v61/foundry/content/{eid}/push',json={'target_type':'world'});assert pushed.status_code==200,pushed.text
+    commands=claim_foundry_commands(s,cid,integration_config(s,cid,include_secret=True)['foundry_bridge_token'])
+    command=next(c for c in commands if c['id']==pushed.json()['command']['id'])
+    assert command['command_type']=='push_homebrew_rule_bundle'
+    assert command['payload']['section']=='archetype' and command['payload']['access'].startswith('You have survived')
+    assert [r['title'] for r in command['payload']['rules']]==['Stonebound Dedication','Granite Guard','Walking Mountain']
+    assert command['payload']['rules'][0]['is_dedication'] is True
+
+
+def test_forge_bundle_draft_and_creator_controls_exist(tmp_path: Path, monkeypatch):
+    import app.main as main
+    from app.storage import create_player_invite
+    from app.campaigns import set_campaign_members
+    s=setup(tmp_path);seed(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s);gm=gm_client(main,s);cid=default_campaign_id(s)
+    draft=gm.post('/api/v61/foundry/content',json={'kind':'homebrew','title':'Work in Progress Ancestry','payload':{'homebrew_document':'ancestry','homebrew_publish':False,'ancestry_hp':'8','heritages':[],'bundle_feats':[]}})
+    assert draft.status_code==200
+    assert 'Work in Progress Ancestry' in gm.get('/homebrew').text
+    inv=create_player_invite(s,'Reader');set_campaign_members(s,cid,[inv['id']]);player=TestClient(main.app);player.get(inv['invite_path'],follow_redirects=False)
+    assert 'Work in Progress Ancestry' not in player.get('/homebrew').text
+
+    workshop=gm.get('/gm/foundry-workshop');assert workshop.status_code==200
+    html=workshop.text
+    for needle in ('data-fw-kind="ancestry"','data-fw-kind="archetype"','name="ancestry_hp"','data-fw-heritages','name="dedication_title"','data-fw-bundle-feats','data-fw-template="ancestry-standard"','data-fw-template="archetype-standard"'):
+        assert needle in html
+
+
+def test_source_ancestry_uses_chapter_title_reads_chassis_and_keeps_actions_inline(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);monkeypatch.setattr(main,'settings',s)
+    (s.project_dir/'chapters').mkdir()
+    source=s.project_dir/'chapters/jotunari.tex'
+    source.write_text(r'''\chapter{Jotunari}
+\section{Origins}
+The Jotunari remember the first mountain.
+
+\begin{multicols}{2}
+\textbf{Hitpoints:} 8
+
+\textbf{Size:} Medium
+
+\textbf{Speed:} 25 feet
+
+\textbf{Ability Boosts:} Charisma, Strength, Free
+
+\textbf{Ability Flaw:} Wisdom
+
+\textbf{Languages:} Draconic, Common plus additional languages equal to your Intelligence modifier (if it's positive).
+\end{multicols}
+
+\action{Stone Roar}{\actionTwo}{auditory, jotunari}{%
+\textbf{Frequency:} once per day\\
+\textbf{Requirements:} You are standing on stone.\\
+You unleash a roar that shakes the mountain.
+}
+
+\section{Jotunari Heritages}
+Choose a lineage.
+\subsection{Tomb Jotunari}
+\textbf{Traits:} jotunari, uncommon\\
+Your body carries funerary stone.
+
+\section{Jotunari Feats}
+\subsection{1st Level}
+\feat{Stone Memory}{1}{jotunari, ancestry}{%
+\textbf{Prerequisites:} Tomb Jotunari\\
+Remember the voice of the mountain.
+}
+''',encoding='utf-8')
+    (s.project_dir/'main.tex').write_text(r'''\documentclass{book}\begin{document}\input{chapters/jotunari}\end{document}''',encoding='utf-8')
+    build_wiki(s);gm=gm_client(main,s);cid=default_campaign_id(s)
+    assert gm.put('/api/admin/file/homebrew',json={'path':'chapters/jotunari.tex','kind':'ancestry'}).status_code==200
+
+    pages=gm.get('/api/admin/codex').json()['pages']
+    source_pages=[p for p in pages if p.get('source_file')=='chapters/jotunari.tex']
+    assert source_pages
+    assert {p.get('homebrew_owner_title') for p in source_pages}=={'Jotunari'}
+    owner=source_pages[0]['homebrew_owner_slug']
+
+    detail=gm.get(f'/homebrew/source/{owner}')
+    assert detail.status_code==200
+    text=detail.text
+    assert '<h1>Jotunari</h1>' in text
+    assert 'Hit Points' in text and '>8<' in text and 'Medium' in text and '25 feet' in text
+    assert 'Charisma, Strength, Free' in text and 'Wisdom' in text
+    assert 'Tomb Jotunari' in text and 'Your body carries funerary stone.' in text
+    assert text.count('<h3 id="stone-roar">Stone Roar')==1
+    assert text.index('Stone Roar') < text.index('Ancestry feats')
+    assert 'homebrew-rule-meta' in text
+    assert text.index('Requirements') < text.index('You unleash a roar that shakes the mountain.')
+    assert text.index('You unleash a roar that shakes the mountain.') < text.index('Ancestry feats')
+
+    pushed=gm.post(f'/api/homebrew/source/{owner}/foundry')
+    assert pushed.status_code==200,pushed.text
+    commands=claim_foundry_commands(s,cid,integration_config(s,cid,include_secret=True)['foundry_bridge_token'])
+    command=next(c for c in commands if c['id']==pushed.json()['command']['id'])
+    payload=command['payload']
+    assert payload['title']=='Jotunari'
+    assert payload['ancestry']['hp']==8 and payload['ancestry']['size']=='med' and payload['ancestry']['speed']==25
+    assert payload['ancestry']['boosts']=='Charisma, Strength' and payload['ancestry']['free_boosts']==1 and payload['ancestry']['flaws']=='Wisdom'
+    assert len(payload['heritages'])==1 and payload['heritages'][0]['title']=='Tomb Jotunari'
+    assert {r['title'] for r in payload['rules']}=={'Stone Roar','Stone Memory'}
+    action=next(r for r in payload['rules'] if r['title']=='Stone Roar')
+    assert action['frequency']=='once per day' and action['requirements']=='You are standing on stone.'
+    assert 'Frequency' not in action['description_html'] and 'Requirements' not in action['description_html']

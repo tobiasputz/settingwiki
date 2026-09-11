@@ -351,7 +351,7 @@ def ensure_built() -> dict:
             pass
         return wiki
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 7320}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 7401}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -675,7 +675,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 7320
+                    needs_build=int(existing.get("renderer_version") or 0) < 7401
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -3845,7 +3845,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.3.2 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.4.1 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -4018,11 +4018,17 @@ def v704_bestiary_remove(request:Request,entry_id:int):
     return {'ok':True,'removed':True,'source_preserved':True}
 
 
-def _strip_source_rule_cards(value:str) -> str:
-    # Generated PF2e cards do not contain sibling ``section`` elements, so this
-    # controlled-source removal is safe and keeps lore/heritage prose separate
-    # from the normalized rules list shown at the bottom of a Homebrew entry.
-    return re.sub(r'<section class="pf2-rule-card\b[^>]*>.*?</section>', '', str(value or ''), flags=re.I|re.S).strip()
+def _strip_source_feat_cards(value:str) -> str:
+    """Remove collected feat cards while preserving inline actions/activities.
+
+    Source-backed Homebrew is a document, not a bag of rule commands. Feats are
+    normalized into the level-grouped feat index at the bottom, but actions and
+    activities belong exactly where the author put them in the LaTeX body.
+    """
+    return re.sub(
+        r'<section class="pf2-rule-card\s+pf2-feat\b[^>]*>.*?</section>',
+        '', str(value or ''), flags=re.I|re.S,
+    ).strip()
 
 
 def _homebrew_source_sections(wiki:dict) -> list[dict]:
@@ -4042,12 +4048,17 @@ def _homebrew_source_sections(wiki:dict) -> list[dict]:
         key=(section,owner_slug)
         bundle=bundles.setdefault(key,{
             'key':section,'name':owner_title,'owner_slug':owner_slug,'pages':[],'lore_pages':[],
-            'rules':[],'source_file':page.get('source_file') or '',
+            'rules':[],'feat_rules':[],'action_rules':[],'source_file':page.get('source_file') or '',
+            'source_meta':dict(page.get('homebrew_source_meta') or {}),
         })
         bundle['pages'].append(page)
-        lore_html=_strip_source_rule_cards(page.get('html') or '')
+        lore_html=_strip_source_feat_cards(page.get('html') or '')
         lore_plain=re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',lore_html)).strip()
-        if lore_plain:
+        heritage_titles={str(h.get('title') or h.get('name') or '').strip().casefold() for h in (bundle.get('source_meta') or {}).get('heritages',[]) if isinstance(h,dict)}
+        # Structured heritage children belong in the heritage section below the
+        # ancestry overview, not duplicated as ordinary lore pages.
+        is_heritage_page=str(page.get('title') or '').strip().casefold() in heritage_titles
+        if lore_plain and not is_heritage_page:
             lore=dict(page);lore['lore_html']=lore_html;lore['lore_plain']=lore_plain
             bundle['lore_pages'].append(lore)
         for rule in page.get('pf2e_rules') or []:
@@ -4056,8 +4067,14 @@ def _homebrew_source_sections(wiki:dict) -> list[dict]:
     grouped={}
     for (section,_),bundle in bundles.items():
         bundle['rules'].sort(key=lambda x:(int(x.get('level') or 0),str(x.get('title') or '').casefold()))
-        bundle['feat_count']=sum(1 for x in bundle['rules'] if str(x.get('kind') or '')=='feat')
-        bundle['action_count']=sum(1 for x in bundle['rules'] if str(x.get('kind') or '')=='action')
+        bundle['feat_rules']=[x for x in bundle['rules'] if str(x.get('kind') or '')=='feat']
+        bundle['action_rules']=[x for x in bundle['rules'] if str(x.get('kind') or '')=='action']
+        bundle['feat_count']=len(bundle['feat_rules'])
+        bundle['action_count']=len(bundle['action_rules'])
+        source_meta=dict(bundle.get('source_meta') or {})
+        bundle['ancestry']=dict(source_meta.get('ancestry') or {}) if section=='ancestry' else {}
+        bundle['heritages']=[dict(x) for x in (source_meta.get('heritages') or []) if isinstance(x,dict)] if section=='ancestry' else []
+        bundle['heritage_count']=len(bundle['heritages'])
         first_lore=(bundle.get('lore_pages') or [{}])[0]
         bundle['summary']=str(first_lore.get('excerpt') or first_lore.get('lore_plain') or '')[:260]
         grouped.setdefault(section,[]).append(bundle)
@@ -4080,19 +4097,35 @@ def _source_rule_index(source_sections:list[dict]) -> set[tuple[str,str,str]]:
     return found
 
 
+def _source_bundle_index(source_sections:list[dict]) -> set[tuple[str,str,str]]:
+    """Index source-backed ancestry/archetype roots for Forge export de-duplication."""
+    found=set()
+    for section in source_sections:
+        section_key=str(section.get('key') or '').casefold()
+        if section_key not in {'ancestry','archetype'}:continue
+        for group in section.get('groups',[]):
+            source=str(group.get('source_file') or '').replace('\\','/').strip('/')
+            name=str(group.get('name') or '').strip().casefold()
+            if source and name:found.add((source,section_key,name))
+    return found
+
+
 def _dedupe_exported_homebrew_rows(rows:list[dict],source_sections:list[dict]) -> list[dict]:
     """Hide a Forge row once its generated rule is represented by classified LaTeX.
 
     The Workshop record remains the editable source of truth; this only prevents
     the Homebrew library from showing the same exported feat twice.
     """
-    source_rules=_source_rule_index(source_sections);out=[]
+    source_rules=_source_rule_index(source_sections);source_bundles=_source_bundle_index(source_sections);out=[]
     for row in rows:
         payload=dict(row.get('payload') or {})
         path=str(payload.get('latex_export_path') or '').replace('\\','/').strip('/')
         if path and truthy(payload.get('latex_exported')):
             meta=classify_homebrew(row)
-            key=(path,str(meta.get('effective_kind') or '').casefold(),str(row.get('title') or '').strip().casefold())
+            kind=str(meta.get('effective_kind') or '').casefold();title=str(row.get('title') or '').strip().casefold()
+            key=(path,kind,title)
+            if kind in {'ancestry','archetype'} and key in source_bundles:
+                continue
             if key in source_rules:
                 continue
         out.append(row)
@@ -4110,6 +4143,22 @@ def homebrew_library_page(request:Request):
         'homebrew_sections':group_homebrew(rows,include_drafts=gm),'source_sections':source_sections,
         'foundry_actors':foundry_actors(settings,cid) if gm else [],
         'project_tex_files':[f['path'] for f in list_project_files(settings) if f.get('suffix')=='.tex'] if gm else [],
+    })
+
+
+@app.get('/homebrew/entry/{entry_id}', response_class=HTMLResponse)
+def homebrew_structured_bundle_detail(request:Request,entry_id:int):
+    if not player_allowed(request):return player_gate_redirect(request)
+    cid=_active_campaign_id(request);gm=is_gm(request);row=_homebrew_entry_or_404(cid,entry_id)
+    payload=dict(row.get('payload') or {});document=str(payload.get('homebrew_document') or '').strip().lower()
+    if document not in {'ancestry','archetype'}:raise HTTPException(404,'This Homebrew entry is not a complete ancestry or archetype.')
+    meta=classify_homebrew(row)
+    if not gm and not meta.get('published'):raise HTTPException(404,'Homebrew entry not found.')
+    rules=[dict(x) for x in (payload.get('bundle_feats') or []) if isinstance(x,dict)]
+    rules.sort(key=lambda x:(int(x.get('level') or 0),str(x.get('title') or '').casefold()))
+    return templates.TemplateResponse('homebrew_bundle.html',{
+        'request':request,'wiki':_visible_wiki(request),'maps':list_maps(settings,public=not gm),'gm_view':gm,
+        'entry':row,'payload':payload,'meta':meta,'document':document,'rules':rules,
     })
 
 
@@ -4132,13 +4181,10 @@ def homebrew_source_detail(request:Request,owner_slug:str):
 
 
 def _source_rule_foundry_html(rule:dict) -> str:
-    chunks=[]
-    for label,key in (('Prerequisites','prerequisites'),('Frequency','frequency'),('Trigger','trigger'),('Requirements','requirements'),('Special','special')):
-        value=str(rule.get(key) or '').strip()
-        if value:chunks.append(f'<p><strong>{html.escape(label)}</strong> {html.escape(value)}</p>')
-    description=str(rule.get('description_html') or rule.get('html') or '').strip()
-    if description:chunks.append(description)
-    return ''.join(chunks)
+    # Metadata is sent as structured fields and rendered by the Foundry bridge
+    # *before* the body. Keeping description_html body-only avoids duplicated
+    # Frequency/Requirements/etc. and guarantees a clean break into rules text.
+    return str(rule.get('description_html') or rule.get('html') or '').strip()
 
 
 @app.post('/api/homebrew/source/{owner_slug}/foundry')
@@ -4155,7 +4201,7 @@ def homebrew_source_foundry_push(request:Request,owner_slug:str):
             'kind':str(rule.get('kind') or 'feat'),'title':str(rule.get('title') or 'Untitled'),
             'level':int(rule.get('level') or 0),'traits':list(rule.get('traits') or []),
             'description_html':_source_rule_foundry_html(rule),'description':str(rule.get('description') or rule.get('plain_text') or ''),
-            'prerequisites':str(rule.get('prerequisites') or ''),'frequency':str(rule.get('frequency') or ''),
+            'access':str(rule.get('access') or ''),'prerequisites':str(rule.get('prerequisites') or ''),'frequency':str(rule.get('frequency') or ''),
             'trigger':str(rule.get('trigger') or ''),'requirements':str(rule.get('requirements') or ''),'special':str(rule.get('special') or ''),
             'action_cost':str(rule.get('action_cost') or ''),'source_page_slug':str(rule.get('source_page_slug') or ''),
         })
@@ -4169,6 +4215,19 @@ def homebrew_source_foundry_push(request:Request,owner_slug:str):
         'description_html':lore_html or str(root.get('html') or ''),'description':'\n\n'.join(str(p.get('lore_plain') or '') for p in group.get('lore_pages') or []),
         'rules':rules,'folder_name':f"Seeker · {str(group.get('name') or root.get('title') or 'Custom Homebrew')}",
     }
+    if section=='ancestry':
+        ancestry=dict(group.get('ancestry') or {})
+        # Keep bridge defaults for genuinely unspecified fields, but pass every
+        # ancestry chassis value that the source parser could identify.
+        payload['ancestry']={
+            'hp':int(ancestry.get('hp') or 8),'size':str(ancestry.get('size') or 'med'),
+            'speed':int(ancestry.get('speed') or 25),'reach':int(ancestry.get('reach') or 5),
+            'vision':str(ancestry.get('vision') or 'normal'),'languages':str(ancestry.get('languages') or 'common'),
+            'additional_languages':int(ancestry.get('additional_languages') or 0),'boosts':str(ancestry.get('boosts') or ''),
+            'free_boosts':int(ancestry.get('free_boosts') if ancestry.get('free_boosts') is not None else 2),
+            'flaws':str(ancestry.get('flaws') or ''),'traits':str(ancestry.get('traits') or ''),
+        }
+        payload['heritages']=[dict(x) for x in (group.get('heritages') or []) if isinstance(x,dict)]
     command_type='push_ancestry_bundle' if section=='ancestry' else 'push_homebrew_rule_bundle'
     command=queue_foundry_command(settings,cid,command_type,payload,scope='world',requested_by=requester_label(request))
     return {'ok':True,'command':command,'rules':len(rules),'section':section}
@@ -4241,10 +4300,15 @@ def _suggest_homebrew_tex_path(row:dict) -> str:
 
 def _manual_homebrew_duplicate(text:str,row:dict) -> bool:
     meta=classify_homebrew(row);kind=str(meta.get('effective_kind') or '')
-    command='feat' if kind=='feat' else 'action' if kind=='action' else 'itemtemplate' if kind=='item' else ''
-    if not command:return False
     title=str(row.get('title') or '').strip()
     if not title:return False
+    if kind in {'ancestry','archetype'}:
+        # Complete Forge bundles export as a named section. Treat an existing
+        # chapter/section/subsection of the same name as the source-backed copy
+        # instead of appending an entire duplicate ancestry/archetype.
+        return bool(re.search(r'\\(?:chapter|section|subsection)\*?\s*\{\s*'+re.escape(title)+r'\s*\}',text,re.I))
+    command='feat' if kind=='feat' else 'action' if kind=='action' else 'itemtemplate' if kind=='item' else ''
+    if not command:return False
     return bool(re.search(r'\\'+re.escape(command)+r'\s*\{\s*'+re.escape(title)+r'\s*\}',text,re.I))
 
 
@@ -4489,7 +4553,7 @@ def v61_foundry_manifest(request:Request):
 def v61_foundry_public_module(request:Request):
     source=settings.root_dir/'integrations'/'foundry-seeker-bridge'
     if not source.exists():raise HTTPException(404,'Foundry bridge module is not included in this build.')
-    out=settings.build_dir/'seeker-foundry-bridge-1.9.1.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.10.1.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip',headers={'Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'})
 
@@ -4497,7 +4561,7 @@ def v61_foundry_public_module(request:Request):
 @app.get('/api/v6/foundry/module.zip')
 def v6_foundry_module(request:Request):
     require_gm(request)
-    out=settings.build_dir/'seeker-foundry-bridge-1.9.1.zip'
+    out=settings.build_dir/'seeker-foundry-bridge-1.10.1.zip'
     build_foundry_module_zip(settings,_external_base_url(request),out)
     return FileResponse(out,filename='seeker-foundry-bridge.zip',media_type='application/zip')
 
@@ -4541,6 +4605,52 @@ def v61_foundry_content_delete(request:Request,item_id:int):
     require_gm(request);cid=_active_campaign_id(request);delete_foundry_prepared_content(settings,cid,item_id);_prune_unused_foundry_images(cid);return {'ok':True}
 
 
+def _forge_bundle_foundry_payload(item:dict) -> tuple[str,dict] | None:
+    """Translate a structured Forge ancestry/archetype into a bridge bundle.
+
+    The Workshop stores the whole object as one editable row.  Foundry receives
+    a bundle so the ancestry/heritages/feats or archetype/dedication/feats stay
+    together without creating duplicate Forge rows for their child rules.
+    """
+    data=dict(item.get('payload') or {})
+    document=str(data.get('homebrew_document') or '').strip().lower()
+    if str(item.get('kind') or '').lower()!='homebrew' or document not in {'ancestry','archetype'}:
+        return None
+    title=str(item.get('title') or ('Custom Ancestry' if document=='ancestry' else 'Custom Archetype')).strip()
+    rules=[]
+    if document=='archetype':
+        dedication={
+            'kind':'feat','title':str(data.get('dedication_title') or f'{title} Dedication'),
+            'level':int(data.get('dedication_level') or 2),'traits':str(data.get('dedication_traits') or 'archetype, dedication'),
+            'action_cost':str(data.get('dedication_action_cost') or ''),'prerequisites':str(data.get('dedication_prerequisites') or ''),
+            'frequency':str(data.get('dedication_frequency') or ''),'trigger':str(data.get('dedication_trigger') or ''),
+            'requirements':str(data.get('dedication_requirements') or ''),'special':str(data.get('dedication_special') or ''),
+            'description':str(data.get('dedication_description') or ''),'is_dedication':True,
+        }
+        if dedication['title'].strip():rules.append(dedication)
+    for raw in data.get('bundle_feats') if isinstance(data.get('bundle_feats'),list) else []:
+        if not isinstance(raw,dict):continue
+        rule=dict(raw);rule.setdefault('kind','feat');rules.append(rule)
+    payload={
+        'title':title,'section':document,'owner_slug':f"forge-{int(item.get('id') or 0)}",
+        'prepared_id':int(item.get('id') or 0),'description':str(data.get('description') or item.get('summary') or ''),
+        'description_html':'','folder_name':f'Seeker · {title}','rules':rules,
+    }
+    if document=='ancestry':
+        payload['ancestry']={
+            'hp':int(data.get('ancestry_hp') or 8),'size':str(data.get('ancestry_size') or 'med'),
+            'speed':int(data.get('ancestry_speed') or 25),'reach':int(data.get('ancestry_reach') or 5),
+            'vision':str(data.get('ancestry_vision') or 'normal'),'languages':str(data.get('ancestry_languages') or 'common'),
+            'additional_languages':int(data.get('ancestry_additional_languages') or 0),'boosts':str(data.get('ancestry_boosts') or ''),
+            'free_boosts':int(data.get('ancestry_free_boosts') or 2),'flaws':str(data.get('ancestry_flaws') or ''),
+            'traits':str(data.get('ancestry_traits') or data.get('traits') or item.get('tags') or ''),
+        }
+        payload['heritages']=[dict(x) for x in (data.get('heritages') or []) if isinstance(x,dict)]
+    else:
+        payload['access']=str(data.get('archetype_access') or '')
+    return ('push_ancestry_bundle' if document=='ancestry' else 'push_homebrew_rule_bundle'),payload
+
+
 @app.post('/api/v61/foundry/content/{item_id}/push')
 def v61_foundry_content_push(request:Request,item_id:int,payload:dict=Body(...)):
     require_gm(request)
@@ -4554,6 +4664,12 @@ def v61_foundry_content_push(request:Request,item_id:int,payload:dict=Body(...))
     actor_uuid=''
     if target_type=='actor':
         actor_uuid=str(next((x.get('actor_uuid') for x in foundry_actors(settings,cid) if str(x.get('actor_id'))==actor_id),'') or '')
+    bundle=_forge_bundle_foundry_payload(item)
+    if bundle:
+        if target_type!='world': raise HTTPException(400,'Ancestries and archetypes are imported to the Foundry world, not directly onto one actor.')
+        command_type,bundle_payload=bundle
+        command=queue_foundry_command(settings,cid,command_type,bundle_payload,scope='world',requested_by=requester_label(request))
+        return {'ok':True,'command':command,'bundle':True,'section':bundle_payload.get('section'),'rules':len(bundle_payload.get('rules') or [])}
     content_data=json.loads(json.dumps(item.get('payload') or {}))
     for image_key in ('img','token_img'):
         if content_data.get(image_key):content_data[image_key]=_foundry_push_asset_url(request,cid,str(content_data.get(image_key)))
