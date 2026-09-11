@@ -13,10 +13,10 @@
   <link rel="icon" href="/static/seeker-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Seeker' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=7402">
-  <link rel="stylesheet" href="/static/tour.css?v=7402">
+  <link rel="stylesheet" href="/static/wiki.css?v=7403">
+  <link rel="stylesheet" href="/static/tour.css?v=7403">
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/refinement.css?v=7402">
+  <link rel="stylesheet" href="/static/refinement.css?v=7403">
 </head>
 {% set campaign_ctx = campaign_context(request) %}
 <body data-campaign-id="{{ campaign_ctx.active_campaign_id }}" data-admin-view="{{ 'true' if request.session.get('admin') or request.session.get('co_gm') else 'false' }}" data-player-access-key="{{ wiki.player_access_key if wiki else '' }}">
@@ -77,6 +77,7 @@
   <div class="mobile-more-sheet" id="mobileMoreSheet" aria-hidden="true">
     <div class="mobile-sheet-handle"></div>
     <div class="mobile-sheet-title"><strong>More in Seeker</strong><button type="button" data-mobile-more-close aria-label="Close menu">×</button></div>
+    <div class="mobile-sheet-scroll" data-mobile-sheet-scroll>
     <div class="mobile-sheet-primary">
       {% if request.session.get('admin') or request.session.get('co_gm') or (wiki and wiki.player_label) %}<a class="mobile-sheet-feature" href="/app"><span>✦</span><div><strong>Table App</strong><small>Character · inventory · journal · maps</small></div></a>{% endif %}
       <a href="/characters"><span>♟</span><strong>Characters</strong></a>
@@ -98,6 +99,7 @@
       <summary><span>⋯</span><strong>App options</strong></summary>
       <div><button type="button" class="mobile-sheet-action" data-start-tour>❔ Quick tour</button><button type="button" class="mobile-sheet-action" data-offline-toggle>⇩ Offline cache: off</button>{% if wiki and wiki.player_label and not request.session.get('admin') and not request.session.get('co_gm') %}<button type="button" class="mobile-sheet-action danger" data-player-logout>↪ Sign out of {{ wiki.player_label }}</button>{% endif %}</div>
     </details>
+    </div>
   </div>
 
   {% if request.session.get('admin') or request.session.get('co_gm') %}<nav class="gm-view-switcher" aria-label="GM mode switcher"><span>{{ 'OWNER' if request.session.get('admin') else 'CO-GM' }}</span><a href="/gm/living-table">Living Table</a><a href="/">Player</a><a href="/gm/session">Session</a><a href="/gm/prep">Prep</a><a href="/gm/continuity">Continuity</a><a href="/gm/foundry-workshop">Foundry</a><a href="/homebrew">Homebrew</a>{% if request.session.get('admin') %}<a href="/admin">Studio</a>{% endif %}<a href="/admin/campaign">Worldcraft</a><a href="/admin/living">State</a></nav>{% endif %}
@@ -118,8 +120,8 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=7402"></script>
-  <script src="/static/tour.js?v=7402"></script>
+  <script src="/static/wiki.js?v=7403"></script>
+  <script src="/static/tour.js?v=7403"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

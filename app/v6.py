@@ -684,7 +684,7 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     query=urllib.parse.parse_qsl(parts.query,keep_blank_values=True)
     query=[(k,v) for k,v in query if k.lower()!='wait']+[('wait','true')]
     webhook_url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,parts.path,urllib.parse.urlencode(query),parts.fragment))
-    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.4.2'}, method='POST')
+    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/7.4.3'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             status=int(resp.status)

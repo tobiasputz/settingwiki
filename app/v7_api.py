@@ -628,7 +628,7 @@ def register_v7_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             queue={r['status']:r['n'] for r in conn.execute('SELECT status,COUNT(*) AS n FROM foundry_command_queue WHERE campaign_id=? GROUP BY status',(cid,)).fetchall()}
             pages=int(conn.execute('SELECT COUNT(*) AS n FROM v7_entities WHERE campaign_id=?',(cid,)).fetchone()['n'])
         backups=settings.data_dir/'migration-backups'
-        return {'ok':True,'version':'7.4.2','campaign_id':cid,'entities':pages,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
+        return {'ok':True,'version':'7.4.3','campaign_id':cid,'entities':pages,'foundry_queue':queue,'asset_bytes':assets['total_bytes'],'asset_files':assets['count'],'dependency_warnings':len(dependency_warnings(settings,cid)),'migration_backups':len(list(backups.glob('pre-v7-*.sqlite'))) if backups.exists() else 0}
 
     @app.get('/entity/{entity_id}',response_class=HTMLResponse)
     def v7_entity_page(request:Request,entity_id:int):

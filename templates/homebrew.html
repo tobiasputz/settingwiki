@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Homebrew · {{ wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/homebrew.css?v=7402">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/homebrew.css?v=7403">{% endblock %}
 {% block body %}
 <main class="homebrew-shell" data-homebrew-library>
   <header class="homebrew-hero">
@@ -47,7 +47,7 @@
           <div class="homebrew-bundle-stats"><span>{{ group.lore_pages|length }} lore section{{ '' if group.lore_pages|length==1 else 's' }}</span>{% if group.heritage_count %}<span>{{ group.heritage_count }} heritage{{ '' if group.heritage_count==1 else 's' }}</span>{% endif %}{% if group.feat_count %}<span>{{ group.feat_count }} feat{{ '' if group.feat_count==1 else 's' }}</span>{% endif %}{% if group.action_count %}<span>{{ group.action_count }} action{{ '' if group.action_count==1 else 's' }}</span>{% endif %}</div>
           <strong class="homebrew-open-entry">Open {{ group.name }} →</strong>
         </a>
-        {% if gm_view and section.key in ['ancestry','archetype','class','general','actions'] %}<button class="quiet-btn homebrew-source-foundry" type="button" data-homebrew-source-foundry="{{ group.owner_slug }}">Import to Foundry</button>{% endif %}
+        {% if gm_view %}<div class="homebrew-source-card-actions">{% if section.key in ['ancestry','archetype'] %}<button class="quiet-btn" type="button" data-homebrew-source-forge="{{ group.owner_slug }}">Forge</button>{% endif %}{% if section.key in ['ancestry','archetype','class','general','actions'] %}<button class="quiet-btn homebrew-source-foundry" type="button" data-homebrew-source-foundry="{{ group.owner_slug }}">Foundry</button>{% endif %}</div>{% endif %}
       </article>{% endfor %}
       </div>
     </section>{% endfor %}
@@ -81,4 +81,4 @@
   {% endif %}
 </main>
 {% endblock %}
-{% block scripts %}<script src="/static/homebrew.js?v=7402"></script>{% endblock %}
+{% block scripts %}<script src="/static/homebrew.js?v=7403"></script>{% endblock %}

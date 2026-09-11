@@ -440,5 +440,34 @@ html:not(.gm-prep-html){min-height:100%;overflow-x:hidden;overflow-y:auto}body:n
 .foundry-direct-set{display:grid;grid-template-columns:minmax(70px,1fr) auto;gap:6px;margin-top:9px}.foundry-direct-set input{min-width:0;border:1px solid rgba(128,150,190,.24);background:#0d1116;color:#e5edf8;border-radius:9px;padding:9px 10px}.foundry-direct-set button{border:1px solid rgba(128,150,190,.3);background:#202a38;color:#e5edf8;border-radius:9px;padding:9px 11px;cursor:pointer;font-weight:600}.foundry-stepper-large button{min-width:48px}.foundry-direct-set button[data-busy="1"]{opacity:.6;cursor:wait}
 @media(max-width:680px){.foundry-direct-set input,.foundry-direct-set button{min-height:44px;font-size:16px}.foundry-stepper-large button{flex:0 1 calc(25% - 6px)}}
 
-/* 7.4.2 PF2e rule metadata stays compact, then effect text begins on a fresh row. */
+/* 7.4.3 PF2e rule metadata stays compact, then effect text begins on a fresh row. */
 .pf2-rule-meta{display:flex;flex-wrap:wrap;gap:.4rem 1rem;margin:.1rem 0 .75rem;padding:.55rem .65rem;border:1px solid rgba(196,155,98,.24);background:rgba(196,155,98,.06);font-size:.88em;line-height:1.45}.pf2-rule-meta span{display:inline-block}.pf2-rule-meta strong{color:#d6b47b;margin-right:.25rem}.pf2-rule-effect{display:block;clear:both;padding-top:.75rem;border-top:1px solid rgba(255,255,255,.08)}.pf2-rule-effect>p:first-child{margin-top:0}
+
+/* Seeker 7.4.3 · one mobile navigation bar + truly scrollable More sheet */
+@media(max-width:900px){
+  html.mobile-more-open,body.mobile-more-open{overflow:hidden!important;overscroll-behavior:none!important}
+  .gm-view-switcher{display:none!important}
+  .mobile-more-sheet{
+    top:max(8px,var(--safe-top));
+    bottom:calc(70px + var(--safe-bottom));
+    max-height:none;
+    height:auto;
+    overflow:hidden;
+    padding:10px 10px 0;
+    touch-action:auto;
+  }
+  .mobile-sheet-title{flex:0 0 auto}
+  .mobile-sheet-scroll{
+    min-height:0;
+    flex:1 1 auto;
+    overflow-y:auto;
+    overflow-x:hidden;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+    touch-action:pan-y;
+    padding-bottom:max(18px,var(--safe-bottom));
+    scrollbar-gutter:stable;
+  }
+  .mobile-sheet-scroll>.mobile-sheet-primary{margin-top:4px}
+  .mobile-more-sheet a,.mobile-more-sheet button,.mobile-more-sheet summary{touch-action:manipulation}
+}

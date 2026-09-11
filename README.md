@@ -1,4 +1,11 @@
-# Seeker 7.4.2 — Mobile, Foundry live sync & Homebrew indexes
+# Seeker 7.4.3 — Source-linked Forge editing & mobile navigation polish
+
+
+## 7.4.3 highlights
+
+Existing `.tex` ancestries and archetypes can now be opened in the Homebrew Forge, edited as structured Seeker homebrew, and saved back into the same authoritative LaTeX source. New feats are placed into the appropriate level section (creating the level heading when necessary), heritages and existing feats update in place, and repeated saves do not create duplicate rules.
+
+On phone layouts Seeker now uses one bottom navigation bar only. The More sheet has an internal touch scroller and locks the background while open, so long GM/tool menus remain fully reachable. Static/PWA generation is **7403**; Foundry Bridge remains **1.10.1**.
 
 Seeker's Homebrew Forge can now author a **complete Pathfinder 2e ancestry or archetype as one editable object**. An ancestry includes its player-facing lore, HP/size/speed/reach/vision, languages, traits, ability boosts/flaws, heritages, and an arbitrary ancestry-feat progression. An archetype includes its overview/access rules, a structured dedication feat, and its complete feat progression. Every child feat keeps its action cost, traits, prerequisites, frequency, trigger, requirements, Special text, and rules text as separate PF2e fields. Work can remain unpublished as a draft at any stage.
 
@@ -8,7 +15,7 @@ The same object can be sent to Foundry and LaTeX. Foundry Bridge **1.10.1** crea
 
 Source-authored Homebrew remains first-class: the three-dot menu beside any `.tex` file can classify the entire source as an ancestry, archetype, class, general rules source, actions source, item source, or other Homebrew without moving or rewriting it. Native `\feat` / `\action` commands are still parsed into structured PF2e fields and the source remains exactly where it already participates in PDF compilation.
 
-This release also retains the 7.3 line's handout-template browser improvements and Foundry resource-write fixes. Static/PWA generation is **7402**.
+This release also retains the 7.3 line's handout-template browser improvements and Foundry resource-write fixes. Static/PWA generation is **7403**.
 
 ## Seeker 7.0.4 — Codex & Relay
 
@@ -602,4 +609,3 @@ Existing handouts can be edited. Legacy HTML formatting is converted to plain pa
 ## Source-backed ancestry/archetype behavior
 
 A `.tex` file classified as an ancestry or archetype is treated as one Homebrew object. Its own `\chapter{...}` title is the canonical entry name; rendered section titles are only fallback names when the source genuinely has no chapter. For ancestries, ordinary labeled LaTeX lines such as `\textbf{Hitpoints:} 8`, Size, Speed, Ability Boosts/Flaws, Languages, Reach and senses are parsed into the ancestry overview without modifying the source. Heritage sections are recognized structurally. `\feat` entries are collected into the level-grouped feat list, while actions/activities remain inline at their original position in the document body. PF2e rule metadata is kept together and visually separated from the effect text.
-

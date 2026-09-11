@@ -54,7 +54,7 @@
 @media(max-width:760px){.bestiary-hero-actions{width:100%}.bestiary-hero-actions>*{flex:1;justify-content:center}.bestiary-editor{width:100vw;height:100dvh;max-height:none;margin:0}.bestiary-editor-card{height:100dvh;max-height:none;border-radius:0;border-left:0;border-right:0}.bestiary-editor-scroll{padding:14px 12px}.bestiary-edit-grid.two,.bestiary-edit-grid.three,.bestiary-edit-grid.four,.bestiary-edit-grid.five,.bestiary-edit-grid.six{grid-template-columns:repeat(2,minmax(0,1fr))}.bestiary-editor-card>footer{grid-template-columns:1fr 1fr}.bestiary-editor-card>footer>span{display:none}.bestiary-card-actions>*{flex:1;text-align:center;justify-content:center}}
 
 
-/* 7.4.2 complete ancestry + archetype authoring */
+/* 7.4.3 complete ancestry + archetype authoring */
 .fw-bundle-section{background:linear-gradient(180deg,rgba(183,150,97,.035),transparent 180px)}
 .fw-bundle-help{margin:14px 0 18px;padding:11px 13px;border-left:2px solid #866e47;background:#171611;color:#8f897d;font:12px/1.55 var(--serif)}
 .fw-nested-heading{margin-top:24px;padding-top:20px;border-top:1px solid #2f302b}
@@ -66,3 +66,8 @@
 .fw-bundle-preview-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-bottom:12px}.fw-bundle-preview-stats span{display:grid;gap:3px;padding:8px;border:1px solid #37342e;background:#14140f;font-size:.66rem;color:#c5b9a3}.fw-bundle-preview-stats strong{font-size:.52rem;letter-spacing:.08em;text-transform:uppercase;color:#8a7350}
 @media(max-width:900px){.fw-type-picker{grid-template-columns:repeat(2,minmax(0,1fr))}.fw-bundle-preview-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.fw-bundle-card .fw-repeat-grid{grid-template-columns:1fr}.fw-bundle-card .fw-repeat-grid .span-2{grid-column:auto}}
+
+/* Seeker 7.4.3 · source-linked Homebrew editing */
+.fw-source-link-banner{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;align-items:center;margin:12px 0 16px;padding:11px 12px;border:1px solid rgba(183,150,97,.3);border-radius:10px;background:linear-gradient(120deg,rgba(183,150,97,.11),rgba(255,255,255,.018));color:#c7b99d}
+.fw-source-link-banner>span{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#262117;color:#d4b276;font-size:1rem}.fw-source-link-banner strong{display:block;font:600 .72rem var(--sans);letter-spacing:.035em}.fw-source-link-banner small{display:block;margin-top:2px;color:#817a6e;font-size:.61rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fw-source-link-banner .quiet-btn{white-space:nowrap}.fw-source-link-banner.fw-hidden{display:none}
+@media(max-width:620px){.fw-source-link-banner{grid-template-columns:auto minmax(0,1fr)}.fw-source-link-banner .quiet-btn{grid-column:1/-1;text-align:center;justify-content:center}}

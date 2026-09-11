@@ -22,6 +22,7 @@
 
   async function sourceFoundry(button){button.disabled=true;try{const out=await send(`/api/homebrew/source/${encodeURIComponent(button.dataset.homebrewSourceFoundry)}/foundry`,'POST',{});const label=out.section==='ancestry'?'Ancestry bundle':'Homebrew bundle';toast(`${label} queued · ${out.rules||0} detected rule${out.rules===1?'':'s'} · command #${out.command?.id||'—'}`)}catch(e){toast(e.message,true)}finally{button.disabled=false}}
   $$('[data-homebrew-source-foundry]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();sourceFoundry(b)}));
+  $$('[data-homebrew-source-forge]').forEach(b=>b.addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();b.disabled=true;try{const out=await send(`/api/homebrew/source/${encodeURIComponent(b.dataset.homebrewSourceForge)}/forge`,'POST',{});location.href=out.url||`/gm/foundry-workshop?entry=${encodeURIComponent(out.entry?.id||'')}`}catch(err){toast(err.message,true);b.disabled=false}}));
 
   const dataEl=$('#homebrewData');if(!dataEl)return;
   let sections=[];try{sections=JSON.parse(dataEl.textContent||'[]')}catch{}

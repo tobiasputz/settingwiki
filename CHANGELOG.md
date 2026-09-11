@@ -1,3 +1,13 @@
+## 7.4.3 — Source-linked Forge editing & mobile navigation polish
+
+- Existing source-backed **ancestries and archetypes can now be opened directly in the Homebrew Forge**. Seeker hydrates the creator from the classified `.tex` source and keeps a link to that source rather than creating a detached duplicate.
+- Saving a source-linked Forge object writes mechanical changes back into the original LaTeX file and rebuilds the Codex/Homebrew view. Existing feats and heritages are updated in place; removed entries are removed from source; newly created entries are inserted into the appropriate source structure.
+- New ancestry/archetype feats are inserted beneath their **matching level heading**. If, for example, a level-17 feat is created and no level-17 heading exists yet, Seeker creates one using the existing document's heading style and places it inside the feat section before following lore sections. Repeated saves are idempotent and do not duplicate rules.
+- Source-linked Forge entries show a clear LaTeX-link banner and retain source identity/snapshots across ordinary saves and drafts. Duplicating one deliberately strips the source link so the copy cannot overwrite the original source.
+- The phone **More** sheet now owns its own touch-scroll region and locks background scrolling while open. Its title remains reachable while every grouped tool can be scrolled and tapped.
+- The separate floating GM shortcut bar is hidden on phone layouts. Mobile navigation is now one bottom toolbar only: **Codex · Session · Search · Chronicle · More**, with GM destinations available inside More.
+- Static/PWA generation is **7403**. Foundry Bridge remains **1.10.1**; this release changes Seeker-side authoring/navigation and does not require a bridge protocol change.
+
 ## 7.4.2 — Mobile, Foundry live sync & Homebrew indexes
 
 - Reworked the phone “More” menu into a compact grouped sheet with the Table App pinned at the top and collapsible Lore/GM groups; fixed the sheet height so its first entries can always be reached and scrolled to.

@@ -2,7 +2,7 @@
   const root=document.querySelector('[data-foundry-workshop]');
   if(!root) return;
   const initial=(()=>{try{return JSON.parse(document.getElementById('foundryWorkshopState')?.textContent||'{}')}catch{return {}}})();
-  const state={actors:initial.actors||[],entries:initial.prepared_content||[],commands:initial.commands||[],filter:'all',query:'',attacks:[],abilities:[],spells:[],heritages:[],bundleFeats:[],savedSnapshot:'',currentId:null,tokenImage:null,cropImage:null};
+  const state={actors:initial.actors||[],entries:initial.prepared_content||[],commands:initial.commands||[],filter:'all',query:'',attacks:[],abilities:[],spells:[],heritages:[],bundleFeats:[],sourceLink:{},savedSnapshot:'',currentId:null,tokenImage:null,cropImage:null};
   const form=document.getElementById('foundryWorkshopForm');
   const list=document.getElementById('foundryPrepList');
   const log=document.getElementById('foundryCommandLog');
@@ -196,7 +196,7 @@
     if(sync)syncRepeaters();
     const uiKind=fieldValue('kind')||'monster';
     const kind=bundleKind(uiKind)?'homebrew':uiKind;
-    const payload={};payloadFields.forEach(k=>payload[k]=fieldValue(k));payload.codex_publish=!!field('codex_publish')?.checked;payload.homebrew_publish=!!field('homebrew_publish')?.checked;payload.attacks=state.attacks;payload.abilities=state.abilities;payload.spells=state.spells;payload.heritages=state.heritages;payload.bundle_feats=state.bundleFeats;
+    const payload={...state.sourceLink};payloadFields.forEach(k=>payload[k]=fieldValue(k));payload.codex_publish=!!field('codex_publish')?.checked;payload.homebrew_publish=!!field('homebrew_publish')?.checked;payload.attacks=state.attacks;payload.abilities=state.abilities;payload.spells=state.spells;payload.heritages=state.heritages;payload.bundle_feats=state.bundleFeats;
     if(bundleKind(uiKind)){payload.homebrew_document=uiKind;payload.library_section=uiKind;payload.library_group=fieldValue('title').trim();if(uiKind==='ancestry')payload.ancestry_trait=payload.ancestry_trait||fieldValue('title').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-');if(uiKind==='archetype')payload.archetype_name=fieldValue('title').trim()}
     return {id:fieldValue('id')||undefined,kind,target_type:'world',title:fieldValue('title').trim(),subtitle:fieldValue('subtitle').trim(),summary:fieldValue('summary'),tags:bundleKind(uiKind)?(uiKind==='ancestry'?fieldValue('ancestry_traits'):fieldValue('archetype_traits')):fieldValue('traits'),payload};
   }
@@ -232,15 +232,24 @@
     if(announce&&problems.length)toast(`Fix ${problems.length} highlighted field${problems.length===1?'':'s'} before saving.`,true);
     return problems;
   }
+  const sourceLinkKeys=['source_linked','source_link_path','source_link_owner_slug','source_link_original_title','source_link_current_title','source_link_snapshot','source_link_dedication_original_title','latex_exported','latex_export_path'];
+  const sourceLinkFrom=p=>{const out={};if(!p?.source_linked)return out;sourceLinkKeys.forEach(k=>{if(p[k]!==undefined)out[k]=structuredClone(p[k])});return out};
+  function updateSourceLinkUI(){
+    const linked=!!state.sourceLink?.source_linked,banner=$('[data-fw-source-link-banner]'),path=String(state.sourceLink?.source_link_path||'');
+    banner?.classList.toggle('fw-hidden',!linked);const text=$('[data-fw-source-link-text]');if(text&&linked)text.textContent=`Saving updates ${path} directly. New feats are placed under their matching level heading and Seeker rebuilds the Homebrew entry.`;
+    const open=$('[data-fw-source-link-open]');if(open){open.href=linked?`/admin?file=${encodeURIComponent(path)}`:'#';open.classList.toggle('fw-hidden',!linked)}
+    $$('[data-fw-kind]').forEach(b=>{b.disabled=linked&&b.dataset.fwKind!==fieldValue('kind')});
+    const latex=$('[data-fw-latex]');if(latex){latex.disabled=creatureKind(fieldValue('kind'))||linked;latex.title=linked?'This Forge entry is source-linked. Save writes changes directly into the existing LaTeX file.':''}
+  }
   function fillForm(entry=null){
-    form.reset();state.currentId=entry?.id||null;state.attacks=[];state.abilities=[];state.spells=[];state.heritages=[];state.bundleFeats=[];
+    form.reset();state.currentId=entry?.id||null;state.attacks=[];state.abilities=[];state.spells=[];state.heritages=[];state.bundleFeats=[];state.sourceLink={};
     setField('id',entry?.id||'');setField('title',entry?.title||'');setField('subtitle',entry?.subtitle||'');setField('summary',entry?.summary||'');
-    const p=entry?.payload||{};payloadFields.forEach(k=>setField(k,p[k]??''));
+    const p=entry?.payload||{};state.sourceLink=sourceLinkFrom(p);payloadFields.forEach(k=>setField(k,p[k]??''));
     if(!entry){setField('level','1');setField('rarity','common');setField('size','med');setField('quantity','1');setField('ancestry_hp','8');setField('ancestry_size','med');setField('ancestry_speed','25');setField('ancestry_reach','5');setField('ancestry_vision','normal');setField('ancestry_languages','common');setField('ancestry_additional_languages','0');setField('ancestry_free_boosts','2');setField('dedication_level','2');setField('dedication_traits','archetype, dedication');setField('weapon_category','simple');setField('weapon_damage_dice','1');setField('weapon_damage_die','d6');setField('weapon_damage_type','slashing');setField('weapon_damage_modifier','0');setField('weapon_bonus','0');setField('weapon_usage','held-in-one-hand');setField('weapon_potency','0');setField('weapon_striking','0');['str_mod','dex_mod','con_mod','int_mod','wis_mod','cha_mod'].forEach(k=>setField(k,'0'))}
     if(field('codex_publish'))field('codex_publish').checked=!!p.codex_publish;if(field('homebrew_publish'))field('homebrew_publish').checked=!!p.homebrew_publish;
     state.attacks=Array.isArray(p.attacks)?structuredClone(p.attacks):[];state.abilities=Array.isArray(p.abilities)?structuredClone(p.abilities):[];state.spells=Array.isArray(p.spells)?structuredClone(p.spells):[];state.heritages=Array.isArray(p.heritages)?structuredClone(p.heritages):[];state.bundleFeats=Array.isArray(p.bundle_feats)?structuredClone(p.bundle_feats):[];
     const inferred=entry?.kind==='homebrew'&&['ancestry','archetype'].includes(String(p.homebrew_document||'').toLowerCase())?String(p.homebrew_document).toLowerCase():(entry?.kind||'monster');
-    setKind(inferred);renderRepeaters();updateItemSubtype();updateArtStatus();updateToolbar();renderPreview();
+    setKind(inferred);renderRepeaters();updateItemSubtype();updateArtStatus();updateToolbar();updateSourceLinkUI();renderPreview();
     state.savedSnapshot=JSON.stringify(collectData());
     setDirty();
     $('[data-fw-duplicate]').disabled=!entry;
@@ -300,7 +309,10 @@
   log?.addEventListener('click',async e=>{const b=e.target.closest('[data-retry-command]');if(!b)return;b.disabled=true;try{await send(`/api/v6/foundry/commands/${b.dataset.retryCommand}/retry`,'POST',{});toast('Foundry delivery queued again.');await refresh()}catch(err){toast(err.message||'Could not retry delivery.',true)}finally{b.disabled=false}});
   async function saveCurrent({silent=false}={}){
     const data=collectData();const problems=validateData(data,{announce:true});if(problems.length){field('title')?.reportValidity?.();throw Error('Fix the highlighted PF2e fields before saving.');}
-    const saved=await send('/api/v61/foundry/content','POST',data);state.currentId=saved.id;setField('id',saved.id);state.savedSnapshot=JSON.stringify(collectData());setDirty();$('[data-fw-duplicate]').disabled=false;if(!silent)toast('Homebrew saved.');await refresh();return saved
+    const saved=await send('/api/v61/foundry/content','POST',data);state.currentId=saved.id;setField('id',saved.id);
+    if(saved.payload?.source_linked){state.sourceLink=sourceLinkFrom(saved.payload);state.bundleFeats=Array.isArray(saved.payload.bundle_feats)?structuredClone(saved.payload.bundle_feats):state.bundleFeats;state.heritages=Array.isArray(saved.payload.heritages)?structuredClone(saved.payload.heritages):state.heritages;renderRepeaters();updateSourceLinkUI()}
+    state.savedSnapshot=JSON.stringify(collectData());setDirty();$('[data-fw-duplicate]').disabled=false;
+    if(!silent){const synced=saved.source_sync?.changed;toast(synced?`Saved and synced to ${saved.source_sync.path}.`:'Homebrew saved.')}await refresh();return saved
   }
   async function pushCurrent(target='world'){
     try{
@@ -382,7 +394,7 @@
   });
   list.addEventListener('click',e=>{const b=e.target.closest('[data-fw-open]');if(!b)return;const entry=state.entries.find(x=>String(x.id)===String(b.dataset.fwOpen));if(entry){fillForm(entry);switchMobile('editor')}});
   $('[data-fw-new]')?.addEventListener('click',()=>{fillForm();switchMobile('editor')});
-  $('[data-fw-duplicate]')?.addEventListener('click',()=>{const data=collectData();const copy={...data,id:null,title:`${data.title||'Untitled'} Copy`,payload:structuredClone(data.payload)};fillForm(copy);setField('id','');state.currentId=null;state.savedSnapshot='';setDirty();toast('Duplicated as a new unsaved entry.')});
+  $('[data-fw-duplicate]')?.addEventListener('click',()=>{const data=collectData();const cloned=structuredClone(data.payload);sourceLinkKeys.forEach(k=>delete cloned[k]);const copy={...data,id:null,title:`${data.title||'Untitled'} Copy`,payload:cloned};fillForm(copy);setField('id','');state.currentId=null;state.savedSnapshot='';setDirty();toast('Duplicated as a new unsaved entry.')});
   $('[data-fw-copy-json]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(JSON.stringify(collectData(),null,2));toast('Homebrew JSON copied.')}catch{toast('Could not access the clipboard.',true)}});
   const latexModal=$('[data-fw-latex-modal]'),latexText=$('[data-fw-latex-text]'),latexPath=$('[data-fw-latex-path]');
   async function openLatex(){

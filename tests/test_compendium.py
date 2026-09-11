@@ -525,3 +525,86 @@ def test_foundry_token_rotation_endpoint_is_atomic_and_does_not_500(tmp_path: Pa
     assert after['foundry_bridge_token']!=before['foundry_bridge_token']
     assert after['calendar_token']==before['calendar_token']
     assert after['display_token']==before['display_token']
+
+
+def test_source_ancestry_can_open_in_forge_and_insert_new_feat_into_matching_level(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);monkeypatch.setattr(main,'settings',s)
+    (s.project_dir/'chapters').mkdir()
+    source=s.project_dir/'chapters/jotunari.tex'
+    source.write_text(r'''\chapter{Jotunari}
+\section{Origins}
+Stone-born giantkin.
+
+\begin{multicols}{2}
+\textbf{Hitpoints:} 8
+
+\textbf{Size:} Medium
+
+\textbf{Speed:} 25 feet
+\end{multicols}
+
+\section{Jotunari Heritages}
+\subsection{Tomb Jotunari}
+Your body carries funerary stone.
+
+\section{Jotunari Feats}
+\subsection{1st Level}
+\feat{Stone Memory}{1}{jotunari, ancestry}{%
+Remember the mountain.
+}
+\subsection{5th Level}
+\feat{Giant Step}{5}{jotunari, ancestry}{%
+Stride far.
+}
+
+\section{Culture}
+The old songs endure.
+''',encoding='utf-8')
+    (s.project_dir/'main.tex').write_text(r'\documentclass{book}\begin{document}\input{chapters/jotunari}\end{document}',encoding='utf-8')
+    build_wiki(s);gm=gm_client(main,s)
+    marked=gm.put('/api/admin/file/homebrew',json={'path':'chapters/jotunari.tex','kind':'ancestry'})
+    assert marked.status_code==200,marked.text
+    pages=gm.get('/api/admin/codex').json()['pages'];owner=next(p['homebrew_owner_slug'] for p in pages if p.get('source_file')=='chapters/jotunari.tex')
+
+    opened=gm.post(f'/api/homebrew/source/{owner}/forge');assert opened.status_code==200,opened.text
+    entry=opened.json()['entry'];assert entry['payload']['source_linked'] is True
+    assert entry['payload']['source_link_path']=='chapters/jotunari.tex'
+    assert {x['title'] for x in entry['payload']['bundle_feats']}=={'Stone Memory','Giant Step'}
+    assert entry['payload']['heritages'][0]['title']=='Tomb Jotunari'
+
+    edited=dict(entry);edited['payload']=dict(entry['payload'])
+    edited['payload']['bundle_feats']=[dict(x) for x in entry['payload']['bundle_feats']]+[{
+        'kind':'feat','title':'Sky Titan','level':'17','traits':'jotunari, ancestry',
+        'requirements':'You are outdoors.','frequency':'once per day','description':'Become as vast as a storm cloud.'
+    }]
+    saved=gm.post('/api/v61/foundry/content',json=edited);assert saved.status_code==200,saved.text
+    saved_row=saved.json();assert saved_row['source_sync']['changed'] is True
+    text=source.read_text(encoding='utf-8')
+    assert r'\subsection{17th Level}' in text and r'\feat{Sky Titan}{17}' in text
+    assert text.index(r'\subsection{17th Level}') < text.index(r'\section{Culture}')
+    assert text.count('Sky Titan')==1
+    assert r'\textbf{Requirements:} You are outdoors.\\' in text
+    assert r'\textbf{Frequency:} once per day\\' in text
+
+    # The source stays authoritative: saving the returned Forge row again must
+    # update the same source rule, not create a second Homebrew entry or feat.
+    saved_again=gm.post('/api/v61/foundry/content',json=saved_row);assert saved_again.status_code==200,saved_again.text
+    assert source.read_text(encoding='utf-8').count('Sky Titan')==1
+    rebuilt=gm.get(f'/homebrew/source/{owner}');assert rebuilt.status_code==200
+    assert 'Sky Titan' in rebuilt.text and 'LEVEL 17' in rebuilt.text.upper()
+    reopened=gm.post(f'/api/homebrew/source/{owner}/forge');assert reopened.status_code==200
+    assert reopened.json()['entry']['id']==entry['id']
+
+
+def test_mobile_more_sheet_has_internal_scroller_and_mobile_gm_switcher_is_suppressed(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed(s);monkeypatch.setattr(main,'settings',s);gm=gm_client(main,s)
+    page=gm.get('/');assert page.status_code==200
+    assert 'class="mobile-sheet-scroll" data-mobile-sheet-scroll' in page.text
+    assert page.text.count('class="mobile-tabbar"')==1
+    css=(Path(__file__).parents[1]/'static/wiki.css').read_text(encoding='utf-8')
+    js=(Path(__file__).parents[1]/'static/wiki.js').read_text(encoding='utf-8')
+    assert '.gm-view-switcher{display:none!important}' in css
+    assert '.mobile-sheet-scroll{' in css and 'overflow-y:auto' in css
+    assert "document.body.classList.toggle('mobile-more-open',active)" in js

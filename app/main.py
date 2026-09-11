@@ -71,7 +71,7 @@ from .homebrew import (
     NON_MONSTER_KINDS, HOME_BREW_SECTIONS, HOME_BREW_SOURCE_TITLES, classify_homebrew, group_homebrew, homebrew_latex_snippet,
     is_homebrew_page, page_homebrew_kind, is_homebrew_source_path, source_homebrew_bucket, truthy, upsert_latex_block,
     insert_latex_block_in_heading, remove_latex_block, load_homebrew_file_kinds, set_file_homebrew_kind,
-    move_file_homebrew_metadata, delete_file_homebrew_metadata,
+    move_file_homebrew_metadata, delete_file_homebrew_metadata, sync_source_linked_bundle_text,
 )
 
 from .v5 import (
@@ -351,7 +351,7 @@ def ensure_built() -> dict:
             pass
         return wiki
     except Exception:
-        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 7402}
+        return {"title": "Seeker", "tagline": "Import a LaTeX campaign project in /admin.", "categories": [], "pages": [], "generated_at": time.time(), "renderer_version": 7403}
 
 
 def _invite_id(request: Request) -> int | None:
@@ -675,7 +675,7 @@ def startup_build() -> None:
             if not needs_build:
                 try:
                     existing=load_wiki(settings)
-                    needs_build=int(existing.get("renderer_version") or 0) < 7402
+                    needs_build=int(existing.get("renderer_version") or 0) < 7403
                     index_mtime=index_path.stat().st_mtime_ns
                     if not needs_build:
                         source_files=tex_files+list(settings.project_dir.rglob("*.sty"))+list(settings.project_dir.rglob("*.cls"))
@@ -3845,7 +3845,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.4.2 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/7.4.3 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -4263,6 +4263,86 @@ def homebrew_source_detail(request:Request,owner_slug:str):
         'request':request,'wiki':wiki,'maps':list_maps(settings,public=not gm),'gm_view':gm,
         'bundle':bundle,'group':bundle['group'],
     })
+
+
+def _source_rule_to_forge(rule:dict) -> dict:
+    traits=rule.get('traits') or []
+    if isinstance(traits,(list,tuple,set)):traits=', '.join(str(x).strip() for x in traits if str(x).strip())
+    try:level=int(rule.get('level') or 0)
+    except (TypeError,ValueError):level=0
+    title=str(rule.get('title') or '').strip()
+    return {
+        'kind':'feat','title':title,'level':level,'traits':str(traits or ''),'action_cost':str(rule.get('action_cost') or ''),
+        'access':str(rule.get('access') or ''),'prerequisites':str(rule.get('prerequisites') or ''),
+        'frequency':str(rule.get('frequency') or ''),'trigger':str(rule.get('trigger') or ''),
+        'requirements':str(rule.get('requirements') or ''),'special':str(rule.get('special') or ''),
+        'description':str(rule.get('description') or rule.get('plain_text') or ''),
+        '_source_original_title':title,'_source_original_level':level,
+    }
+
+
+def _source_bundle_forge_payload(bundle:dict) -> dict:
+    section=str(bundle.get('section') or '').strip().lower();group=bundle.get('group') or {}
+    title=str(group.get('name') or 'Homebrew').strip();source=str(group.get('source_file') or '').replace('\\','/').strip('/')
+    if section not in {'ancestry','archetype'}:raise HTTPException(400,'Only source-backed ancestries and archetypes can currently open as complete Forge documents.')
+    feats=[_source_rule_to_forge(r) for r in (group.get('feat_rules') or []) if isinstance(r,dict)]
+    payload={
+        'homebrew_document':section,'homebrew_publish':True,'library_section':section,'library_group':title,
+        'description':'','source_linked':True,'source_link_path':source,'source_link_owner_slug':str(group.get('owner_slug') or ''),
+        'source_link_original_title':title,'source_link_current_title':title,'latex_exported':True,'latex_export_path':source,
+    }
+    if section=='ancestry':
+        a=dict(group.get('ancestry') or {})
+        payload.update({
+            'ancestry_trait':re.sub(r'[^a-z0-9]+','-',title.casefold()).strip('-'),
+            'ancestry_hp':str(a.get('hp') or 8),'ancestry_size':str(a.get('size') or 'med'),'ancestry_speed':str(a.get('speed') or 25),
+            'ancestry_reach':str(a.get('reach') or 5),'ancestry_vision':str(a.get('vision') or 'normal'),
+            'ancestry_languages':str(a.get('languages') or ''),'ancestry_additional_languages':str(a.get('additional_languages') or 0),
+            'ancestry_traits':str(a.get('traits') or ''),'ancestry_boosts':str(a.get('boosts') or ''),
+            'ancestry_free_boosts':str(a.get('free_boosts') if a.get('free_boosts') is not None else 0),'ancestry_flaws':str(a.get('flaws') or ''),
+        })
+        heritages=[]
+        for raw in group.get('heritages') or []:
+            if not isinstance(raw,dict):continue
+            h={'title':str(raw.get('title') or raw.get('name') or ''),'rarity':str(raw.get('rarity') or 'common'),'traits':str(raw.get('traits') or ''),'description':str(raw.get('description') or '')}
+            h['_source_original_title']=h['title'];heritages.append(h)
+        payload['heritages']=heritages;payload['bundle_feats']=feats
+    else:
+        dedication_index=next((i for i,r in enumerate(feats) if 'dedication' in {x.strip().casefold() for x in str(r.get('traits') or '').split(',')} or str(r.get('title') or '').casefold().endswith(' dedication')),None)
+        dedication=feats.pop(dedication_index) if dedication_index is not None else None
+        payload.update({'archetype_name':title,'archetype_access':'','archetype_traits':''})
+        if dedication:
+            payload.update({
+                'dedication_title':dedication.get('title') or f'{title} Dedication','dedication_level':str(dedication.get('level') or 2),
+                'dedication_action_cost':dedication.get('action_cost') or '','dedication_traits':dedication.get('traits') or 'archetype, dedication',
+                'dedication_prerequisites':dedication.get('prerequisites') or '','dedication_frequency':dedication.get('frequency') or '',
+                'dedication_trigger':dedication.get('trigger') or '','dedication_requirements':dedication.get('requirements') or '',
+                'dedication_special':dedication.get('special') or '','dedication_description':dedication.get('description') or '',
+                'source_link_dedication_original_title':dedication.get('title') or '',
+            })
+        else:
+            payload.update({'dedication_title':f'{title} Dedication','dedication_level':'2','dedication_traits':'archetype, dedication'})
+        payload['heritages']=[];payload['bundle_feats']=feats
+    payload['source_link_snapshot']={
+        'title':title,
+        'ancestry':{k:payload.get(k,'') for k in ('ancestry_hp','ancestry_size','ancestry_speed','ancestry_reach','ancestry_vision','ancestry_languages','ancestry_additional_languages','ancestry_traits','ancestry_boosts','ancestry_free_boosts','ancestry_flaws')},
+        'heritages':[dict(x) for x in payload.get('heritages') or []],
+        'bundle_feats':[dict(x) for x in payload.get('bundle_feats') or []],
+        'dedication':{k:payload.get(k,'') for k in ('dedication_title','dedication_level','dedication_action_cost','dedication_traits','dedication_prerequisites','dedication_frequency','dedication_trigger','dedication_requirements','dedication_special','dedication_description')},
+    }
+    lore='\n\n'.join(str(p.get('lore_plain') or '') for p in group.get('lore_pages') or [] if str(p.get('lore_plain') or '').strip())
+    return {'kind':'homebrew','title':title,'subtitle':f'Source-linked {section}','summary':lore[:8000],'tags':payload.get('ancestry_traits') or payload.get('archetype_traits') or '', 'target_type':'world','payload':payload}
+
+
+@app.post('/api/homebrew/source/{owner_slug}/forge')
+def homebrew_source_open_in_forge(request:Request,owner_slug:str):
+    require_gm(request);cid=_active_campaign_id(request);bundle=_source_homebrew_bundle_or_404(_visible_wiki(request),owner_slug)
+    section=str(bundle.get('section') or '').strip().lower();source=str((bundle.get('group') or {}).get('source_file') or '').replace('\\','/').strip('/')
+    if section not in {'ancestry','archetype'}:raise HTTPException(400,'Complete Forge editing is available for source-backed ancestries and archetypes.')
+    existing=next((row for row in list_foundry_prepared_content(settings,cid) if truthy((row.get('payload') or {}).get('source_linked')) and str((row.get('payload') or {}).get('source_link_path') or '').replace('\\','/').strip('/')==source and str((row.get('payload') or {}).get('homebrew_document') or '').strip().lower()==section),None)
+    if existing:return {'ok':True,'entry':existing,'created':False,'url':f"/gm/foundry-workshop?entry={int(existing['id'])}"}
+    prepared=_source_bundle_forge_payload(bundle);saved=save_foundry_prepared_content(settings,cid,prepared)
+    return {'ok':True,'entry':saved,'created':True,'url':f"/gm/foundry-workshop?entry={int(saved['id'])}"}
 
 
 def _source_rule_foundry_html(rule:dict) -> str:
@@ -4685,9 +4765,31 @@ def v61_foundry_workshop_state(request:Request):
 def v61_foundry_content_save(request:Request,payload:dict=Body(...)):
     require_gm(request)
     cid=_active_campaign_id(request)
+    prepared=dict(payload or {})
+    content=dict(prepared.get('payload') or {}) if isinstance(prepared.get('payload'),dict) else {}
+    source_sync=None
+    if truthy(content.get('source_linked')):
+        rel=str(content.get('source_link_path') or '').replace('\\','/').strip('/')
+        if not rel or not rel.lower().endswith('.tex'):
+            raise HTTPException(400,'This source-linked Forge entry no longer points to a valid .tex file.')
+        source=safe_project_path(settings,rel)
+        if not source.exists():raise HTTPException(404,'The linked LaTeX source file no longer exists.')
+        try:existing=source.read_text(encoding='utf-8',errors='replace')
+        except OSError as exc:raise HTTPException(500,'Could not read the linked LaTeX source.') from exc
+        rendered,content,changes=sync_source_linked_bundle_text(existing,{**prepared,'payload':content})
+        prepared['payload']=content
+        if rendered!=existing:
+            save_text_file(settings,rel,rendered)
+            source_sync={'path':rel,'changes':changes,'changed':True}
+        else:
+            source_sync={'path':rel,'changes':changes,'changed':False}
     try:
-        out=save_foundry_prepared_content(settings,cid,payload)
+        out=save_foundry_prepared_content(settings,cid,prepared)
+        if source_sync and source_sync.get('changed'):
+            try:build_wiki(settings)
+            except Exception as exc:source_sync['wiki_warning']=str(exc)
         _prune_unused_foundry_images(cid)
+        if source_sync:out['source_sync']=source_sync
         return out
     except ValueError as exc:raise HTTPException(400,str(exc))
 
