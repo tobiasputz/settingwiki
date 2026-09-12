@@ -32,7 +32,7 @@
   </section>
 
   <section class="living-pane" data-living-pane="journal">
-    <div class="living-pane-head"><div><span class="eyebrow">YOUR MEMORY</span><h2>Session journal</h2><p>Attach notes to a character when they belong to that hero, or leave them player-wide. At the live table Seeker automatically filters your private notes to the character you entered as.</p></div>{% if can_author %}<button class="primary-button" data-new-journal>＋ Journal entry</button>{% endif %}</div>
+    <div class="living-pane-head"><div><span class="eyebrow">YOUR MEMORY</span><h2>Session journal</h2><p>Attach notes to a character when they belong to that hero, or leave them player-wide. At the live table Seeker automatically filters your private notes to the character you entered as.</p></div>{% if can_journal_author %}<button class="primary-button" data-new-journal>＋ Journal entry</button>{% endif %}</div>
     {% if journal_characters %}<div class="journal-filter" aria-label="Filter journal by character"><button class="active" data-journal-filter="all">All notes</button><button data-journal-filter="general">Player-wide</button>{% for c in journal_characters %}<button data-journal-filter="{{ c.id }}">♟ {{ c.name }}</button>{% endfor %}</div>{% endif %}
     <div class="journal-grid" id="journalGrid">{% for j in journals %}<article data-journal-id="{{ j.id }}" data-journal-character="{{ j.character_id or 'general' }}"><small>{{ 'PRIVATE' if j.visibility=='private' else 'PARTY JOURNAL' }}{% if j.character_name %} · ♟ {{ j.character_name }}{% else %} · PLAYER-WIDE{% endif %}{% if j.session_id %} · SESSION {{ j.session_number or j.session_id }}{% if j.session_title %} · {{ j.session_title }}{% endif %}{% endif %}</small><h3>{{ j.title }}</h3><p>{{ j.body }}</p>{% if can_author %}<button data-edit-journal="{{ j.id }}">Edit</button>{% endif %}</article>{% else %}<div class="living-empty"><span>✎</span><h3>No journal entries yet</h3><p>Write down the thing everyone will otherwise forget by next week.</p></div>{% endfor %}</div>
   </section>
@@ -59,12 +59,12 @@
   </section>
 
   <section class="living-pane" data-living-pane="contribute">
-    <div class="living-pane-head"><div><span class="eyebrow">PLAYER AUTHORSHIP</span><h2>Contribute to the world</h2><p>Propose hometown lore, character-connected details, images, session writeups, or relationship ideas. The GM can approve them into canonical worldbuilding.</p></div>{% if can_author %}<button class="primary-button" data-new-submission>＋ Submission</button>{% endif %}</div>
+    <div class="living-pane-head"><div><span class="eyebrow">PLAYER AUTHORSHIP</span><h2>Contribute to the world</h2><p>Propose hometown lore, character-connected details, images, session writeups, or relationship ideas. The GM can approve them into canonical worldbuilding.</p></div>{% if can_contribute %}<button class="primary-button" data-new-submission>＋ Submission</button>{% endif %}</div>
     <div class="submission-list" id="submissionList">{% for s in submissions %}<article><span class="submission-status status-{{ s.status }}">{{ s.status }}</span><div><small>{{ s.kind|upper }}</small><h3>{{ s.title }}</h3><p>{{ s.body }}</p>{% if s.asset_ref %}<a class="submission-asset" href="{{ '/uploads/' + s.asset_ref.split(':',1)[1] if s.asset_ref.startswith('upload:') else s.asset_ref }}" target="_blank" rel="noopener">Attached file →</a>{% endif %}{% if s.gm_note %}<blockquote>GM: {{ s.gm_note }}</blockquote>{% endif %}</div></article>{% else %}<div class="living-empty"><span>✦</span><h3>No submissions yet</h3><p>Your character's corner of the setting can be yours to help build.</p></div>{% endfor %}</div>
   </section>
 </main>
 <div class="modal-backdrop hidden" id="livingModal"><div class="modal living-modal"><button class="modal-close" data-living-close>×</button><div id="livingModalContent"></div></div></div>
 <div class="toast-stack" id="toastStack"></div>
-<script>window.LF_LIVING={{ {"threads":threads,"journals":journals,"characters":journal_characters,"submissions":submissions,"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":none,"session_id":none,"session_context":false,"sessions":journal_sessions}|tojson }};</script>
+<script>window.LF_LIVING={{ {"threads":threads,"journals":journals,"characters":journal_characters,"journal_authors":journal_authors,"submissions":submissions,"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":none,"session_id":none,"session_context":false,"sessions":journal_sessions}|tojson }};</script>
 {% endblock %}
-{% block scripts %}<script src="/static/living.js?v=9003"></script>{% endblock %}
+{% block scripts %}<script src="/static/living.js?v=9004"></script>{% endblock %}

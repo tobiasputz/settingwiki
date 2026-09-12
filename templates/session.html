@@ -75,7 +75,7 @@
       </article>
 
       <article class="session-v5-panel private-notes-panel" data-session-pane="notes">
-        <header><div><small>PRIVATE MEMORY</small><h2>{% if active_character %}{{ active_character.name }}'s notes{% else %}Your journal{% endif %}</h2></div>{% if can_author %}<button data-new-journal>＋ Note</button>{% endif %}</header>
+        <header><div><small>PRIVATE MEMORY</small><h2>{% if active_character %}{{ active_character.name }}'s notes{% else %}Your journal{% endif %}</h2></div>{% if can_journal_author %}<button data-new-journal>＋ Note</button>{% endif %}</header>
         <div class="session-v5-note-list">{% for j in party_journals[:8] %}<article><small>{{ j.player_label or 'Player' }}{% if j.character_name %} · {{ j.character_name }}{% endif %}</small><strong>{{ j.title }}</strong><p>{{ j.body }}</p>{% if can_author and player and j.invite_id == player.id %}<button data-edit-journal="{{ j.id }}">Edit</button>{% endif %}</article>{% else %}<div class="empty-mini">No journal entries in this view.</div>{% endfor %}</div>
         <a class="session-inline-link" href="/campaign#journal">Open full Chronicle →</a>
       </article>
@@ -104,6 +104,6 @@
   </div>
 </main>
 <div class="modal-backdrop hidden" id="livingModal"><div class="modal living-modal"><button class="modal-close" data-living-close>×</button><div id="livingModalContent"></div></div></div><div class="toast-stack" id="toastStack"></div>
-<script>window.LF_LIVING={{ {"threads":threads,"journals":party_journals,"characters":session_characters,"submissions":[],"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":(active_character.id if active_character else none),"session_id":(session.id if session else none),"session_context":true,"character_selection_made":character_selection_made,"sessions":([session] if session else [])}|tojson }};window.SEEKER_V5_SESSION={{ {"session_id":(session.id if session else none),"player_id":(player.id if player else none),"gm":gm_view}|tojson }};</script>
+<script>window.LF_LIVING={{ {"threads":threads,"journals":party_journals,"characters":journal_characters,"journal_authors":journal_authors,"submissions":[],"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":(active_character.id if active_character else none),"session_id":(session.id if session else none),"session_context":true,"character_selection_made":character_selection_made,"sessions":([session] if session else [])}|tojson }};window.SEEKER_V5_SESSION={{ {"session_id":(session.id if session else none),"player_id":(player.id if player else none),"gm":gm_view}|tojson }};</script>
 {% endblock %}
-{% block scripts %}{{ super() }}<script src="/static/living.js?v=9003"></script><script src="/static/session-v5.js?v=9003"></script>{% endblock %}
+{% block scripts %}{{ super() }}<script src="/static/living.js?v=9004"></script><script src="/static/session-v5.js?v=9004"></script>{% endblock %}

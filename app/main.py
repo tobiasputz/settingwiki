@@ -1172,6 +1172,9 @@ def player_session_screen(request: Request):
     invite=current_player_invite(request)
     can_author=gm or (not archive_mode() and bool(invite) and player_role(request)=='player')
     session_characters,active_character,character_selection_made=_session_character_context(request,session)
+    journal_authors=[m for m in campaign_members(settings,cid) if int(m.get("campaign_member") or 0)==1 and str(m.get("role") or "player").lower()=="player"]
+    journal_characters=(list_player_characters(settings,invite_id=iid,admin=True,campaign_id=cid) if gm else session_characters)
+    can_journal_author=bool(can_author and (iid is not None or journal_authors))
     journal_character_filter=None
     if not gm and character_selection_made:journal_character_filter=int((active_character or {}).get('id') or 0)
     party_journals=list_party_journals(settings,iid,admin=gm,character_id=journal_character_filter,campaign_id=cid)
@@ -1198,7 +1201,7 @@ def player_session_screen(request: Request):
         'player':invite,'updates':recent_updates(settings,iid,16,admin=gm,campaign_id=cid),'mysteries':mysteries,'session_history':history,
         'calendar':_calendar_config(),'threads':list_threads(settings,admin=gm,invite_id=iid,campaign_id=cid),'party_journals':party_journals,
         'party_notes':shared_notes,'objectives':objectives,'follows':follows,'followed_pages':followed_pages,'notifications':notifications,
-        'gm_view':gm,'can_author':can_author,'archive_mode':archive_mode(),'session_characters':session_characters,'active_character':active_character,
+        'gm_view':gm,'can_author':can_author,'can_journal_author':can_journal_author,'archive_mode':archive_mode(),'session_characters':session_characters,'journal_characters':journal_characters,'journal_authors':journal_authors,'active_character':active_character,
         'character_selection_made':character_selection_made,'own_rsvp':own_rsvp,'campaign_clocks':campaign_clocks,
     })
 
@@ -2752,18 +2755,22 @@ def living_campaign_page(request: Request):
     if not player_allowed(request): return player_gate_redirect(request)
     iid=_invite_id(request); gm=is_gm(request); cid=_active_campaign_id(request); wiki=_visible_wiki(request); maps=list_maps(settings,public=not gm)
     chars=list_player_characters(settings,invite_id=iid,admin=gm,campaign_id=cid)
+    journal_authors=[m for m in campaign_members(settings,cid) if int(m.get("campaign_member") or 0)==1 and str(m.get("role") or "player").lower()=="player"]
     for c in chars:
         owner=gm or int(c.get("invite_id") or -1)==int(iid or -2)
         c["arcs"]=character_arcs(settings,int(c["id"]),owner=owner)
         c["relationships"]=character_relationships(settings,int(c["id"]),owner=owner)
     can_author = gm or (not archive_mode() and bool(current_player_invite(request)) and player_role(request) == "player")
+    journals=(list_party_journals(settings,admin=True,campaign_id=cid) if gm else ([] if iid is None else list_journals(settings,iid,admin=False,campaign_id=cid)))
+    journal_characters=(chars if gm else [c for c in chars if iid is not None and int(c.get("invite_id") or -1)==int(iid)])
+    can_journal_author=bool(can_author and (iid is not None or journal_authors))
     return templates.TemplateResponse("living.html",{
         "request":request,"wiki":wiki,"maps":maps,"gm_view":gm,"player":current_player_invite(request),
         "threads":list_threads(settings,admin=gm,invite_id=iid,campaign_id=cid),"fronts":list_fronts(settings,admin=gm,invite_id=iid,campaign_id=cid),
-        "rumors":list_rumors(settings,admin=gm,campaign_id=cid),"journals":([] if iid is None else list_journals(settings,iid,admin=gm,campaign_id=cid)),
+        "rumors":list_rumors(settings,admin=gm,campaign_id=cid),"journals":journals,
         "characters":chars,"notifications":list_notifications(settings,iid,admin=gm,campaign_id=cid),"runtime_states":runtime_states(settings,admin=gm),
-        "submissions":list_submissions(settings,invite_id=iid,admin=gm,campaign_id=cid),"calendar":_calendar_config(),"can_author":can_author,"archive_mode":archive_mode(),
-        "journal_characters":[c for c in chars if iid is not None and int(c.get("invite_id") or -1)==int(iid)],
+        "submissions":list_submissions(settings,invite_id=iid,admin=gm,campaign_id=cid),"calendar":_calendar_config(),"can_author":can_author,"can_contribute":bool(can_author and not gm and iid is not None),"can_journal_author":can_journal_author,"archive_mode":archive_mode(),
+        "journal_characters":journal_characters,"journal_authors":journal_authors,
         "journal_sessions":list_sessions(settings,public=not gm,invite_id=iid,campaign_id=cid),
     })
 
@@ -2954,9 +2961,20 @@ def thread_link_delete_api(request:Request,tid:int,target_type:str="page",target
 def player_journal_save(request:Request,payload:dict=Body(...)):
     if not player_allowed(request):raise HTTPException(401)
     require_player_author(request)
-    iid=_invite_id(request)
-    if iid is None:raise HTTPException(403,"A personal invitation is required for journals.")
     payload=_campaign_payload(request,payload)
+    iid=_invite_id(request)
+    if is_gm(request):
+        target_iid=payload.get("author_invite_id")
+        if payload.get("id") and not target_iid:
+            with connect(settings) as conn:
+                row=conn.execute("SELECT invite_id FROM player_journals WHERE id=?",(int(payload["id"]),)).fetchone()
+            target_iid=(int(row["invite_id"]) if row else None)
+        try: target_iid=int(target_iid) if target_iid is not None else None
+        except (TypeError,ValueError): target_iid=None
+        if target_iid is None or not invite_has_campaign(settings,target_iid,_active_campaign_id(request)):
+            raise HTTPException(400,"Choose a player at this table for the journal entry.")
+        iid=target_iid
+    if iid is None:raise HTTPException(403,"A personal invitation is required for journals.")
     # Session note forms inherit the character identity chosen for the current
     # live session unless the client explicitly chose a different/general scope.
     if "character_id" not in payload:
@@ -3843,7 +3861,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/9.0.3 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/9.0.4 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))

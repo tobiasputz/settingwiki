@@ -1,3 +1,13 @@
+# 9.0.4 — UI action integrity
+
+- Fixed **Add journal entry** end-to-end. GMs can now create/edit journal entries by explicitly choosing a player at the active table; players keep their existing private journal flow.
+- The full Chronicle now shows all table journals to GMs and keeps journal authorship/character ownership valid instead of exposing a button whose save path could only work for a personal invitation.
+- Fixed the same GM journal path on the live Session screen.
+- Removed the misleading GM-side **Submission** action from the player-contribution pane; that action is intentionally player-only.
+- Journal actions now use delegated click handling and can recreate their modal shell if page markup is incomplete, preventing a missing/late-bound node from leaving the button inert.
+- Added stricter release checks: page-local button binding, frontend API method/route contracts, and real GM/player Chronicle write-path tests for journals, arcs, and relationships.
+- Static/PWA generation: **9004**.
+
 # Seeker 9.0.3 — UI Reliability & Button Audit
 
 - Added a shared **UI Core** navigation fallback for Chronicle, Table App, Worldcraft, World State, Living Table, and Campaign Workspace tab systems. Feature-specific scripts still own rich behavior, but a failure in another module can no longer leave core tabs such as **Journal** or **Relationships** visibly clickable but inert.

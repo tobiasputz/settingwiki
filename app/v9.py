@@ -512,4 +512,4 @@ def extension_foundry_action(settings: Settings, plugin_id: str, action_id: str)
 
 def migration_status(settings: Settings) -> dict:
     rows=_rows(settings,'SELECT * FROM v9_schema_history ORDER BY applied_at DESC,id DESC')
-    return {'schema_history':rows,'current':'9.0.3','database':str(settings.db_path),'data_dir':str(settings.data_dir)}
+    return {'schema_history':rows,'current':'9.0.4','database':str(settings.db_path),'data_dir':str(settings.data_dir)}

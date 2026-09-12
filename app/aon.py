@@ -17,7 +17,7 @@ AON_QUERY_KEYS = {"id", "elite", "weak", "pwl", "noredirect", "redirected"}
 AON_MAX_LINKS = 25
 AON_MAX_BYTES = 2_500_000
 AON_TIMEOUT = httpx.Timeout(12.0, connect=5.0)
-AON_USER_AGENT = "Seeker/9.0.3 (+Archives-of-Nethys creature importer; private campaign tool)"
+AON_USER_AGENT = "Seeker/9.0.4 (+Archives-of-Nethys creature importer; private campaign tool)"
 
 _ACTION_WORDS = {
     "one-action": "1",

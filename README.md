@@ -1,6 +1,6 @@
-# Seeker — Campaign Workspace (9.0.3)
+# Seeker — Campaign Workspace (9.0.4)
 
-**9.0.3 maintenance update:** hardens UI navigation and completes a project-wide button audit. Core Journal/Relationships/tab navigation now has a shared fallback, dead Studio controls are implemented, and CI fails if a visible static button ships without behavior. Static/PWA generation is 9003.
+**9.0.4 maintenance update:** fixes the Chronicle journal workflow end-to-end for both players and GMs, removes a GM-only dead contribution control, hardens modal/action delegation, and upgrades the UI audit so buttons must be bound by scripts actually loaded on their page and every frontend API action must resolve to a matching backend method/route. Static/PWA generation is 9004.
 
 **One campaign, one source of truth.** This major release adds a connected **Campaign Workspace** without turning Seeker's document structure into another database you have to manage. LaTeX remains authoritative for source-backed campaign material; Foundry remains authoritative for live actor state; Seeker connects those systems to sessions, Chronicle, maps, handouts, Homebrew and campaign relationships.
 
@@ -28,7 +28,7 @@ The new workspace uses additive SQLite tables (`v8_*`) and reuses existing V7 re
 
 On first use, the object registry classifies old automatically mirrored Codex headings. It does **not** delete them. This is specifically intended to turn installations with hundreds of heading-derived “entities” into a small, useful list of actual campaign objects without sacrificing anything you had already attached data to.
 
-Static/PWA generation is **9003**. **Foundry Bridge remains 1.11.0**; no bridge protocol migration is required.
+Static/PWA generation is **9004**. **Foundry Bridge remains 1.11.0**; no bridge protocol migration is required.
 
 Release verification: **237 automated tests pass**, plus Python compilation and browser JavaScript syntax validation.
 
