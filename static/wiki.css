@@ -473,7 +473,7 @@ html:not(.gm-prep-html){min-height:100%;overflow-x:hidden;overflow-y:auto}body:n
 }
 
 
-/* Seeker 9.0.5 — shared dialog + transient UI foundation -----------------
+/* Seeker 10.0.0 — shared dialog + transient UI foundation -----------------
    Generic modal markup is used by Chronicle, Session, GM Prep/Console and
    other non-Studio screens. Keep the presentation in the shared stylesheet
    so opening a tool can never dump its form into normal document flow. */

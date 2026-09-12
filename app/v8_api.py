@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from .config import Settings
 from .storage import connect, safe_project_path, save_text_file
 from .campaigns import get_campaign, campaign_members
+from .v10 import log_best_effort
 from .features import (
     add_session_update, get_live_session, list_handouts, list_player_characters, list_sessions,
     recent_updates, save_handout, save_session,
@@ -123,7 +124,7 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             compact.append({**e,'sync':syncs.get(int(e['id']))})
         wf=workflow(settings,cid,int(session['id'])) if session else None
         return {
-            'version':'9.0.5','campaign':get_campaign(settings,cid) or {},'modules':module_settings(settings,cid),
+            'version':'10.0.0','campaign':get_campaign(settings,cid) or {},'modules':module_settings(settings,cid),
             'session':session,'workflow':wf,'sessions':list_sessions(settings,public=False,campaign_id=cid),
             'entities':compact,'codex_candidates':_codex_candidates(wiki,entities),'table':_table_payload(cid,session),'maps':list_maps(settings,public=False),
             'handouts':list_handouts(settings,admin=True,campaign_id=cid),'threads':list_threads(settings,admin=True,campaign_id=cid),
@@ -232,7 +233,7 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         try:out=restore_source_revision(settings,cid,revision_id,created_by=requester_label(request))
         except ValueError as exc:raise HTTPException(404,str(exc))
         try: build_wiki(settings)
-        except Exception: pass
+        except Exception as exc: log_best_effort(settings,"source","source_restore.rebuild",exc,campaign_id=cid)
         return out
 
     @app.put('/api/v8/modules')

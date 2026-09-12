@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .v10 import log_best_effort
 from .storage import connect, get_setting, set_setting, list_revisions, restore_revision
 from .living import create_portable_archive, validate_portable_archive_file
 
@@ -314,8 +315,8 @@ def list_foundry_prepared_content(settings: Settings, campaign_id: int) -> list[
     try:
         from .homebrew_global import list_global_homebrew
         out.extend(list_global_homebrew(settings,int(campaign_id)))
-    except Exception:
-        pass
+    except Exception as exc:
+        log_best_effort(settings,"foundry","prepared_content.global_homebrew",exc,campaign_id=int(campaign_id),level="debug")
     out.sort(key=lambda r:(-float(r.get('updated_at') or 0),-int(r.get('id') or 0)))
     return out
 
@@ -710,13 +711,13 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     query=urllib.parse.parse_qsl(parts.query,keep_blank_values=True)
     query=[(k,v) for k,v in query if k.lower()!='wait']+[('wait','true')]
     webhook_url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,parts.path,urllib.parse.urlencode(query),parts.fragment))
-    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/9.0.5'}, method='POST')
+    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/10.0.0'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             status=int(resp.status)
             raw=b''
             try: raw=resp.read()
-            except Exception: pass
+            except Exception as exc: log_best_effort(settings,"discord","discord.response_read",exc,campaign_id=int(campaign_id) if campaign_id is not None else None,level="debug")
             created={}
             if raw:
                 try: created=json.loads(raw.decode('utf-8'))
@@ -736,7 +737,7 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     except urllib.error.HTTPError as exc:
         detail=''
         try: detail=exc.read().decode('utf-8','replace')[:500]
-        except Exception: pass
+        except Exception as read_exc: log_best_effort(settings,"discord","discord.error_body_read",read_exc,campaign_id=int(campaign_id) if campaign_id is not None else None,level="debug")
         raise ValueError(f'Discord rejected the webhook ({exc.code}){": "+detail if detail else "."}') from exc
     except Exception as exc:
         raise ValueError(f'Could not reach Discord: {exc}') from exc
@@ -1144,7 +1145,7 @@ def continuity_v6(settings: Settings, campaign_id: int, wiki: dict) -> dict:
             if c['trigger_kind']=='date':
                 try:
                     if dt.date.fromisoformat(str(c['trigger_value'])[:10]) < dt.date.today(): issues.append({'severity':'warning','title':c['title'],'message':'A dated consequence is overdue.','href':'/gm/prep'})
-                except Exception: pass
+                except Exception as exc: log_best_effort(settings,"continuity","consequence.invalid_date",exc,campaign_id=cid,meta={"consequence_id":int(c['id']) if 'id' in c.keys() else None})
         hidden={str(r['target_key']) for r in conn.execute("SELECT target_key FROM lore_reveals WHERE campaign_id=? AND target_type='page' AND state='hidden'",(cid,)).fetchall()}
         for h in conn.execute("SELECT id,title,body FROM handouts WHERE campaign_id=?",(cid,)).fetchall():
             text=(str(h['title'])+' '+str(h['body'])).casefold()
@@ -1321,7 +1322,7 @@ def campaign_keepsake(settings: Settings, campaign_id: int, out: Path) -> Path:
             try:
                 path=path.resolve();base=base.resolve()
                 if path.is_file() and base in path.parents:return path,arc
-            except Exception:pass
+            except Exception as exc: log_best_effort(settings,"archive","keepsake.asset_resolve",exc,campaign_id=int(campaign_id),path=str(path),level="debug")
         return None
     with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,allowZip64=True) as z:
         z.writestr('campaign-chronicle.html',''.join(parts));z.writestr('campaign-data.json',json.dumps(manifest,indent=2,ensure_ascii=False))

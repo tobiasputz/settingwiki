@@ -77,7 +77,7 @@ def test_resource_guardrails_are_shipped():
     assert '_stream_upload' in main and 'await file.read(30_000_001)' not in main and 'await file.read(40_000_001)' not in main
     assert '_visible_wiki_cached' in main and 'player_activity' not in main[main.index('def _visible_wiki_signature'):main.index('@functools.lru_cache(maxsize=12)')]
     assert 'searchAbort?.abort()' in wiki and 'hoverCache.size>32' in wiki
-    assert 'setInterval(pollNotifications,12000)' in wiki and 'if(document.hidden)return' in wiki
+    assert 'setInterval(pollNotifications,60000)' in wiki and "addEventListener('seeker:event'" in wiki and 'if(document.hidden)return' in wiki
 
 
 def test_seeker_brand_is_player_facing_and_legacy_name_is_only_internal_compatibility():

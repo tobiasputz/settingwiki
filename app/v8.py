@@ -408,7 +408,7 @@ def diagnostics(settings: Settings, campaign_id: int, *, foundry: dict | None = 
     checks.append({'id':'storage','label':'Storage','status':'warning' if free_pct<10 else 'ok','detail':f"{store['project_bytes']//1024//1024} MB campaign · {free_pct:.0f}% disk free."})
     warnings=dependency_warnings(settings,campaign_id)
     checks.append({'id':'continuity','label':'Continuity','status':'warning' if warnings else 'ok','detail':f'{len(warnings)} dependency warning(s).' if warnings else 'No active dependency warnings.'})
-    version=(settings.root_dir/'VERSION').read_text(encoding='utf-8').strip() if (settings.root_dir/'VERSION').exists() else '9.0.5'
+    version=(settings.root_dir/'VERSION').read_text(encoding='utf-8').strip() if (settings.root_dir/'VERSION').exists() else '10.0.0'
     return {'version':version,'checks':checks,'source_warnings':sw,'duplicates':dup,'storage':store,'dependency_warnings':warnings,'audit':recent_audit(settings,campaign_id,20)}
 
 

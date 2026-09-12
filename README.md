@@ -1,6 +1,6 @@
-# Seeker — Campaign Workspace (9.0.5)
+# Seeker — Campaign Workspace (10.0.0)
 
-**9.0.5 maintenance update:** fixes and standardizes Seeker’s shared dialog layer. Chronicle journal/relationship forms, Session dialogs, GM Prep/Console dialogs, World State, and Worldcraft now open as proper centered overlays on desktop and touch-friendly bottom sheets on phones, with background scroll locking, accessible dismissal, consistent form styling, and shared toast presentation. The stricter UI action/API audits from 9.0.4 remain in place. Static/PWA generation is 9005.
+**10.0.0 — GM Suite consolidation:** preserves Seeker's player-facing campaign UI and existing workflows while unifying the GM side around Campaign Workspace. Source Studio is now a first-class GM tool rather than a separate product surface; specialist tools remain available without losing their established functionality. This release also adds owner-only **View As Player**, a **Needs Attention** action center, a universal campaign-object drawer, manual GM cue/run-of-show controls, a single SSE live-event channel with slow polling fallbacks, incremental asset indexing, runtime/browser diagnostics, a shared opt-in UI component layer, self-hosted CodeMirror, login/write/upload hardening, ordered schema initialization, and Playwright browser regression coverage. Static/PWA generation is 10000.
 
 **One campaign, one source of truth.** This major release adds a connected **Campaign Workspace** without turning Seeker's document structure into another database you have to manage. LaTeX remains authoritative for source-backed campaign material; Foundry remains authoritative for live actor state; Seeker connects those systems to sessions, Chronicle, maps, handouts, Homebrew and campaign relationships.
 
@@ -28,9 +28,9 @@ The new workspace uses additive SQLite tables (`v8_*`) and reuses existing V7 re
 
 On first use, the object registry classifies old automatically mirrored Codex headings. It does **not** delete them. This is specifically intended to turn installations with hundreds of heading-derived “entities” into a small, useful list of actual campaign objects without sacrificing anything you had already attached data to.
 
-Static/PWA generation is **9005**. **Foundry Bridge remains 1.11.0**; no bridge protocol migration is required.
+Static/PWA generation is **10000**. **Foundry Bridge remains 1.11.0**; no bridge protocol migration is required.
 
-Release verification: **237 automated tests pass**, plus Python compilation and browser JavaScript syntax validation.
+Release verification: automated Python/UI contract tests, Python compilation, JavaScript syntax checks, and an opt-in Playwright browser suite.
 
 ## Seeker 7.0.4 — Codex & Relay
 
@@ -552,6 +552,14 @@ The Docker image intentionally does not install `texlive-full`, because that ima
 - include the custom `.sty` / `.cls` file in the project, as you normally can in Overleaf.
 
 The wiki renderer is semantic rather than pixel-identical to the PDF. Your PDF preview is the exact place to verify TeX formatting; the player wiki intentionally reformats the same content into a responsive website.
+
+## Maintainer architecture (10.0)
+
+Seeker 10 keeps all established routes and player-facing behavior, but the web layer is no longer a single monolithic router. `app/main.py` is the composition root: it owns shared runtime helpers, security/auth context, application construction, and compatibility wiring. Mature endpoint declarations are grouped by concern in `app/route_runtime.py`, `app/route_public_access.py`, `app/route_studio.py`, `app/route_living.py`, `app/route_session_tools.py`, `app/route_gm_integrations.py`, and `app/route_integration_api.py`. Newer V7–V10 feature routers continue to use their explicit `register_*_routes` modules.
+
+The small `app/route_bridge.py` is intentionally one-way and exists to preserve mature handler contracts while the service layer is decomposed incrementally. Domain/storage modules do not import route modules. Settings and the handful of historical development/test seams that can be swapped at runtime are late-bound so local development, tests, and deployment behavior remain unchanged.
+
+Best-effort compatibility and cleanup paths no longer fail silently. They use `log_best_effort(...)` to write non-fatal diagnostic events; the operation still succeeds or falls back exactly as before, while the GM can inspect the issue in Campaign Workspace → Diagnostics.
 
 ## Tests
 

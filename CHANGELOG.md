@@ -1,3 +1,24 @@
+# Changelog
+
+## 10.0.0 — GM Suite consolidation
+
+- Preserved the established player-facing Seeker UI while reorganizing GM navigation around **Campaign Workspace**, with Source Studio promoted into the same core tool suite and specialist tools retained as advanced destinations.
+- Added owner-only **View As Player**, enforcing the selected player’s real campaign memberships, role permissions, knowledge visibility and spoiler filters while keeping a persistent escape banner for the owner.
+- Added a **Needs Attention** action center for pending player submissions, relationship suggestions, Foundry failures/conflicts, recent runtime errors and stale backups.
+- Added the universal **Campaign Object drawer** with relationships, knowledge, session appearances, source ownership, handouts and contextual actions for party reveals, live-session touches, handout creation, map placement and Foundry pushes.
+- Added a manual **GM cue/run-of-show queue** for prepared reveals, display changes, map states, Foundry actions and reminders; cues never execute without an explicit GM action.
+- Added one authenticated **Server-Sent Events** channel and converted high-frequency browser polling to event-driven updates with low-frequency compatibility fallbacks.
+- Added runtime/browser diagnostics with request IDs, slow-request tracking, 5xx/error capture, browser exception reporting and diagnostics surfaced in Campaign Workspace.
+- Added an incremental persistent media index and removed repeated full asset metadata reconstruction from normal asset-library reads.
+- Added an ordered storage bootstrap/migration registry without changing legacy table/data semantics.
+- Decomposed the historical 5,400-line HTTP router into ordered domain route modules (`route_public_access`, `route_studio`, `route_living`, `route_session_tools`, `route_gm_integrations`, and `route_integration_api`). `app.main` is now the compatibility/composition root rather than the home of every endpoint; existing URLs, handler names, permissions, and response contracts are unchanged.
+- Replaced the remaining silent broad best-effort exception paths with non-fatal diagnostic events, so optional cleanup/compatibility failures stay harmless to users but are visible in Diagnostics instead of disappearing.
+- Added a shared, opt-in UI primitive layer for dialogs, toasts, drawers, sheets, menus, tabs, forms, search, status chips, cards and tables.
+- Self-hosted CodeMirror and hardened browser writes, login attempts, security headers and SVG upload/serving behavior.
+- Fixed source-backed Homebrew cards so **Forge**, **Foundry** and **Open …** controls can never overlap.
+- Added Playwright desktop/mobile regression tests and CI coverage for Studio integration, shared dialogs and Homebrew control geometry.
+- Static/PWA generation: **10000**.
+
 # Seeker 9.0.5 — Shared dialogs & UI polish
 
 - Fixed the underlying reason Chronicle's **Add journal entry** looked broken: generic player-facing dialogs had markup and working actions, but their full modal presentation lived only in the Studio/admin stylesheet. The shared `wiki.css` now owns the dialog foundation.

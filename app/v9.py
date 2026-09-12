@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .v10 import log_best_effort
 from .storage import connect
 from .v7 import list_entities, knowledge_facts, sync_link, memory_search
 from .v6 import foundry_state, recent_foundry_commands
@@ -388,12 +389,17 @@ def _asset_file(settings: Settings, ref: str) -> Path | None:
 
 
 def asset_library(settings: Settings, campaign_id: int) -> dict:
+    # V10 maintains the filesystem catalog incrementally, so opening the media
+    # library no longer performs a second recursive discovery pass.
+    from .v10 import indexed_assets
     refs={}
-    for root,prefix,urlprefix in ((settings.uploads_dir,'upload:','/uploads/'),(settings.project_dir,'project:','/project-asset/')):
-        for path in root.rglob('*'):
-            if not path.is_file() or path.suffix.lower() not in {'.png','.jpg','.jpeg','.webp','.gif','.svg','.pdf','.mp3','.ogg','.wav'}: continue
-            rel=path.relative_to(root).as_posix();ref=prefix+rel
-            refs[ref]={'ref':ref,'url':urlprefix+rel,'name':path.name,'path':rel,'size_bytes':path.stat().st_size,'modified_at':path.stat().st_mtime}
+    for item in indexed_assets(settings):
+        ref=str(item.get('ref') or '')
+        refs[ref]={
+            'ref':ref,'url':item.get('url') or '','name':item.get('name') or '',
+            'path':item.get('path') or '','size_bytes':int(item.get('size_bytes') or 0),
+            'modified_at':float(item.get('mtime_ns') or 0)/1_000_000_000,
+        }
     meta={r['asset_ref']:r for r in _rows(settings,'SELECT * FROM v9_asset_metadata')}
     links=_rows(settings,'SELECT * FROM v9_asset_links WHERE campaign_id=?',(int(campaign_id),));byref={}
     for l in links: byref.setdefault(l['asset_ref'],[]).append(l)
@@ -468,7 +474,7 @@ def apply_map_state(settings: Settings, campaign_id: int, state_id: int) -> dict
             conn.execute('UPDATE markers SET visible_to_players=?,updated_at=? WHERE id=? AND map_id=?',(1 if m.get('visible_to_players') else 0,time.time(),int(m['id']),int(row['map_id'])))
         for l in state.get('layers') or []:
             try: conn.execute('UPDATE map_layers SET enabled=?,visible_to_players=?,opacity=?,updated_at=? WHERE id=? AND map_id=?',(1 if l.get('enabled') else 0,1 if l.get('visible_to_players') else 0,float(l.get('opacity') or 0.7),time.time(),int(l['id']),int(row['map_id'])))
-            except Exception: pass
+            except Exception as exc: log_best_effort(settings,"maps","map_state.layer_update",exc,campaign_id=int(campaign_id),meta={"layer_id":l.get("id"),"map_id":row.get("map_id")})
     return {'ok':True,'state':row}
 
 
@@ -512,4 +518,4 @@ def extension_foundry_action(settings: Settings, plugin_id: str, action_id: str)
 
 def migration_status(settings: Settings) -> dict:
     rows=_rows(settings,'SELECT * FROM v9_schema_history ORDER BY applied_at DESC,id DESC')
-    return {'schema_history':rows,'current':'9.0.5','database':str(settings.db_path),'data_dir':str(settings.data_dir)}
+    return {'schema_history':rows,'current':'10.0.0','database':str(settings.db_path),'data_dir':str(settings.data_dir)}

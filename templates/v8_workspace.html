@@ -1,17 +1,18 @@
 {% extends 'base.html' %}
 {% block title %}Campaign Workspace · {{ campaign.name or wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v8.css?v=9005">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v8.css?v=10000">{% endblock %}
 {% block body %}
 <main class="v8-shell" data-v8-root>
   <header class="v8-hero">
     <div><span class="eyebrow">SEEKER · CAMPAIGN WORKSPACE</span><h1>{{ campaign.name or wiki.title }}</h1><p>Your campaign control center. Source, Homebrew, Foundry, sessions, maps and handouts stay connected without turning every document heading into an object.</p></div>
-    <div class="v8-hero-stats"><div><small>TRACKED OBJECTS</small><strong>{{ entity_count }}</strong></div><div><small>SESSION</small><strong>{{ session.title if session else 'None prepared' }}</strong></div><div><small>FOUNDRY</small><strong class="{{ 'ok' if foundry.received_at else 'muted' }}">{{ 'Live' if foundry.received_at else 'Waiting' }}</strong></div></div>
+    <div class="v8-hero-stats"><div><small>TRACKED OBJECTS</small><strong>{{ entity_count }}</strong></div><div><small>SESSION</small><strong>{{ session.title if session else 'None prepared' }}</strong></div><div><small>FOUNDRY</small><strong class="{{ 'ok' if foundry.received_at else 'muted' }}">{{ 'Live' if foundry.received_at else 'Waiting' }}</strong></div>{% if owner_mode %}<button type="button" class="v8-button ghost v10-view-as" id="v10ViewAs">◉ View as player</button>{% endif %}</div>
   </header>
 
   <nav class="v8-workspace-nav" aria-label="Campaign workspaces">
     <button type="button" class="active" data-v8-tab="dashboard">✦ <span>Dashboard</span></button>
     <button type="button" data-v8-tab="session">◉ <span>Session</span></button>
     <button type="button" data-v8-tab="entities">◇ <span>Objects</span></button>
+    {% if owner_mode %}<a class="v8-tool-link" href="/admin">✎ <span>Studio</span></a>{% endif %}
     <button type="button" data-v8-tab="sources">⌘ <span>Sources</span></button>
     <button type="button" data-v8-tab="homebrew">◆ <span>Homebrew</span></button>
     <button type="button" data-v8-tab="world">◎ <span>World</span></button>
@@ -26,6 +27,7 @@
   <section class="v8-pane" data-v8-pane="session">
     <header class="v8-section-head"><div><span class="eyebrow">PREP → RUN → CHRONICLE</span><h2>Session workspace</h2><p>Prepare once, run from the same surface, then turn what actually happened into the Chronicle.</p></div><a class="v8-button ghost" href="/gm/prep">Open detailed prep</a></header>
     <div id="v8Session"></div>
+    <section class="v8-panel v10-cue-panel"><header><div><span class="eyebrow">RUN OF SHOW</span><h3>GM cues</h3></div><button type="button" class="v8-button ghost small" id="v10AddCue">＋ Add cue</button></header><p>Prepare the moments you want at your fingertips, then explicitly run or skip them during play. Seeker never advances the queue on its own.</p><div id="v10Cues"><div class="v8-loading">Loading cue queue…</div></div></section>
     <div class="v9-stack"><section class="v8-panel"><header><div><span class="eyebrow">SESSION DIRECTOR</span><h3>Live scene control</h3></div><span>scene · encounter · exploration</span></header><div id="v9SessionDirector" class="v9-feature-host"><div class="v8-loading">Loading live director…</div></div></section><section class="v8-panel"><header><div><span class="eyebrow">PF2E ENCOUNTER BUILDER</span><h3>XP budget & Foundry handoff</h3></div><a class="v8-button ghost small" href="/gm/living-table#encounters">Advanced encounters</a></header><div id="v9EncounterBuilder" class="v9-feature-host"></div></section></div>
   </section>
 
@@ -37,7 +39,7 @@
   </section>
 
   <section class="v8-pane" data-v8-pane="sources">
-    <header class="v8-section-head"><div><span class="eyebrow">SOURCE MAP</span><h2>LaTeX source graph</h2><p>See how the PDF is structured, which Seeker objects come from each source, and edit source with revision protection.</p></div><a class="v8-button ghost" href="/admin">Classic Studio</a></header>
+    <header class="v8-section-head"><div><span class="eyebrow">SOURCE MAP</span><h2>LaTeX source graph</h2><p>See how the PDF is structured, which Seeker objects come from each source, and edit source with revision protection.</p></div><a class="v8-button ghost" href="/admin">Open full Source Studio</a></header>
     <div id="v8SourceMap" class="v8-source-layout"></div>
   </section>
 
@@ -67,6 +69,7 @@
   <section class="v8-pane" data-v8-pane="diagnostics">
     <header class="v8-section-head"><div><span class="eyebrow">SYSTEM CHECK</span><h2>Diagnostics Center</h2><p>Bridge state, parser warnings, duplicate tracked objects, continuity and Railway storage in one place.</p></div><button class="v8-button" id="v8RunDiagnostics">Run system check</button></header>
     <div id="v8Diagnostics"></div>
+    <div id="v10Diagnostics"></div>
     <div class="v9-diagnostics-grid"><section class="v8-panel"><header><div><span class="eyebrow">BACKUP & MIGRATION CENTER</span><h3>Safe upgrades and restore points</h3></div><button class="v8-button small" id="v9CreateBackup">Create backup</button></header><div id="v9Backups"></div></section><section class="v8-panel"><header><div><span class="eyebrow">OFFLINE MOBILE PACK</span><h3>Keep current campaign data on-device</h3></div><button class="v8-button small" id="v9CacheOffline">Cache now</button></header><div id="v9Offline"></div></section><section class="v8-panel"><header><div><span class="eyebrow">EXTENSIONS</span><h3>Declarative module API</h3></div></header><div id="v9Extensions"></div></section></div><section class="v8-panel v8-module-panel"><header><div><span class="eyebrow">WORKSPACE MODULES</span><h3>Keep Seeker focused</h3></div><button class="v8-button small" id="v8SaveModules">Save layout</button></header><div id="v8Modules"></div></section>
   </section>
 </main>
@@ -76,4 +79,4 @@
 <div class="v8-modal" id="v8ObjectPicker" aria-hidden="true"><div class="v8-modal-card v8-picker-card"><header><div><small>TRACK A CODEX PAGE</small><strong>Add something meaningful to Campaign Objects</strong></div><button type="button" data-v8-picker-close>×</button></header><div class="v8-picker-body"><div class="v8-search"><span>⌕</span><input id="v8ObjectPickerSearch" placeholder="Search Codex pages"></div><label class="v8-picker-kind"><small>OBJECT TYPE</small><select id="v8ObjectPickerKind"><option value="lore">Lore / other</option><option value="npc">NPC / person</option><option value="place">Place</option><option value="faction">Faction</option><option value="organization">Organization</option><option value="item">Item</option><option value="monster">Creature</option></select></label><div id="v8ObjectPickerList" class="v8-picker-list"></div></div><footer><span>Tracking a page does not alter its LaTeX or move it in the Codex.</span><button class="v8-button ghost" type="button" data-v8-picker-close>Close</button></footer></div></div>
 <div class="v8-toast" id="v8Toast"></div>
 {% endblock %}
-{% block scripts %}<script src="/static/v8.js?v=9005"></script><script src="/static/v9.js?v=9005"></script>{% endblock %}
+{% block scripts %}<script src="/static/v8.js?v=10000"></script><script src="/static/v9.js?v=10000"></script>{% endblock %}
