@@ -48,9 +48,9 @@ def seed_source(s: Settings):
 
 def test_v8_release_contract_and_assets():
     root=Path(__file__).resolve().parents[1]
-    assert (root/'VERSION').read_text().strip()=='9.0.4'
+    assert (root/'VERSION').read_text().strip()=='9.0.5'
     sw=(root/'static/sw.js').read_text(encoding='utf-8')
-    assert 'seeker-static-v9004' in sw and '/static/v8.js?v=9004' in sw
+    assert 'seeker-static-v9005' in sw and '/static/v8.js?v=9005' in sw
     assert (root/'app/v8.py').exists() and (root/'app/v8_api.py').exists()
     assert (root/'templates/v8_workspace.html').exists() and (root/'templates/v8_player_portal.html').exists()
     base=(root/'templates/base.html').read_text(encoding='utf-8')
@@ -94,7 +94,7 @@ def test_v8_http_workspace_source_studio_portal_and_command_palette(tmp_path: Pa
     inv=create_player_invite(s,'Alice');set_campaign_members(s,cid,[inv['id']])
     gm=TestClient(main.app);assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     page=gm.get('/app/v8');assert page.status_code==200 and 'CAMPAIGN WORKSPACE' in page.text and 'SOURCE MAP' in page.text and 'Seeker 8' not in page.text
-    state=gm.get('/api/v8/state');assert state.status_code==200 and state.json()['version']=='9.0.4'
+    state=gm.get('/api/v8/state');assert state.status_code==200 and state.json()['version']=='9.0.5'
     payload=state.json();assert payload['entities']==[] and payload['codex_candidates']
     candidate=payload['codex_candidates'][0]
     tracked=gm.post('/api/v8/codex/track',json={'slug':candidate['slug'],'kind':'place'});assert tracked.status_code==200

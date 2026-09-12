@@ -63,8 +63,8 @@
     <div class="submission-list" id="submissionList">{% for s in submissions %}<article><span class="submission-status status-{{ s.status }}">{{ s.status }}</span><div><small>{{ s.kind|upper }}</small><h3>{{ s.title }}</h3><p>{{ s.body }}</p>{% if s.asset_ref %}<a class="submission-asset" href="{{ '/uploads/' + s.asset_ref.split(':',1)[1] if s.asset_ref.startswith('upload:') else s.asset_ref }}" target="_blank" rel="noopener">Attached file →</a>{% endif %}{% if s.gm_note %}<blockquote>GM: {{ s.gm_note }}</blockquote>{% endif %}</div></article>{% else %}<div class="living-empty"><span>✦</span><h3>No submissions yet</h3><p>Your character's corner of the setting can be yours to help build.</p></div>{% endfor %}</div>
   </section>
 </main>
-<div class="modal-backdrop hidden" id="livingModal"><div class="modal living-modal"><button class="modal-close" data-living-close>×</button><div id="livingModalContent"></div></div></div>
+<div class="modal-backdrop hidden" id="livingModal" aria-hidden="true"><div class="modal living-modal" role="dialog" aria-modal="true"><button class="modal-close" data-living-close>×</button><div id="livingModalContent"></div></div></div>
 <div class="toast-stack" id="toastStack"></div>
 <script>window.LF_LIVING={{ {"threads":threads,"journals":journals,"characters":journal_characters,"journal_authors":journal_authors,"submissions":submissions,"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":none,"session_id":none,"session_context":false,"sessions":journal_sessions}|tojson }};</script>
 {% endblock %}
-{% block scripts %}<script src="/static/living.js?v=9004"></script>{% endblock %}
+{% block scripts %}<script src="/static/living.js?v=9005"></script>{% endblock %}

@@ -471,3 +471,52 @@ html:not(.gm-prep-html){min-height:100%;overflow-x:hidden;overflow-y:auto}body:n
   .mobile-sheet-scroll>.mobile-sheet-primary{margin-top:4px}
   .mobile-more-sheet a,.mobile-more-sheet button,.mobile-more-sheet summary{touch-action:manipulation}
 }
+
+
+/* Seeker 9.0.5 — shared dialog + transient UI foundation -----------------
+   Generic modal markup is used by Chronicle, Session, GM Prep/Console and
+   other non-Studio screens. Keep the presentation in the shared stylesheet
+   so opening a tool can never dump its form into normal document flow. */
+body.modal-open{overflow:hidden!important}
+.modal-backdrop{position:fixed;inset:0;z-index:520;display:grid;place-items:center;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));overflow-y:auto;overscroll-behavior:contain;background:rgba(5,5,4,.78);backdrop-filter:blur(12px) saturate(.75);-webkit-backdrop-filter:blur(12px) saturate(.75);animation:seekerModalFade .16s ease-out}
+.modal-backdrop.hidden{display:none!important}
+.modal{position:relative;width:min(640px,calc(100vw - 36px));max-height:min(86dvh,920px);overflow:auto;overscroll-behavior:contain;padding:30px;border:1px solid rgba(183,150,97,.28);border-radius:16px;background:radial-gradient(circle at 95% 0,rgba(183,150,97,.09),transparent 30%),linear-gradient(155deg,#1a1916,#121210 72%);box-shadow:0 34px 110px rgba(0,0,0,.72),inset 0 1px rgba(255,255,255,.025);color:var(--ink);animation:seekerModalRise .2s cubic-bezier(.2,.8,.2,1);scrollbar-color:#554936 #171510;scrollbar-width:thin}
+.modal.living-modal{width:min(720px,calc(100vw - 36px))}
+.modal-close{position:sticky;float:right;top:0;z-index:3;width:34px;height:34px;margin:-10px -10px 0 10px;border:1px solid rgba(183,150,97,.16);border-radius:50%;background:#12110f;color:#90887d;font:300 22px/1 var(--sans);cursor:pointer;display:grid;place-items:center;transition:.18s ease}
+.modal-close:hover,.modal-close:focus-visible{color:#f2e8d9;border-color:rgba(183,150,97,.5);background:#211c15;outline:none}
+.modal h2{font:400 clamp(1.65rem,4vw,2.15rem)/1.08 var(--serif);margin:3px 48px 20px 0;color:#f0e8db;letter-spacing:-.025em}
+.modal h3{font:400 1.2rem/1.2 var(--serif);color:#e6ded1}
+.modal>div>p,.modal p{color:#958d82;line-height:1.55}
+.modal label{display:grid;gap:7px;margin:14px 0;color:#a79e91;font-size:.69rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+.modal label small{font-weight:400;letter-spacing:0;text-transform:none;color:#6f685e}
+.modal input:not([type=checkbox]):not([type=radio]):not([type=file]),.modal textarea,.modal select{width:100%;min-height:43px;border:1px solid #38342d;border-radius:8px;background:#0d0e0c;color:#e7dfd3;padding:10px 12px;font:400 .9rem/1.45 var(--sans);outline:none;transition:border-color .16s,box-shadow .16s,background .16s}
+.modal textarea{min-height:110px;resize:vertical}
+.modal input:focus,.modal textarea:focus,.modal select:focus{border-color:#7d6848;background:#11110f;box-shadow:0 0 0 3px rgba(183,150,97,.09)}
+.modal .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+.modal .modal-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap;margin:22px -2px 0;padding-top:17px;border-top:1px solid rgba(183,150,97,.13)}
+.modal .modal-actions .danger-btn{margin-right:auto}
+.modal button:not(.modal-close):not(.primary-button):not(.ghost-button){min-height:38px;border:1px solid #3c372f;border-radius:7px;background:#171612;color:#bdb3a5;padding:0 13px;cursor:pointer}
+.modal button:not(.modal-close):hover{border-color:#62533e;color:#f1e6d6;background:#1e1b16}
+.modal .primary-button{min-height:42px;height:auto;border-radius:8px;padding:10px 17px;box-shadow:0 7px 22px rgba(183,150,97,.08)}
+.modal .danger-btn{border-color:#633f38!important;background:#211411!important;color:#df9b8c!important}
+.modal .journal-scope-lock{margin:12px 0;padding:12px 14px;border:1px solid rgba(183,150,97,.16);border-radius:10px;background:rgba(183,150,97,.035);display:grid;grid-template-columns:auto 1fr;gap:3px 12px;align-items:center}
+.modal .journal-scope-lock small{grid-row:1/3;color:#a98c5e;font-size:.58rem;letter-spacing:.15em}
+.modal .journal-scope-lock strong{color:#ddd3c4;font:400 1rem var(--serif)}
+.modal .journal-scope-lock span{color:#716a61;font-size:.72rem}
+.modal .journal-draft-state{min-height:1.2em;margin:6px 0 12px;color:#887a66;font-size:.72rem;font-style:italic}
+.toast-stack{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));z-index:610;display:grid;gap:8px;width:min(360px,calc(100vw - 32px));pointer-events:none}
+.toast{pointer-events:auto;border:1px solid rgba(183,150,97,.25);border-radius:10px;background:#1d1a15;color:#e7ded0;box-shadow:0 16px 50px #000a;padding:12px 14px;font-size:.78rem;line-height:1.4;animation:seekerToastIn .18s ease-out}
+.toast.bad,.toast.error{border-color:#70443b;color:#e2a495;background:#251713}
+@keyframes seekerModalFade{from{opacity:0}to{opacity:1}}
+@keyframes seekerModalRise{from{opacity:0;transform:translateY(12px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes seekerToastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media(max-width:640px){
+  .modal-backdrop{place-items:end center;padding:0;background:rgba(5,5,4,.74)}
+  .modal{width:100%;max-width:none;max-height:min(90dvh,900px);border-radius:18px 18px 0 0;border-left:0;border-right:0;border-bottom:0;padding:24px 16px calc(20px + env(safe-area-inset-bottom));animation:seekerModalSheet .22s cubic-bezier(.2,.8,.2,1)}
+  .modal:before{content:"";display:block;width:42px;height:4px;border-radius:99px;background:#4a4339;margin:-12px auto 15px}
+  .modal .form-grid{grid-template-columns:1fr}
+  .modal h2{font-size:1.65rem;margin-right:42px}
+  .modal .modal-actions{position:sticky;bottom:calc(-20px - env(safe-area-inset-bottom));z-index:2;margin:20px -16px calc(-20px - env(safe-area-inset-bottom));padding:13px 16px calc(13px + env(safe-area-inset-bottom));background:linear-gradient(180deg,rgba(18,18,16,.88),#121210 28%);backdrop-filter:blur(8px)}
+  @keyframes seekerModalSheet{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+}
+@media(prefers-reduced-motion:reduce){.modal-backdrop,.modal,.toast{animation:none!important}}

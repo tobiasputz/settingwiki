@@ -140,9 +140,9 @@ def test_ui_core_is_shipped_and_cached():
     player = (TEMPLATES / "v7_player.html").read_text(encoding="utf-8")
     sw = (STATIC / "sw.js").read_text(encoding="utf-8")
     for text in (base, cc, la, player):
-        assert "/static/ui-core.js?v=9004" in text
-    assert "/static/ui-core.js?v=9004" in sw
-    assert "seeker-static-v9004" in sw
+        assert "/static/ui-core.js?v=9005" in text
+    assert "/static/ui-core.js?v=9005" in sw
+    assert "seeker-static-v9005" in sw
 
 
 def test_generated_data_action_buttons_have_a_handler():
@@ -204,3 +204,51 @@ def test_generated_id_buttons_are_referenced_by_their_module():
             ):
                 failures.append(f"{source.name}: #{ident}")
     assert not failures, "Generated id buttons not referenced by their module:\n" + "\n".join(failures)
+
+
+def test_shared_modal_styles_live_in_player_stylesheet():
+    css=(STATIC/'wiki.css').read_text(encoding='utf-8')
+    assert '.modal-backdrop{position:fixed' in css
+    assert '.modal{position:relative' in css
+    assert 'body.modal-open{overflow:hidden!important}' in css
+    assert '@media(max-width:640px)' in css and 'seekerModalSheet' in css
+    assert '.toast-stack{position:fixed' in css
+
+
+def test_generic_modal_pages_use_overlay_and_accessible_dialog_markup():
+    for filename, ident in (
+        ('living.html','livingModal'),('session.html','livingModal'),('living_admin.html','laModal'),
+        ('gm_session.html','gmSessionModal'),('gm_prep.html','gmPrepModal'),('campaign_admin.html','ccModal'),
+    ):
+        text=(TEMPLATES/filename).read_text(encoding='utf-8')
+        assert f'id="{ident}"' in text, filename
+        assert 'modal-backdrop hidden' in text, filename
+        assert 'aria-hidden="true"' in text, filename
+        assert 'role="dialog"' in text and 'aria-modal="true"' in text, filename
+
+
+def test_living_dialog_controller_cannot_fall_into_document_flow():
+    js=(STATIC/'living.js').read_text(encoding='utf-8')
+    for token in (
+        "document.body.classList.add('modal-open')",
+        "document.body.classList.remove('modal-open')",
+        "shell.setAttribute('aria-hidden','false')",
+        "e.target===shell",
+        "e.key==='Escape'",
+    ):
+        assert token in js
+
+
+def test_shared_modal_controllers_lock_background_scroll():
+    modules={
+        'campaign-admin.js':'ccModal',
+        'gm-prep.js':'gmPrepModal',
+        'gm-session.js':'gmSessionModal',
+        'living-admin.js':'laModal',
+    }
+    for filename, ident in modules.items():
+        js=(STATIC/filename).read_text(encoding='utf-8')
+        assert "classList.add('modal-open')" in js, filename
+        assert "classList.remove('modal-open')" in js, filename
+        assert "e.key==='Escape'" in js, filename
+        assert ident in js, filename

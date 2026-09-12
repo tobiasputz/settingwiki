@@ -1,4 +1,15 @@
-# 9.0.4 — UI action integrity
+# Seeker 9.0.5 — Shared dialogs & UI polish
+
+- Fixed the underlying reason Chronicle's **Add journal entry** looked broken: generic player-facing dialogs had markup and working actions, but their full modal presentation lived only in the Studio/admin stylesheet. The shared `wiki.css` now owns the dialog foundation.
+- Chronicle, Session, GM Prep, Session Console, World State, and Worldcraft generic dialogs now open as real fixed overlays with backdrop blur, bounded internal scrolling, reliable z-indexing, and background scroll lock.
+- On phones, the same dialogs become touch-friendly bottom sheets with a grab handle, single-column forms, safe-area padding, and sticky action controls.
+- Standardized dialog form controls, focus states, close buttons, destructive actions, journal scope cards, draft status, and toast notifications so these features no longer look like raw admin forms dropped into the page.
+- Added click-outside and Escape-to-close behavior plus automatic initial focus to the shared dialog controllers.
+- Added release tests that require shared modal CSS to exist on player-facing pages, verify accessible dialog markup, and verify the relevant controllers lock/unlock background scrolling and support Escape dismissal.
+- Static/PWA generation: **9005**. Foundry Bridge remains **1.11.0**.
+- Release verification: **245 automated tests pass** across all test modules; Python and browser/Foundry JavaScript pass syntax checks.
+
+# Seeker 9.0.4 — UI action integrity
 
 - Fixed **Add journal entry** end-to-end. GMs can now create/edit journal entries by explicitly choosing a player at the active table; players keep their existing private journal flow.
 - The full Chronicle now shows all table journals to GMs and keeps journal authorship/character ownership valid instead of exposing a button whose save path could only work for a personal invitation.
