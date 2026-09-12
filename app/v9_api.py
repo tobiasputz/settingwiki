@@ -34,7 +34,7 @@ def register_v9_routes(app, settings: Settings, helpers: dict[str, Callable[...,
         require_gm(request);cid=active_campaign_id(request);sessions=list_sessions(settings,campaign_id=cid)
         current=next((s for s in sessions if s.get('status')=='live'),None) or next((s for s in sessions if s.get('status')=='planned'),None)
         return {
-            'version':'9.0.2','sessions':sessions,'session':current,
+            'version':'9.0.3','sessions':sessions,'session':current,
             'director':session_director(settings,cid,int(current['id'])) if current else None,
             'encounters':list_encounters(settings,cid,int(current['id'])) if current else list_encounters(settings,cid)[:20],
             'entities':list_entities(settings,cid,tracked_only=True),

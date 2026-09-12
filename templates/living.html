@@ -10,13 +10,13 @@
   {% if notifications %}<section class="living-notice-strip" id="livingNotifications">{% for n in notifications[:5] %}<article data-notification-id="{{ n.id }}" class="kind-{{ n.kind }}"><span>✦</span><div><small>{{ n.kind|replace('_',' ')|upper }}</small><strong>{{ n.title }}</strong><p>{{ n.body }}</p></div><button data-dismiss-notice="{{ n.id }}">×</button></article>{% endfor %}</section>{% endif %}
 
   <nav class="living-tabs" aria-label="Chronicle sections">
-    <button class="active" data-living-tab="threads">Threads <i>{{ threads|selectattr('status','equalto','open')|list|length }}</i></button>
-    <button data-living-tab="journal">Journal</button>
-    <button data-living-tab="characters">Characters <i>{{ characters|length }}</i></button>
-    <button data-living-tab="rumors">Rumors</button>
-    <button data-living-tab="world">World pulse</button>
-    <button data-living-tab="assistant">Ask Seeker</button>
-    <button data-living-tab="contribute">Contribute</button>
+    <button type="button" class="active" data-living-tab="threads">Threads <i>{{ threads|selectattr('status','equalto','open')|list|length }}</i></button>
+    <button type="button" data-living-tab="journal">Journal</button>
+    <button type="button" data-living-tab="characters">Characters <i>{{ characters|length }}</i></button>
+    <button type="button" data-living-tab="rumors">Rumors</button>
+    <button type="button" data-living-tab="world">World pulse</button>
+    <button type="button" data-living-tab="assistant">Ask Seeker</button>
+    <button type="button" data-living-tab="contribute">Contribute</button>
   </nav>
 
   <section class="living-pane active" data-living-pane="threads" id="threads">
@@ -67,4 +67,4 @@
 <div class="toast-stack" id="toastStack"></div>
 <script>window.LF_LIVING={{ {"threads":threads,"journals":journals,"characters":journal_characters,"submissions":submissions,"gm":gm_view,"pages":wiki.pages,"can_author":can_author,"active_character_id":none,"session_id":none,"session_context":false,"sessions":journal_sessions}|tojson }};</script>
 {% endblock %}
-{% block scripts %}<script src="/static/living.js?v=9002"></script>{% endblock %}
+{% block scripts %}<script src="/static/living.js?v=9003"></script>{% endblock %}

@@ -1,3 +1,15 @@
+# Seeker 9.0.3 — UI Reliability & Button Audit
+
+- Added a shared **UI Core** navigation fallback for Chronicle, Table App, Worldcraft, World State, Living Table, and Campaign Workspace tab systems. Feature-specific scripts still own rich behavior, but a failure in another module can no longer leave core tabs such as **Journal** or **Relationships** visibly clickable but inert.
+- Added hash-safe navigation for all of those tab systems and for Seeker Studio workspaces, including links such as `/admin#access`.
+- Audited every static template button. Three genuinely dead Studio controls were found and implemented: the top-right **⋯** menu, **＋ Map Layer**, and **＋ Discovery Fog**.
+- The Studio map sidebar now lists, edits, enables/disables, reveals/hides, and deletes map layers/fog regions. Layer upload and a quick rectangular discovery-fog editor are available directly in Studio; irregular polygons remain available in Worldcraft.
+- Added automated UI regression checks that fail the build when a visible static button has neither submit semantics nor a JavaScript binding, when a tab has no matching pane, when a literal internal link has no registered route, or when the shared UI fallback is omitted from a required surface.
+- Extended the audit to JavaScript-rendered controls: generated `data-*` action buttons must have a consuming handler and generated id-based buttons must be referenced by their module. The Session workflow step indicators were also changed from inert fake buttons into non-interactive status markers.
+- Explicitly marks navigation/tab controls as `type=button` to prevent accidental form submission as layouts evolve.
+- Static/PWA generation is **9003** and includes the UI Core in the offline shell.
+- Release verification: **237 automated tests pass**; Python compilation and the audited browser scripts pass syntax checks.
+
 # Seeker 9.0.2 — Landing Motion & Explicit Table Access
 
 - Rebuilt the home-screen archive motion around a dedicated `requestAnimationFrame` loop. Orbit rotation, the ambient glow, and the scroll cue no longer depend on CSS animation or IntersectionObserver timing, so the landing page cannot silently render as a static composition when generic motion rules interfere.

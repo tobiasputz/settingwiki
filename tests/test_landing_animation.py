@@ -14,4 +14,4 @@ def test_landing_animation_contract_and_cache_bust():
     assert "requestAnimationFrame(()=>requestAnimationFrame" in js
     assert "homeHero.dataset.motionEngine='raf'" in js
     assert 'ring.style.transform=`rotate(' in js
-    assert 'seeker-static-v9002' in sw and '/static/wiki.css?v=9002' in sw
+    assert 'seeker-static-v9003' in sw and '/static/wiki.css?v=9003' in sw

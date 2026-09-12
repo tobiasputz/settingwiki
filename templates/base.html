@@ -13,10 +13,10 @@
   <link rel="icon" href="/static/seeker-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Seeker' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=9002">
-  <link rel="stylesheet" href="/static/tour.css?v=9002">
+  <link rel="stylesheet" href="/static/wiki.css?v=9003">
+  <link rel="stylesheet" href="/static/tour.css?v=9003">
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/refinement.css?v=9002">
+  <link rel="stylesheet" href="/static/refinement.css?v=9003">
 </head>
 {% set campaign_ctx = campaign_context(request) %}
 <body data-campaign-id="{{ campaign_ctx.active_campaign_id }}" data-admin-view="{{ 'true' if request.session.get('admin') or request.session.get('co_gm') else 'false' }}" data-player-access-key="{{ wiki.player_access_key if wiki else '' }}">
@@ -121,8 +121,9 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/wiki.js?v=9002"></script>
-  <script src="/static/tour.js?v=9002"></script>
+  <script src="/static/ui-core.js?v=9003"></script>
+  <script src="/static/wiki.js?v=9003"></script>
+  <script src="/static/tour.js?v=9003"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
