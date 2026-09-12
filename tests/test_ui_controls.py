@@ -140,9 +140,9 @@ def test_ui_core_is_shipped_and_cached():
     player = (TEMPLATES / "v7_player.html").read_text(encoding="utf-8")
     sw = (STATIC / "sw.js").read_text(encoding="utf-8")
     for text in (base, cc, la, player):
-        assert "/static/ui-core.js?v=10000" in text
-    assert "/static/ui-core.js?v=10000" in sw
-    assert "seeker-static-v10000" in sw
+        assert "/static/ui-core.js?v=10001" in text
+    assert "/static/ui-core.js?v=10001" in sw
+    assert "seeker-static-v10001" in sw
 
 
 def test_generated_data_action_buttons_have_a_handler():

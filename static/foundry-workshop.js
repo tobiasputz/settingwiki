@@ -262,9 +262,13 @@
   const sourceLinkFrom=p=>{const out={};if(!p?.source_linked)return out;sourceLinkKeys.forEach(k=>{if(p[k]!==undefined)out[k]=structuredClone(p[k])});return out};
   function updateSourceLinkUI(){
     const linked=!!state.sourceLink?.source_linked,banner=$('[data-fw-source-link-banner]'),path=String(state.sourceLink?.source_link_path||'');
-    banner?.classList.toggle('fw-hidden',!linked);const text=$('[data-fw-source-link-text]');if(text&&linked)text.textContent=`Saving updates ${path} directly. New feats are placed under their matching level heading and Seeker rebuilds the Homebrew entry.`;
+    banner?.classList.toggle('fw-hidden',!linked);const text=$('[data-fw-source-link-text]');if(text&&linked)text.textContent=`Saving updates ${path} directly. Choosing a different content type starts a new entry, so this linked source is never converted accidentally.`;
     const open=$('[data-fw-source-link-open]');if(open){open.href=linked?`/admin?file=${encodeURIComponent(path)}`:'#';open.classList.toggle('fw-hidden',!linked)}
-    $$('[data-fw-kind]').forEach(b=>{b.disabled=linked&&b.dataset.fwKind!==fieldValue('kind')});
+    // Never make the type palette look broken. Source-linked records cannot be
+    // converted in place, but every type (including Freeform) remains clickable;
+    // choosing a different type safely starts a fresh unsaved entry instead.
+    $$('[data-fw-kind]').forEach(b=>{b.disabled=false;b.title=linked&&b.dataset.fwKind!==fieldValue('kind')?`Start a new ${kindName(b.dataset.fwKind).toLowerCase()} entry; the linked source stays unchanged.`:''});
+    $$('[data-fw-doc-kind]').forEach(b=>{b.disabled=false;b.title=linked?`Start a new ${kindName(b.dataset.fwDocKind).toLowerCase()} entry; the linked source stays unchanged.`:''});
     const latex=$('[data-fw-latex]');if(latex){latex.disabled=creatureKind(fieldValue('kind'))||linked;latex.title=linked?'This Forge entry is source-linked. Save writes changes directly into the existing LaTeX file.':''}
   }
   function fillForm(entry=null){
@@ -373,7 +377,23 @@
   let validationTimer=null;
   const onWorkshopEdit=()=>{if(fieldValue('kind')==='archetype'&&!fieldValue('dedication_title').trim()&&fieldValue('title').trim())setField('dedication_title',`${fieldValue('title').trim()} Dedication`);renderPreview();setDirty();clearTimeout(validationTimer);validationTimer=setTimeout(()=>validateData(collectData(),{announce:false}),180)};
   form.addEventListener('input',onWorkshopEdit);form.addEventListener('change',e=>{if(e.target?.name==='item_type')updateItemSubtype();if(e.target?.name==='homebrew_document')updateHomebrewDocument();onWorkshopEdit()});
-  $$('[data-fw-kind]').forEach(b=>b.addEventListener('click',()=>setKind(b.dataset.fwKind)));$$('[data-fw-doc-kind]').forEach(b=>b.addEventListener('click',()=>{setKind('homebrew');setField('homebrew_document',b.dataset.fwDocKind);if(b.dataset.fwDocKind==='class')setField('library_section','class');else if(['background','spell','hazard'].includes(b.dataset.fwDocKind))setField('library_section','other');updateHomebrewDocument();renderPreview();setDirty()}));
+  function beginDifferentType(kind,docKind=''){
+    const linked=!!state.sourceLink?.source_linked;
+    const currentKind=fieldValue('kind'),currentDoc=String(fieldValue('homebrew_document')||'').toLowerCase();
+    const changesType=kind!==currentKind||(docKind&&docKind!==currentDoc);
+    if(linked&&changesType){
+      if(saveState?.classList.contains('dirty')&&!confirm('This entry is linked to LaTeX and has unsaved changes. Start a new entry and leave those unsaved changes behind?'))return false;
+      fillForm();
+      setKind(kind,{resetCollections:true});
+      if(docKind){setField('homebrew_document',docKind);if(docKind==='class')setField('library_section','class');else if(['background','spell','hazard'].includes(docKind))setField('library_section','other');updateHomebrewDocument()}
+      updateSourceLinkUI();renderPreview();setDirty();
+      toast(`Started a new ${kindName(docKind||kind)} entry; the linked source was left unchanged.`);
+      return false;
+    }
+    return true;
+  }
+  $$('[data-fw-kind]').forEach(b=>b.addEventListener('click',()=>{const kind=b.dataset.fwKind;if(!beginDifferentType(kind))return;setKind(kind)}));
+  $$('[data-fw-doc-kind]').forEach(b=>b.addEventListener('click',()=>{const doc=b.dataset.fwDocKind;if(!beginDifferentType('homebrew',doc))return;setKind('homebrew');setField('homebrew_document',doc);if(doc==='class')setField('library_section','class');else if(['background','spell','hazard'].includes(doc))setField('library_section','other');updateHomebrewDocument();renderPreview();setDirty()}));
   $$('[data-fw-template]').forEach(b=>b.addEventListener('click',()=>{
     const key=b.dataset.fwTemplate;
     const presets={

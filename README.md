@@ -1,6 +1,8 @@
-# Seeker — Campaign Workspace (10.0.0)
+# Seeker — Campaign Workspace (10.0.1)
 
-**10.0.0 — GM Suite consolidation:** preserves Seeker's player-facing campaign UI and existing workflows while unifying the GM side around Campaign Workspace. Source Studio is now a first-class GM tool rather than a separate product surface; specialist tools remain available without losing their established functionality. This release also adds owner-only **View As Player**, a **Needs Attention** action center, a universal campaign-object drawer, manual GM cue/run-of-show controls, a single SSE live-event channel with slow polling fallbacks, incremental asset indexing, runtime/browser diagnostics, a shared opt-in UI component layer, self-hosted CodeMirror, login/write/upload hardening, ordered schema initialization, and Playwright browser regression coverage. Static/PWA generation is 10000.
+**10.0.1 — Foundry bridge & Forge hotfix:** keeps the 10.0 GM Suite consolidation intact while repairing cross-origin Foundry Bridge command polling/import delivery and restoring the Homebrew Forge type palette for source-linked entries. The Foundry module remains 1.11.0; no bridge reinstall or protocol migration is required. Static/PWA generation is 10001.
+
+**10.0.0 — GM Suite consolidation:** preserves Seeker's player-facing campaign UI and existing workflows while unifying the GM side around Campaign Workspace. Source Studio is now a first-class GM tool rather than a separate product surface; specialist tools remain available without losing their established functionality. This release also adds owner-only **View As Player**, a **Needs Attention** action center, a universal campaign-object drawer, manual GM cue/run-of-show controls, a single SSE live-event channel with slow polling fallbacks, incremental asset indexing, runtime/browser diagnostics, a shared opt-in UI component layer, self-hosted CodeMirror, login/write/upload hardening, ordered schema initialization, and Playwright browser regression coverage.
 
 **One campaign, one source of truth.** This major release adds a connected **Campaign Workspace** without turning Seeker's document structure into another database you have to manage. LaTeX remains authoritative for source-backed campaign material; Foundry remains authoritative for live actor state; Seeker connects those systems to sessions, Chronicle, maps, handouts, Homebrew and campaign relationships.
 
@@ -28,7 +30,7 @@ The new workspace uses additive SQLite tables (`v8_*`) and reuses existing V7 re
 
 On first use, the object registry classifies old automatically mirrored Codex headings. It does **not** delete them. This is specifically intended to turn installations with hundreds of heading-derived “entities” into a small, useful list of actual campaign objects without sacrificing anything you had already attached data to.
 
-Static/PWA generation is **10000**. **Foundry Bridge remains 1.11.0**; no bridge protocol migration is required.
+Static/PWA generation is **10001**. **Foundry Bridge remains 1.11.0**; no bridge protocol migration is required.
 
 Release verification: automated Python/UI contract tests, Python compilation, JavaScript syntax checks, and an opt-in Playwright browser suite.
 

@@ -13,12 +13,12 @@
   <link rel="icon" href="/static/seeker-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <title>{% block title %}{{ wiki.title if wiki else 'Seeker' }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/wiki.css?v=10000">
-  <link rel="stylesheet" href="/static/ui-core.css?v=10000">
-  <link rel="stylesheet" href="/static/tour.css?v=10000">
+  <link rel="stylesheet" href="/static/wiki.css?v=10001">
+  <link rel="stylesheet" href="/static/ui-core.css?v=10001">
+  <link rel="stylesheet" href="/static/tour.css?v=10001">
   {% block head %}{% endblock %}
-  <link rel="stylesheet" href="/static/refinement.css?v=10000">
-  <link rel="stylesheet" href="/static/v10.css?v=10000">
+  <link rel="stylesheet" href="/static/refinement.css?v=10001">
+  <link rel="stylesheet" href="/static/v10.css?v=10001">
 </head>
 {% set campaign_ctx = campaign_context(request) %}
 {% set preview_mode = request.session.get('admin') and request.session.get('view_as_invite_id') %}
@@ -145,10 +145,10 @@
     <div><button type="button" id="installAppBtn">Install</button><button type="button" data-dismiss-install>×</button></div>
   </div>
 
-  <script src="/static/ui-core.js?v=10000"></script>
-  <script src="/static/wiki.js?v=10000"></script>
-  <script src="/static/tour.js?v=10000"></script>
-  <script src="/static/v10.js?v=10000"></script>
+  <script src="/static/ui-core.js?v=10001"></script>
+  <script src="/static/wiki.js?v=10001"></script>
+  <script src="/static/tour.js?v=10001"></script>
+  <script src="/static/v10.js?v=10001"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

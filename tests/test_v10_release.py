@@ -51,7 +51,7 @@ def setup_v10(tmp_path: Path) -> Settings:
 
 def test_v10_release_surface_is_shipped_and_player_styles_remain_opt_in():
     root = Path(__file__).resolve().parents[1]
-    assert (root / "VERSION").read_text().strip() == "10.0.0"
+    assert (root / "VERSION").read_text().strip() == "10.0.1"
     assert (root / "app/realtime.py").exists()
     assert (root / "app/bootstrap.py").exists()
     assert (root / "app/v10.py").exists() and (root / "app/v10_api.py").exists()
@@ -169,3 +169,14 @@ def test_v10_router_is_domain_split_and_best_effort_failures_are_observable():
             if broad and len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
                 swallowed.append(f"{path.name}:{node.lineno}")
     assert swallowed == []
+
+
+def test_v1001_source_linked_forge_type_picker_stays_clickable():
+    root = Path(__file__).resolve().parents[1]
+    js = (root / "static" / "foundry-workshop.js").read_text(encoding="utf-8")
+    # Source-linked entries may not be converted in place, but the palette must
+    # remain interactive. A different type starts a fresh unsaved entry instead.
+    assert "b.disabled=false" in js
+    assert "function beginDifferentType" in js
+    assert "the linked source was left unchanged" in js
+    assert "b.disabled=linked&&b.dataset.fwKind!==fieldValue('kind')" not in js

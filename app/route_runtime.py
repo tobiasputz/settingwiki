@@ -30,7 +30,7 @@ async def v10_request_guard_and_diagnostics(request: Request, call_next):
     mutating = request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
     # Origin validation is a low-friction CSRF defense for browser writes. API
     # clients/Foundry do not send Origin and continue to work exactly as before.
-    if mutating and not _same_origin_request(request):
+    if mutating and not _same_origin_request(request) and not _cross_origin_write_allowed(request):
         return JSONResponse({"detail": "Cross-origin write rejected."}, status_code=403, headers={"X-Request-ID": request_id})
     try:
         response = await call_next(request)

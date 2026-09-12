@@ -168,7 +168,7 @@ def test_v61_scroll_contract_and_foundry_frontend_assets():
     assert 'data-foundry-manifest' in integrations and 'Automatically announce confirmed session dates' in integrations
     assert '/api/v61/characters/' in chars and 'data-foundry-tab' in chars
     assert 'data-notification-pref="spotlight"' not in base
-    assert 'seeker-static-v10000' in sw
+    assert 'seeker-static-v10001' in sw
 
 
 def test_v61_public_urls_respect_railway_https(tmp_path: Path, monkeypatch):
@@ -245,7 +245,7 @@ def test_v612_workshop_and_safe_foundry_commands(tmp_path: Path, monkeypatch):
     gm=TestClient(main.app); assert gm.post('/admin/login',data={'password':'admin'}).status_code in {200,303}
     workshop=gm.get('/gm/foundry-workshop'); assert workshop.status_code==200
     assert 'Homebrew Forge' in workshop.text and 'foundryWorkshopForm' in workshop.text
-    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=10000' in workshop.text
+    assert 'foundryLivePreview' in workshop.text and '/static/foundry-workshop.css?v=10001' in workshop.text
     created=gm.post('/api/v61/foundry/content',json={'kind':'item','target_type':'actor','title':'Moon Key','summary':'Opens a silver gate.','payload':{'item_type':'equipment','traits':'magical, occult','quantity':1}})
     assert created.status_code==200
     pushed=gm.post(f"/api/v61/foundry/content/{created.json()['id']}/push",json={'target_type':'actor','actor_id':'abc123'})
@@ -535,3 +535,34 @@ def test_v742_mobile_navigation_and_table_live_refresh_contract():
     assert 'visibilitychange' in table and "window.addEventListener('focus',refreshLive)" in table
     assert 'BroadcastChannel' in live and 'seeker-foundry-live' in live and 'notify()' in live
     assert 'data-player-set-resource' in table
+
+
+def test_foundry_bridge_cross_origin_posts_bypass_browser_csrf_guard(tmp_path: Path, monkeypatch):
+    import app.main as main
+    s=setup(tmp_path);seed_wiki(s);monkeypatch.setattr(main,'settings',s)
+    cid=default_campaign_id(s);cfg=integration_config(s,cid,include_secret=True);token=cfg['foundry_bridge_token']
+    client=TestClient(main.app)
+    origin='https://kiragon.00asdf.dev'
+
+    # The Foundry module runs in a browser on its own origin. These endpoints are
+    # token-authenticated bridge APIs, not Seeker cookie-authenticated form writes.
+    heartbeat=client.post(
+        f'/api/v6/foundry/push/{cid}?token={token}',
+        json=actor_payload(),
+        headers={'Origin':origin},
+    )
+    assert heartbeat.status_code==200
+    assert heartbeat.headers.get('access-control-allow-origin')=='*'
+
+    commands=client.post(
+        f'/api/v6/foundry/push/{cid}/commands?token={token}',
+        headers={'Origin':origin},
+    )
+    assert commands.status_code==200
+    assert commands.headers.get('access-control-allow-origin')=='*'
+    assert 'commands' in commands.json()
+
+    # Normal Seeker browser writes remain same-origin protected.
+    blocked=client.post('/api/v6/discord/send',json={'content':'x'},headers={'Origin':origin})
+    assert blocked.status_code==403
+    assert blocked.json()['detail']=='Cross-origin write rejected.'

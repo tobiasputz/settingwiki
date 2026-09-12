@@ -404,6 +404,18 @@ def _same_origin_request(request: Request) -> bool:
     return bool(origin_host and host and origin_host == host)
 
 
+def _cross_origin_write_allowed(request: Request) -> bool:
+    """Allow the authenticated Foundry bridge to call Seeker from Foundry's origin.
+
+    Browser CSRF protection must not treat the Foundry VTT module like a Seeker
+    browser form.  These bridge endpoints are deliberately cross-origin and are
+    authenticated by the per-campaign bridge token inside the endpoint itself.
+    Keeping the exception path-scoped avoids weakening same-origin protection for
+    any normal Seeker mutation.
+    """
+    return request.url.path.startswith("/api/v6/foundry/push/")
+
+
 # Route `v10_request_guard_and_diagnostics` moved to app.route_runtime.
 
 
@@ -1816,7 +1828,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/10.0.0 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/10.0.1 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))

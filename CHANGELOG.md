@@ -1,5 +1,13 @@
 # Changelog
 
+## 10.0.1 — Foundry bridge & Forge interaction hotfix
+
+- Fixed the V10 same-origin request guard incorrectly rejecting the **Foundry Bridge** command/heartbeat POSTs when Foundry is hosted on a different domain. The token-authenticated `/api/v6/foundry/push/*` endpoints are now explicitly exempt from Seeker browser-CSRF origin checks while retaining their existing bridge-token authentication and CORS headers.
+- Restored Seeker → Foundry imports and queued command delivery for cross-origin Foundry worlds such as hosted Foundry instances.
+- Fixed the Homebrew Forge content-type palette so **Freeform** and the structured Freeform document buttons remain clickable while a source-linked entry is open. Switching type now starts a fresh unsaved entry rather than attempting to convert or corrupt the linked LaTeX source.
+- Added regression coverage for cross-origin Foundry polling and the source-linked Forge type-picker contract.
+- Static/PWA generation is **10001** so deployed browsers and installed PWAs immediately receive the repaired Forge script; Foundry Bridge package version is unchanged.
+
 ## 10.0.0 — GM Suite consolidation
 
 - Preserved the established player-facing Seeker UI while reorganizing GM navigation around **Campaign Workspace**, with Source Studio promoted into the same core tool suite and specialist tools retained as advanced destinations.

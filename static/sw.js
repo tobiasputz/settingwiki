@@ -1,8 +1,8 @@
-const STATIC='seeker-static-v10000';
-const PRIVATE='seeker-private-v10000';
-const META='seeker-offline-meta-v10000';
+const STATIC='seeker-static-v10001';
+const PRIVATE='seeker-private-v10001';
+const META='seeker-offline-meta-v10001';
 const ENABLE_KEY='/__seeker_offline_enabled__';
-const SHELL=['/static/wiki.css?v=10000','/static/ui-core.css?v=10000','/static/ui-core.js?v=10000','/static/wiki.js?v=10000','/static/v10.css?v=10000','/static/v10.js?v=10000','/static/tour.css?v=10000','/static/tour.js?v=10000','/static/refinement.css?v=10000','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png','/static/v7.css?v=10000','/static/v7-player.js?v=10000','/static/homebrew.css?v=10000','/static/homebrew.js?v=10000','/static/homebrew-source.js?v=10000','/static/homebrew-bundle.js?v=10000','/static/v8.css?v=10000','/static/v8.js?v=10000','/static/v9.js?v=10000'];
+const SHELL=['/static/wiki.css?v=10001','/static/ui-core.css?v=10001','/static/ui-core.js?v=10001','/static/wiki.js?v=10001','/static/v10.css?v=10001','/static/v10.js?v=10001','/static/tour.css?v=10001','/static/tour.js?v=10001','/static/refinement.css?v=10001','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png','/static/v7.css?v=10001','/static/v7-player.js?v=10001','/static/homebrew.css?v=10001','/static/homebrew.js?v=10001','/static/homebrew-source.js?v=10001','/static/homebrew-bundle.js?v=10001','/static/v8.css?v=10001','/static/v8.js?v=10001','/static/v9.js?v=10001'];
 const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/structures','/archive','/schedule','/tables','/investigation','/recap','/app','/app/v8','/portal','/homebrew'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/homebrew/source/')||u.pathname.startsWith('/homebrew/entry/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
 const privateAsset=u=>u.pathname.startsWith('/project-asset/')||u.pathname.startsWith('/uploads/');
 async function offlineEnabled(){const c=await caches.open(META);return !!(await c.match(ENABLE_KEY))}
