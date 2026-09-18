@@ -1,8 +1,8 @@
-const STATIC='seeker-static-v10101';
-const PRIVATE='seeker-private-v10101';
-const META='seeker-offline-meta-v10101';
+const STATIC='seeker-static-v10102';
+const PRIVATE='seeker-private-v10102';
+const META='seeker-offline-meta-v10102';
 const ENABLE_KEY='/__seeker_offline_enabled__';
-const SHELL=['/static/wiki.css?v=10101','/static/ui-core.css?v=10101','/static/ui-core.js?v=10101','/static/wiki.js?v=10101','/static/v10.css?v=10101','/static/v10.js?v=10101','/static/tour.css?v=10101','/static/tour.js?v=10101','/static/refinement.css?v=10101','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png','/static/v7.css?v=10101','/static/v7-player.js?v=10101','/static/homebrew.css?v=10101','/static/homebrew.js?v=10101','/static/homebrew-source.js?v=10101','/static/homebrew-bundle.js?v=10101','/static/v8.css?v=10101','/static/v8.js?v=10101','/static/v9.js?v=10101','/static/atlas-relief.js?v=10101'];
+const SHELL=['/static/wiki.css?v=10102','/static/ui-core.css?v=10102','/static/ui-core.js?v=10102','/static/wiki.js?v=10102','/static/v10.css?v=10102','/static/v10.js?v=10102','/static/tour.css?v=10102','/static/tour.js?v=10102','/static/refinement.css?v=10102','/static/seeker-icon.svg','/static/icon-192.png','/static/icon-512.png','/static/v7.css?v=10102','/static/v7-player.js?v=10102','/static/homebrew.css?v=10102','/static/homebrew.js?v=10102','/static/homebrew-source.js?v=10102','/static/homebrew-bundle.js?v=10102','/static/v8.css?v=10102','/static/v8.js?v=10102','/static/v9.js?v=10102','/static/atlas-relief.js?v=10102'];
 const privatePage=u=>u.pathname==='/'||['/session','/timeline','/calendar','/mysteries','/handouts','/updates','/network','/characters','/campaign','/structures','/archive','/schedule','/tables','/investigation','/recap','/app','/app/v8','/portal','/homebrew'].includes(u.pathname)||u.pathname.startsWith('/wiki/')||u.pathname.startsWith('/homebrew/source/')||u.pathname.startsWith('/homebrew/entry/')||u.pathname.startsWith('/atlas/')||u.pathname.startsWith('/handout/')||u.pathname.startsWith('/characters/');
 const privateAsset=u=>u.pathname.startsWith('/project-asset/')||u.pathname.startsWith('/uploads/');
 async function offlineEnabled(){const c=await caches.open(META);return !!(await c.match(ENABLE_KEY))}

@@ -1,6 +1,6 @@
-# Seeker — Campaign Workspace (10.1.0)
+# Seeker — Campaign Workspace (10.1.1)
 
-**10.1.0 — Kiragon World Atlas 2.5D:** upgrades the existing Atlas with an optional displaced-perspective WebGL terrain renderer for the Kiragon world map. Mountains and landforms now rise from the supplied height map under a constrained Runeterra-style camera; water remains level; cloud masks suppress false terrain and cloud shading; existing markers, fog, regions, notes, travel history and layer toggles are reprojected onto the 3D surface. The original 2D map remains the automatic fallback and can be restored at any time with the 3D/2D toggle. Static/PWA generation is 10101.
+**10.1.1 — Kiragon World Atlas high-resolution compatibility:** allows higher-resolution exports of the same Kiragon cartography (including the 8192×5794 source map) to use the bundled 2048×1448 terrain masks by normalized UV coordinates. WebGL render targets are capped independently of map coordinates, so high-resolution maps retain correct marker/fog/route alignment without allocating an enormous native-resolution framebuffer. The cloud-aware displaced-perspective renderer and original 2D fallback are unchanged. Static/PWA generation is 10102.
 
 **10.0.0 — GM Suite consolidation:** preserves Seeker's player-facing campaign UI and existing workflows while unifying the GM side around Campaign Workspace. Source Studio is now a first-class GM tool rather than a separate product surface; specialist tools remain available without losing their established functionality. This release also adds owner-only **View As Player**, a **Needs Attention** action center, a universal campaign-object drawer, manual GM cue/run-of-show controls, a single SSE live-event channel with slow polling fallbacks, incremental asset indexing, runtime/browser diagnostics, a shared opt-in UI component layer, self-hosted CodeMirror, login/write/upload hardening, ordered schema initialization, and Playwright browser regression coverage.
 
@@ -30,7 +30,7 @@ The new workspace uses additive SQLite tables (`v8_*`) and reuses existing V7 re
 
 On first use, the object registry classifies old automatically mirrored Codex headings. It does **not** delete them. This is specifically intended to turn installations with hundreds of heading-derived “entities” into a small, useful list of actual campaign objects without sacrificing anything you had already attached data to.
 
-Current static/PWA generation is **10101**. **Foundry Bridge remains 1.11.0**; no bridge protocol migration is required.
+Current static/PWA generation is **10102**. **Foundry Bridge remains 1.11.0**; no bridge protocol migration is required.
 
 Release verification: automated Python/UI contract tests, Python compilation, JavaScript syntax checks, and an opt-in Playwright browser suite.
 

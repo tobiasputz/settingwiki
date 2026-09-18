@@ -51,7 +51,7 @@ def setup_v10(tmp_path: Path) -> Settings:
 
 def test_v10_release_surface_is_shipped_and_player_styles_remain_opt_in():
     root = Path(__file__).resolve().parents[1]
-    assert (root / "VERSION").read_text().strip() == "10.1.0"
+    assert (root / "VERSION").read_text().strip() == "10.1.1"
     assert (root / "app/realtime.py").exists()
     assert (root / "app/bootstrap.py").exists()
     assert (root / "app/v10.py").exists() and (root / "app/v10_api.py").exists()

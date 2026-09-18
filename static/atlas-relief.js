@@ -175,6 +175,43 @@
     img.src = src;
   });
 
+  function aspectRatio(width, height) {
+    return Number(width || 0) / Math.max(1, Number(height || 0));
+  }
+
+  function aspectCompatible(aWidth, aHeight, bWidth, bHeight, tolerance = 0.005) {
+    const a = aspectRatio(aWidth, aHeight);
+    const b = aspectRatio(bWidth, bHeight);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) return false;
+    return Math.abs(a - b) / Math.max(a, b) <= tolerance;
+  }
+
+  function fittedSize(width, height, maxDimension) {
+    const limit = Math.max(256, Number(maxDimension) || 2048);
+    const scale = Math.min(1, limit / Math.max(width, height));
+    return {
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+    };
+  }
+
+  function textureSource(image, maxDimension) {
+    if (!image?.naturalWidth && !image?.width) return image;
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    const target = fittedSize(width, height, maxDimension);
+    if (target.width === width && target.height === height) return image;
+    const c = document.createElement('canvas');
+    c.width = target.width;
+    c.height = target.height;
+    const ctx = c.getContext('2d');
+    if (!ctx) return image;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(image, 0, 0, target.width, target.height);
+    return c;
+  }
+
   function shader(gl, type, source) {
     const sh = gl.createShader(type);
     gl.shaderSource(sh, source);
@@ -292,13 +329,13 @@
     }
 
     projectUV(u, v) {
-      if (!this.ready) return {x: u * (this.canvas?.width || 1), y: v * (this.canvas?.height || 1), u, v};
+      if (!this.ready) return {x: u * (this.mapWidth || this.canvas?.width || 1), y: v * (this.mapHeight || this.canvas?.height || 1), u, v};
       const p = this.rawProject(Number(u), Number(v));
       const nx = (p.x - this.fitCenter.x) * this.fitScale;
       const ny = (p.y - this.fitCenter.y) * this.fitScale;
       return {
-        x: (nx * 0.5 + 0.5) * this.canvas.width,
-        y: (0.5 - ny * 0.5) * this.canvas.height,
+        x: (nx * 0.5 + 0.5) * this.mapWidth,
+        y: (0.5 - ny * 0.5) * this.mapHeight,
         u: Number(u), v: Number(v), depth: p.depth,
       };
     }
@@ -436,7 +473,7 @@
           const img = element.complete && element.naturalWidth ? element : await loadImage(element.currentSrc || element.src);
           this.overlayTextures.push({
             element,
-            texture: makeTexture(gl, img, 0),
+            texture: makeTexture(gl, textureSource(img, this.maxTextureDimension), 0),
           });
         } catch (err) {
           console.warn('[Seeker Atlas] Overlay layer skipped in 3D mode:', err);
@@ -457,9 +494,7 @@
       this.terrainProgram = program(gl, TERRAIN_VERTEX, TERRAIN_FRAGMENT);
       this.overlayProgram = program(gl, TERRAIN_VERTEX, OVERLAY_FRAGMENT);
 
-      const albedoSrc = this.profile.albedoMap || this.image.currentSrc || this.image.src;
-      const [albedo, height, normal, water, cloud, label, ao] = await Promise.all([
-        loadImage(albedoSrc),
+      const [height, normal, water, cloud, label, ao] = await Promise.all([
         loadImage(this.profile.heightMap),
         loadImage(this.profile.normalMap),
         loadImage(this.profile.waterMask),
@@ -468,30 +503,43 @@
         loadImage(this.profile.aoMap),
       ]);
 
-      const expectedWidth = Number(this.profile.width || 0);
-      const expectedHeight = Number(this.profile.height || 0);
+      const expectedWidth = Number(this.profile.width || height.naturalWidth || 0);
+      const expectedHeight = Number(this.profile.height || height.naturalHeight || 0);
       const fallbackWidth = this.image.naturalWidth;
       const fallbackHeight = this.image.naturalHeight;
-      if ((expectedWidth && fallbackWidth !== expectedWidth) || (expectedHeight && fallbackHeight !== expectedHeight)) {
+      if (!fallbackWidth || !fallbackHeight) throw new Error('Atlas base map has no usable dimensions.');
+
+      // Terrain maps are UV data, not a same-resolution copy of the visible map.
+      // Accept higher/lower-resolution exports of the same cartography as long as
+      // their aspect ratio agrees. This is important for Seeker installations
+      // using the original 8192px Kiragon export with the bundled 2048px masks.
+      if (expectedWidth && expectedHeight && !aspectCompatible(expectedWidth, expectedHeight, fallbackWidth, fallbackHeight)) {
         throw new Error(
-          `Atlas terrain profile expects ${expectedWidth || '?'}×${expectedHeight || '?'} but the map is ` +
-          `${fallbackWidth}×${fallbackHeight}. Falling back to the original 2D map.`
+          `Atlas terrain profile aspect ratio (${expectedWidth}×${expectedHeight}) does not match the map ` +
+          `(${fallbackWidth}×${fallbackHeight}). Falling back to the original 2D map.`
         );
       }
-      const required = [['albedo', albedo], ['height', height], ['normal', normal], ['water', water], ['cloud', cloud], ['label', label], ['ao', ao]];
+
+      const required = [['height', height], ['normal', normal], ['water', water], ['cloud', cloud], ['label', label], ['ao', ao]];
       for (const [kind, asset] of required) {
-        if (asset.naturalWidth !== fallbackWidth || asset.naturalHeight !== fallbackHeight) {
-          throw new Error(`Atlas ${kind} texture dimensions do not match the map. Falling back to 2D.`);
+        if (!aspectCompatible(expectedWidth || height.naturalWidth, expectedHeight || height.naturalHeight, asset.naturalWidth, asset.naturalHeight, 0.002)) {
+          throw new Error(`Atlas ${kind} texture has an incompatible aspect ratio. Falling back to 2D.`);
         }
       }
 
       const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 2048;
-      if (fallbackWidth > maxTex || fallbackHeight > maxTex) {
-        throw new Error(`Map texture ${fallbackWidth}×${fallbackHeight} exceeds this GPU's ${maxTex}px texture limit.`);
-      }
+      const maxRenderbuffer = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || maxTex;
+      this.maxTextureDimension = Math.max(1024, Math.min(maxTex, Number(this.profile.maxTextureDimension || 4096)));
+      const renderLimit = Math.max(1024, Math.min(maxTex, maxRenderbuffer, Number(this.profile.maxRenderDimension || 4096)));
+      const renderSize = fittedSize(fallbackWidth, fallbackHeight, renderLimit);
 
-      this.canvas.width = fallbackWidth;
-      this.canvas.height = fallbackHeight;
+      // Keep DOM/map coordinates at the uploaded map's native resolution while
+      // rendering WebGL to a bounded backing buffer. This avoids allocating a
+      // ~190 MB 8192×5794 canvas just to display the same world on screen.
+      this.mapWidth = fallbackWidth;
+      this.mapHeight = fallbackHeight;
+      this.canvas.width = renderSize.width;
+      this.canvas.height = renderSize.height;
       this.canvas.style.width = `${fallbackWidth}px`;
       this.canvas.style.height = `${fallbackHeight}px`;
       this.aspect = fallbackWidth / fallbackHeight;
@@ -502,14 +550,18 @@
       this.buildMesh();
       this.uploadGeometry();
 
-      this.terrainTextures = [albedo, normal, water, cloud, label, ao].map((img, unit) => makeTexture(gl, img, unit));
+      // The uploaded map remains the source of visible cartography so a high-res
+      // 8192px Kiragon upload retains more detail than the bundled 2048px preview.
+      // It is downsampled only for GPU upload; masks continue to sample in UVs.
+      const albedo = textureSource(this.image, this.maxTextureDimension);
+      this.terrainTextures = [albedo, normal, water, cloud, label, ao].map((img, unit) => makeTexture(gl, textureSource(img, this.maxTextureDimension), unit));
       const p = this.terrainProgram;
       gl.useProgram(p);
       ['u_albedo', 'u_normal', 'u_water', 'u_cloud', 'u_label', 'u_ao'].forEach((name, unit) => {
         gl.uniform1i(gl.getUniformLocation(p, name), unit);
       });
-      gl.uniform2f(gl.getUniformLocation(p, 'u_texel'), 1 / this.canvas.width, 1 / this.canvas.height);
-      gl.uniform2f(gl.getUniformLocation(p, 'u_grid_density'), this.canvas.width / 120, this.canvas.height / 120);
+      gl.uniform2f(gl.getUniformLocation(p, 'u_texel'), 1 / label.naturalWidth, 1 / label.naturalHeight);
+      gl.uniform2f(gl.getUniformLocation(p, 'u_grid_density'), (expectedWidth || label.naturalWidth) / 120, (expectedHeight || label.naturalHeight) / 120);
       gl.uniform1f(gl.getUniformLocation(p, 'u_label_start'), Number(this.profile.labelFadeStart ?? 1.22));
       gl.uniform1f(gl.getUniformLocation(p, 'u_label_end'), Number(this.profile.labelFadeEnd ?? 1.95));
 
@@ -614,12 +666,15 @@
   }
 
   window.SeekerAtlasRelief = {
+    lastError: null,
     async create(options) {
       const renderer = new AtlasRelief(options);
       try {
         const ok = await renderer.init();
+        this.lastError = ok ? null : new Error('WebGL could not be initialized.');
         return ok ? renderer : null;
       } catch (err) {
+        this.lastError = err;
         console.warn('[Seeker Atlas] 2.5D terrain disabled:', err);
         options?.root?.classList?.add('atlas-relief-failed');
         return null;

@@ -1,5 +1,15 @@
 # Changelog
 
+## 10.1.1 — High-resolution Kiragon Atlas compatibility
+
+- Fixed the Kiragon 2.5D renderer rejecting the original **8192×5794** Seeker map simply because the bundled terrain pack was authored at **2048×1448**. Terrain/mask assets are now treated correctly as normalized UV data and only require a compatible aspect ratio.
+- Kept all Atlas interaction coordinates in the uploaded map's native resolution while using an independently capped WebGL backing buffer, avoiding a huge native 8192×5794 framebuffer and reducing GPU memory pressure.
+- The uploaded Kiragon artwork is used as the visible albedo and downsampled only for GPU upload; height, normal, water, cloud, label and AO maps may remain at their authored resolution.
+- Added aspect-ratio validation for terrain assets, preserving safety against accidentally applying the Kiragon terrain pack to an unrelated map while allowing equivalent higher/lower-resolution exports.
+- Oversized raster overlay layers are downsampled for GPU upload without changing their map-space geometry.
+- Improved Atlas failure diagnostics so the 3D toggle can expose the actual initialization error instead of describing every failure as a browser limitation.
+- Static/PWA generation: **10102**.
+
 ## 10.1.0 — Kiragon displaced-perspective World Atlas
 
 - Rebuilt the optional Kiragon Atlas renderer from flat relief shading into a real subdivided **WebGL displacement mesh** driven by the supplied height map.

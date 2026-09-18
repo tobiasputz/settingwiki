@@ -14,7 +14,7 @@ def test_atlas_template_has_progressive_relief_fallback():
     text=(ROOT/'templates'/'map.html').read_text(encoding='utf-8')
     assert 'atlasReliefCanvas' in text
     assert 'data-map-relief' in text
-    assert 'atlas-relief.js?v=10101' in text
+    assert 'atlas-relief.js?v=10102' in text
     assert 'id="atlasImage"' in text  # original image remains the fallback/interaction surface
 
 
@@ -50,3 +50,15 @@ def test_3d_mode_keeps_2d_fallback_and_warps_raster_layers_in_webgl():
     assert "querySelectorAll('.atlas-overlay-layer')" in relief
     assert '.atlas-overlay-layer{visibility:hidden}' in css
     assert 'id="atlasImage"' in template
+
+
+def test_high_resolution_equivalent_maps_use_uv_terrain_assets():
+    relief=(ROOT/'static'/'atlas-relief.js').read_text(encoding='utf-8')
+    mapjs=(ROOT/'static'/'map.js').read_text(encoding='utf-8')
+    assert 'aspectCompatible(expectedWidth, expectedHeight, fallbackWidth, fallbackHeight)' in relief
+    assert 'this.mapWidth = fallbackWidth' in relief
+    assert 'this.canvas.style.width = `${fallbackWidth}px`' in relief
+    assert 'maxRenderDimension || 4096' in relief
+    assert 'textureSource(this.image, this.maxTextureDimension)' in relief
+    assert 'lastError' in relief
+    assert '2.5D terrain unavailable:' in mapjs
