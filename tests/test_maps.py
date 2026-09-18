@@ -56,3 +56,34 @@ def test_partial_effect_update_preserves_existing_choices(tmp_path: Path):
     assert second['effects']['stars'] is True
     assert second['effects']['clouds'] is False
     assert second['effects']['rain'] is True
+
+
+def test_kiragon_map_auto_enables_bundled_relief_profile(tmp_path: Path):
+    s=make_settings(tmp_path); init_db(s)
+    m=create_map(s,'Kiragon World','maps/random-upload-name.jpg')
+    assert m['effects']['terrain_3d'] is True
+    assert m['effects']['terrain_profile']=='kiragon'
+    assert m['effects']['label_declutter'] is True
+    assert m['terrain3d']['id']=='kiragon-v1'
+    assert m['terrain3d']['cloudMask'].endswith('/cloud-mask.png')
+    assert m['terrain3d']['labelMask'].endswith('/major-label-mask.png')
+
+
+def test_kiragon_relief_can_be_disabled_and_stays_disabled(tmp_path: Path):
+    s=make_settings(tmp_path); init_db(s)
+    m=create_map(s,'Kiragon','maps/kiragon.png')
+    flat=update_map(s,m['id'],{'effects':{'terrain_3d':False,'terrain_profile':'kiragon'}})
+    assert flat['effects']['terrain_3d'] is False
+    assert flat['terrain3d'] is None
+    again=get_map(s,m['id'])
+    assert again['effects']['terrain_3d'] is False
+    assert again['terrain3d'] is None
+
+
+def test_terrain_strength_and_profile_validation(tmp_path: Path):
+    s=make_settings(tmp_path); init_db(s)
+    m=create_map(s,'Other Map','maps/other.png')
+    updated=update_map(s,m['id'],{'effects':{'terrain_3d':True,'terrain_profile':'kiragon','terrain_strength':9,'label_declutter':False}})
+    assert updated['effects']['terrain_strength']==1.5
+    assert updated['effects']['label_declutter'] is False
+    assert updated['terrain3d']['id']=='kiragon-v1'

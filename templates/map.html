@@ -11,11 +11,13 @@
       {% if gm_view and map.fog_regions %}<button data-map-campaign-fog title="Campaign fog of war">◐</button>{% endif %}
       <button data-map-travel title="Travel between locations">⌁</button><button data-map-annotations title="Party map annotations">✎</button>
       <button data-map-locations title="Show locations">⌖</button>
+      {% if map.terrain3d %}<button data-map-relief class="atlas-relief-toggle" title="Toggle 2.5D terrain relief" aria-pressed="true">3D</button>{% endif %}
       <button data-map-zoom="out" title="Zoom out">−</button><span id="zoomLevel">100%</span><button data-map-zoom="in" title="Zoom in">+</button><button data-map-reset title="Fit map">⌂</button>
     </div>
   </div>
   <div class="atlas-stage" id="atlasStage">
     <div class="atlas-transform" id="atlasTransform">
+      {% if map.terrain3d %}<canvas id="atlasReliefCanvas" class="atlas-relief-canvas" aria-hidden="true"></canvas>{% endif %}
       <img id="atlasImage" src="/uploads/{{ map.image_path }}" alt="{{ map.name }}" draggable="false">
       <div id="atlasLayerStack" class="atlas-layer-stack">{% for layer in map.layers %}<img class="atlas-overlay-layer" data-layer-id="{{ layer.id }}" src="/uploads/{{ layer.image_path }}" alt="" draggable="false" style="opacity:{{ layer.opacity }};z-index:{{ 5 + loop.index }}">{% endfor %}</div>
       <svg id="atlasRegions" class="atlas-map-regions" viewBox="0 0 100 100" preserveAspectRatio="none">{% for region in map.regions %}{% if region.points %}<polygon data-region-id="{{ region.id }}" points="{% for pt in region.points %}{{ pt[0]*100 }},{{ pt[1]*100 }} {% endfor %}" fill="{{ region.fill }}" fill-opacity="{{ region.opacity }}" stroke="{{ region.border }}" stroke-width=".22"><title>{{ region.title }}</title></polygon>{% endif %}{% endfor %}</svg>
@@ -34,4 +36,4 @@
   <aside class="marker-drawer" id="markerDrawer" aria-hidden="true" role="dialog" aria-label="Map location details"><button id="closeMarker" aria-label="Close">×</button><div class="marker-drawer-icon" id="markerDrawerIcon">✦</div><span class="eyebrow" id="markerKind"></span><h2 id="markerTitle">Location</h2><div class="marker-discovery-badge" id="markerDiscoveryState"></div><p id="markerBody"></p><small class="marker-first-visit" id="markerFirstVisit"></small>{% if gm_view %}<label class="gm-marker-discovery">Table knowledge<select id="gmMarkerDiscovery"><option value="unknown">Unknown</option><option value="rumored">Rumored</option><option value="discovered">Discovered</option><option value="visited">Visited</option></select></label>{% endif %}<a id="markerLink" class="primary-button" href="#">Read codex entry →</a></aside>
 </main>
 {% endblock %}
-{% block scripts %}<script src="/static/fantasy-map-effects.js?v=10001"></script><script src="/static/map.js?v=10001"></script>{% endblock %}
+{% block scripts %}<script src="/static/fantasy-map-effects.js?v=10101"></script><script src="/static/atlas-relief.js?v=10101"></script><script src="/static/map.js?v=10101"></script>{% endblock %}

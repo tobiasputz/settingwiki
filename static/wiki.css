@@ -520,3 +520,36 @@ body.modal-open{overflow:hidden!important}
   @keyframes seekerModalSheet{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
 }
 @media(prefers-reduced-motion:reduce){.modal-backdrop,.modal,.toast{animation:none!important}}
+
+/* Seeker 10.1 · optional Runeterra-style 2.5D World Atlas relief.
+   The original image remains the layout/interaction surface; WebGL only replaces
+   its pixels after the renderer is ready, so markers, fog, regions and links keep
+   exactly the same normalized coordinates and 2D fallback behavior. */
+.atlas-relief-canvas{position:absolute;left:0;top:0;z-index:1;display:none;max-width:none;pointer-events:none;user-select:none;-webkit-user-drag:none}
+.atlas-page.atlas-relief-enabled.atlas-relief-ready .atlas-relief-canvas{display:block}
+.atlas-page #atlasImage{position:relative;z-index:0;transition:opacity .2s ease}
+.atlas-page.atlas-relief-enabled.atlas-relief-ready #atlasImage{opacity:0}
+.atlas-relief-toggle{font:700 9px/1 var(--sans);letter-spacing:.06em;transition:border-color .18s,background .18s,color .18s,box-shadow .18s}
+.atlas-relief-toggle.active,.atlas-relief-toggle[aria-pressed="true"]{border-color:rgba(211,177,99,.62);background:rgba(183,150,97,.18);color:#edcf91;box-shadow:inset 0 0 18px rgba(183,150,97,.08)}
+.atlas-relief-toggle:disabled{opacity:.36;cursor:not-allowed}
+.atlas-page.atlas-relief-failed .atlas-relief-toggle{opacity:.42}
+@media (prefers-reduced-motion:reduce){.atlas-page #atlasImage{transition:none}}
+
+/* Seeker 10.1.0 · displaced-perspective atlas surface -------------------
+   In 3D mode the WebGL mesh owns raster cartography (base image + optional
+   overlay images). DOM vector layers are reprojected by map.js and remain
+   interactive; the ordinary 2D image stays present underneath as fallback. */
+.atlas-page.atlas-relief-enabled.atlas-relief-ready .atlas-relief-canvas{
+  display:block;
+  filter:drop-shadow(0 24px 34px rgba(0,0,0,.38));
+  transform:translateZ(0);
+}
+.atlas-page.atlas-relief-enabled.atlas-relief-ready .atlas-overlay-layer{visibility:hidden}
+.atlas-page.atlas-relief-enabled.atlas-relief-ready #atlasMapGrid{display:none!important}
+.atlas-page.atlas-perspective-dom .atlas-map-regions polygon,
+.atlas-page.atlas-perspective-dom .atlas-fog-regions polygon{vector-effect:non-scaling-stroke}
+.atlas-page.atlas-perspective-dom .atlas-marker,
+.atlas-page.atlas-perspective-dom .atlas-annotation-pin{will-change:left,top}
+@media(max-width:900px){
+  .atlas-page.atlas-relief-enabled.atlas-relief-ready .atlas-relief-canvas{filter:drop-shadow(0 14px 22px rgba(0,0,0,.34))}
+}

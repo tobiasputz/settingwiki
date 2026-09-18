@@ -1,5 +1,18 @@
 # Changelog
 
+## 10.1.0 — Kiragon displaced-perspective World Atlas
+
+- Rebuilt the optional Kiragon Atlas renderer from flat relief shading into a real subdivided **WebGL displacement mesh** driven by the supplied height map.
+- Added a constrained perspective camera that creates the miniature-world / Runeterra-style depth effect without turning the Atlas into a free-flying 3D engine.
+- Added explicit **cloud-aware geometry and lighting**: the cloud mask suppresses terrain displacement and AO/normal-map shading only where atmospheric clouds are painted; snow, ice and pale terrain remain genuine relief. Oceans remain at sea level.
+- Reprojected Seeker markers, party notes, route history, political/historical regions and campaign fog onto the displaced surface while preserving their existing normalized map coordinates and data model.
+- Added perspective-aware inverse mapping for placing new party notes, so clicking the tilted 3D surface still stores the correct original map coordinates.
+- Raster map layers now render through the same displaced WebGL mesh in 3D mode, avoiding the misalignment that a flat HTML overlay would create. The ordinary DOM layers remain unchanged in 2D mode.
+- Kept the original map image as an always-available progressive fallback. WebGL/GPU failures automatically leave the established 2D Atlas functional, and the 3D/2D preference remains per-map.
+- Added a bundled exact-size Kiragon albedo plus the height, normal, water, land, cloud, AO, roughness and label masks needed by the renderer.
+- Added regression coverage for displacement/perspective rendering contracts, cloud handling, coordinate reprojection, layer rendering and the 2D fallback.
+- Static/PWA generation: **10101**.
+
 ## 10.0.1 — Foundry bridge & Forge interaction hotfix
 
 - Fixed the V10 same-origin request guard incorrectly rejecting the **Foundry Bridge** command/heartbeat POSTs when Foundry is hosted on a different domain. The token-authenticated `/api/v6/foundry/push/*` endpoints are now explicitly exempt from Seeker browser-CSRF origin checks while retaining their existing bridge-token authentication and CORS headers.

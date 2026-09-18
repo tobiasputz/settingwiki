@@ -1,0 +1,163 @@
+{
+  "id": "kiragon-v1",
+  "width": 2048,
+  "height": 1448,
+  "aspect": 1.4143646408839778,
+  "heightMap": "/static/atlas/kiragon/height.png",
+  "normalMap": "/static/atlas/kiragon/normal.png",
+  "waterMask": "/static/atlas/kiragon/water-mask.png",
+  "landMask": "/static/atlas/kiragon/land-mask.png",
+  "cloudMask": "/static/atlas/kiragon/cloud-mask.png",
+  "labelMask": "/static/atlas/kiragon/major-label-mask.png",
+  "aoMap": "/static/atlas/kiragon/ao.png",
+  "roughnessMap": "/static/atlas/kiragon/roughness.png",
+  "labelFadeStart": 1.22,
+  "labelFadeEnd": 1.95,
+  "terrainStrength": 1.0,
+  "cloudReliefSuppression": 0.94,
+  "majorLabels": [
+    {
+      "title": "VOLCORC",
+      "box": [
+        190,
+        190,
+        370,
+        225
+      ]
+    },
+    {
+      "title": "BLACK ISLAND",
+      "box": [
+        135,
+        535,
+        345,
+        575
+      ]
+    },
+    {
+      "title": "EMPIRE OF THE SUN",
+      "box": [
+        525,
+        688,
+        800,
+        730
+      ]
+    },
+    {
+      "title": "SUNROCK",
+      "box": [
+        570,
+        765,
+        755,
+        808
+      ]
+    },
+    {
+      "title": "SILVARIA",
+      "box": [
+        240,
+        958,
+        405,
+        1002
+      ]
+    },
+    {
+      "title": "SILVARION",
+      "box": [
+        135,
+        985,
+        310,
+        1032
+      ]
+    },
+    {
+      "title": "ABANDONED SWAMPS",
+      "box": [
+        440,
+        1215,
+        720,
+        1267
+      ]
+    },
+    {
+      "title": "XANDRIA FOREST",
+      "box": [
+        1200,
+        355,
+        1510,
+        412
+      ]
+    },
+    {
+      "title": "EASTERN FORESTS",
+      "box": [
+        1508,
+        630,
+        1810,
+        688
+      ]
+    },
+    {
+      "title": "LANDS OF SLAUGHTER",
+      "box": [
+        1435,
+        735,
+        1785,
+        794
+      ]
+    },
+    {
+      "title": "KODOGO",
+      "box": [
+        1575,
+        825,
+        1745,
+        875
+      ]
+    },
+    {
+      "title": "DESERT RUINS",
+      "box": [
+        1190,
+        1180,
+        1435,
+        1236
+      ]
+    },
+    {
+      "title": "SOUTHERN LANDS",
+      "box": [
+        1580,
+        1270,
+        1845,
+        1328
+      ]
+    },
+    {
+      "title": "ICE CONTINENT",
+      "box": [
+        1670,
+        72,
+        1890,
+        124
+      ]
+    },
+    {
+      "title": "FLYING ISLANDS",
+      "box": [
+        1810,
+        1042,
+        2030,
+        1100
+      ]
+    }
+  ],
+  "albedoMap": "/static/atlas/kiragon/albedo.webp",
+  "meshSegmentsX": 184,
+  "meshSegmentsY": 130,
+  "tiltDegrees": 28,
+  "cameraDistance": 4.2,
+  "elevationScale": 0.22,
+  "fitMargin": 0.925,
+  "renderer": "displaced-perspective-v2"
+}

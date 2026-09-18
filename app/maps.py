@@ -16,6 +16,12 @@ DEFAULT_EFFECTS: dict = {
     "marker_labels": True,
     "marker_pulse": True,
     "marker_scale": 1.0,
+    # Optional 2.5D terrain relief. Existing maps remain flat unless a supported
+    # profile is selected; Kiragon auto-enables its bundled profile once.
+    "terrain_3d": False,
+    "terrain_profile": "auto",
+    "terrain_strength": 1.0,
+    "label_declutter": True,
     # Global animation controls
     "effect_intensity": 0.72,
     "motion_speed": 0.65,
@@ -68,11 +74,46 @@ DEFAULT_EFFECTS: dict = {
 BOOLEAN_EFFECT_KEYS = {
     key for key, value in DEFAULT_EFFECTS.items() if isinstance(value, bool)
 }
-NUMERIC_EFFECT_KEYS = {"marker_scale", "effect_intensity", "motion_speed"}
+NUMERIC_EFFECT_KEYS = {"marker_scale", "effect_intensity", "motion_speed", "terrain_strength"}
+STRING_EFFECT_KEYS = {"terrain_profile"}
+
+KIRAGON_TERRAIN_PROFILE = {
+    "id": "kiragon-v1",
+    "width": 2048,
+    "height": 1448,
+    "aspect": 2048 / 1448,
+    "albedoMap": "/static/atlas/kiragon/albedo.webp",
+    "heightMap": "/static/atlas/kiragon/height.png",
+    "normalMap": "/static/atlas/kiragon/normal.png",
+    "waterMask": "/static/atlas/kiragon/water-mask.png",
+    "landMask": "/static/atlas/kiragon/land-mask.png",
+    "cloudMask": "/static/atlas/kiragon/cloud-mask.png",
+    "labelMask": "/static/atlas/kiragon/major-label-mask.png",
+    "aoMap": "/static/atlas/kiragon/ao.png",
+    "roughnessMap": "/static/atlas/kiragon/roughness.png",
+    "labelFadeStart": 1.22,
+    "labelFadeEnd": 1.95,
+    "terrainStrength": 1.0,
+    "cloudReliefSuppression": 0.94,
+    "meshSegmentsX": 184,
+    "meshSegmentsY": 130,
+    "tiltDegrees": 28,
+    "cameraDistance": 4.2,
+    "elevationScale": 0.22,
+    "fitMargin": 0.925,
+    "renderer": "displaced-perspective-v2",
+}
 
 
 def slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "map"
+
+
+def _looks_like_kiragon(legacy: dict | None) -> bool:
+    if not legacy:
+        return False
+    label = f"{legacy.get('name', '')} {legacy.get('slug', '')} {legacy.get('image_path', '')}".lower()
+    return "kiragon" in label
 
 
 def normalize_effects(raw: object, *, legacy: dict | None = None) -> dict:
@@ -89,8 +130,9 @@ def normalize_effects(raw: object, *, legacy: dict | None = None) -> dict:
             raw = json.loads(raw or "{}")
         except json.JSONDecodeError:
             raw = {}
-    if isinstance(raw, dict):
-        for key, value in raw.items():
+    raw_dict = raw if isinstance(raw, dict) else {}
+    if isinstance(raw_dict, dict):
+        for key, value in raw_dict.items():
             if key not in effects:
                 continue
             if key in BOOLEAN_EFFECT_KEYS:
@@ -104,10 +146,22 @@ def normalize_effects(raw: object, *, legacy: dict | None = None) -> dict:
                     effects[key] = max(0.65, min(2.6, number))
                 elif key == "effect_intensity":
                     effects[key] = max(0.05, min(1.6, number))
+                elif key == "terrain_strength":
+                    effects[key] = max(0.0, min(1.5, number))
                 else:
                     effects[key] = max(0.05, min(2.0, number))
+            elif key in STRING_EFFECT_KEYS:
+                effects[key] = str(value or "auto") if str(value or "auto") in {"auto", "kiragon", "none"} else "auto"
             elif key == "viewport_mode":
                 effects[key] = value if value in {"cover", "contain"} else "cover"
+
+    # Existing Kiragon maps predate terrain_3d. Auto-enable the bundled relief
+    # only when that key is absent, so a GM who later disables it stays opted out.
+    if _looks_like_kiragon(legacy):
+        if "terrain_3d" not in raw_dict:
+            effects["terrain_3d"] = True
+        if "terrain_profile" not in raw_dict or effects.get("terrain_profile") == "auto":
+            effects["terrain_profile"] = "kiragon"
     return effects
 
 
@@ -117,6 +171,10 @@ def _normalize_map(row: dict, markers: list[dict]) -> dict:
     m["cloud_enabled"] = bool(m.get("cloud_enabled", 1))
     effects_raw = m.get("effects_json", "{}")
     m["effects"] = normalize_effects(effects_raw, legacy=m)
+    profile_key = str(m["effects"].get("terrain_profile") or "auto")
+    if profile_key == "auto" and _looks_like_kiragon(m):
+        profile_key = "kiragon"
+    m["terrain3d"] = deepcopy(KIRAGON_TERRAIN_PROFILE) if (m["effects"].get("terrain_3d") and profile_key == "kiragon") else None
     # Do not expose an implementation detail to Jinja/client JSON.
     m.pop("effects_json", None)
     for marker in m["markers"]:
@@ -189,7 +247,14 @@ def get_map(settings: Settings, map_id_or_slug: str | int, *, public: bool = Fal
 
 def create_map(settings: Settings, name: str, image_path: str, description: str = "") -> dict:
     now = time.time(); base = slugify(name); slug = base
-    effects_json = json.dumps(DEFAULT_EFFECTS, separators=(",", ":"))
+    # New Kiragon atlas records should opt into the bundled relief immediately.
+    # Existing maps are upgraded lazily by normalize_effects(), while an explicit
+    # later GM disable remains sticky because the stored key is then present.
+    initial_effects = deepcopy(DEFAULT_EFFECTS)
+    if _looks_like_kiragon({"name": name, "slug": slug, "image_path": image_path}):
+        initial_effects["terrain_3d"] = True
+        initial_effects["terrain_profile"] = "kiragon"
+    effects_json = json.dumps(initial_effects, separators=(",", ":"))
     with connect(settings) as conn:
         i = 2
         while conn.execute("SELECT 1 FROM maps WHERE slug=?", (slug,)).fetchone():
