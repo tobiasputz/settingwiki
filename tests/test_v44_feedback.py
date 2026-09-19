@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.campaigns import default_campaign_id, save_campaign
+from app.campaigns import default_campaign_id, save_campaign, set_campaign_members
 from app.config import Settings
 from app.features import get_player_character, init_feature_db, save_player_character
 from app.latex import build_wiki
@@ -45,10 +45,11 @@ def test_availability_stays_global_after_second_campaign_character(tmp_path: Pat
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
     alice=create_player_invite(s,'Alice');main_id=default_campaign_id(s)
+    set_campaign_members(s,main_id,[alice['id']])
     save_player_character(s,{'name':'Aster','campaign_id':main_id},invite_id=alice['id'])
     player=TestClient(main.app);player.get(alice['invite_path'])
     day=future();assert player.post('/api/schedule/me',json={'changes':[{'date':day,'status':'available'}]}).status_code==200
-    second=save_campaign(s,{'name':'Second Campaign','member_ids':[]})
+    second=save_campaign(s,{'name':'Second Campaign','member_ids':[alice['id']]})
     save_player_character(s,{'name':'Bram','campaign_id':second['id']},invite_id=alice['id'])
     owner=TestClient(main.app);owner.post('/admin/login',data={'password':'admin'})
     a=owner.get('/api/gm/schedule',params={'start':day,'end':day,'campaign_id':main_id})
@@ -65,6 +66,7 @@ def test_codex_comment_owner_and_gm_can_delete_but_other_player_cannot(tmp_path:
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
     alice=create_player_invite(s,'Alice');bob=create_player_invite(s,'Bob')
+    set_campaign_members(s,default_campaign_id(s),[alice['id'],bob['id']])
     a=TestClient(main.app);a.get(alice['invite_path']);b=TestClient(main.app);b.get(bob['invite_path'])
     made=a.post('/api/public/annotations',json={'page_slug':'the-crown-of-frost','note':'Remember this','visibility':'party'});assert made.status_code==200
     note_id=made.json()['id']
@@ -79,6 +81,7 @@ def test_gm_can_edit_and_delete_player_character_and_advanced_sheet_roundtrips(t
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
     alice=create_player_invite(s,'Alice');cid=default_campaign_id(s)
+    set_campaign_members(s,cid,[alice['id']])
     char=save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=alice['id'])
     gm=TestClient(main.app);gm.post('/admin/login',data={'password':'admin'})
     sheet={'initiative':'+12','focus_points':'2/3','spell_dc':'27','armor':'Explorer clothing','currency':'42 gp','appearance':'Silver braid','personality':'Restless but kind','bonds':'Owes Corvina a life-debt','attacks':[{'name':'Moon blade','bonus':'+18','note':'2d8 slashing'}],'resources':[{'name':'Panache','value':'1 / 1','note':'Reset after rest'}],'proficiencies':[{'name':'Occultism','rank':'master','note':''}],'display':{'subtitle':'Seeker of the Pale Road','symbol':'☾','secondary_color':'#665588','density':'compact'}}
@@ -102,7 +105,7 @@ def test_semantic_search_is_integrated_into_player_search_and_ask_seeker(tmp_pat
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
     monkeypatch.delenv('SEEKER_AI_API_KEY',raising=False);monkeypatch.delenv('LOREFORGE_AI_API_KEY',raising=False)
     monkeypatch.delenv('SEEKER_AI_MODEL',raising=False);monkeypatch.delenv('LOREFORGE_AI_MODEL',raising=False)
-    invite=create_player_invite(s,'Searcher');client=TestClient(main.app);client.get(invite['invite_path'])
+    invite=create_player_invite(s,'Searcher');set_campaign_members(s,default_campaign_id(s),[invite['id']]);client=TestClient(main.app);client.get(invite['invite_path'])
     results=client.get('/api/public/search',params={'q':'ruler of the northern realm'})
     assert results.status_code==200 and any(x.get('slug')=='the-crown-of-frost' for x in results.json())
     answer=client.post('/api/assistant/query',json={'q':'Who rules the northern realm?','use_ai':True})

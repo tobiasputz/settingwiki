@@ -1,4 +1,8 @@
-# Seeker — Campaign Workspace (8.0.1)
+# Seeker — Campaign Workspace (10.2.0)
+
+**10.2.0 — Kiragon cinematic World Atlas:** fixes the vertically inverted 3D artwork and replaces the first-pass embossed relief with a more restrained Runeterra-inspired rendering stack: multi-scale height/normal lighting, soft terrain self-shadow, flatter roughness-aware water, stronger coast definition, atmospheric distance, cloud-aware lift/shadow, improved terrain masks, a gentler perspective camera, and denser displacement geometry. The original Atlas coordinates, markers, fog, routes, layers, player permissions and 2D fallback are unchanged. High-resolution 8192×5794 Kiragon uploads continue to use the bundled masks in normalized UV space. Static/PWA generation is 10200.
+
+**10.0.0 — GM Suite consolidation:** preserves Seeker's player-facing campaign UI and existing workflows while unifying the GM side around Campaign Workspace. Source Studio is now a first-class GM tool rather than a separate product surface; specialist tools remain available without losing their established functionality. This release also adds owner-only **View As Player**, a **Needs Attention** action center, a universal campaign-object drawer, manual GM cue/run-of-show controls, a single SSE live-event channel with slow polling fallbacks, incremental asset indexing, runtime/browser diagnostics, a shared opt-in UI component layer, self-hosted CodeMirror, login/write/upload hardening, ordered schema initialization, and Playwright browser regression coverage.
 
 **One campaign, one source of truth.** This major release adds a connected **Campaign Workspace** without turning Seeker's document structure into another database you have to manage. LaTeX remains authoritative for source-backed campaign material; Foundry remains authoritative for live actor state; Seeker connects those systems to sessions, Chronicle, maps, handouts, Homebrew and campaign relationships.
 
@@ -26,9 +30,9 @@ The new workspace uses additive SQLite tables (`v8_*`) and reuses existing V7 re
 
 On first use, the object registry classifies old automatically mirrored Codex headings. It does **not** delete them. This is specifically intended to turn installations with hundreds of heading-derived “entities” into a small, useful list of actual campaign objects without sacrificing anything you had already attached data to.
 
-Static/PWA generation is **8001**. **Foundry Bridge remains 1.10.1**; no bridge protocol migration is required.
+Current static/PWA generation is **10200**. **Foundry Bridge remains 1.11.0**; no bridge protocol migration is required.
 
-Release verification: **224 automated tests pass**, plus Python compilation and browser JavaScript syntax validation.
+Release verification: automated Python/UI contract tests, Python compilation, JavaScript syntax checks, and an opt-in Playwright browser suite.
 
 ## Seeker 7.0.4 — Codex & Relay
 
@@ -104,7 +108,7 @@ GMs prepare through **Session Prep** (`/gm/prep`). A planned session can have an
 
 V5 also adds a private player **Investigation Board**, campaign objectives, lore follows/watches and notification preferences, a data-grounded **Previously on…** briefing, narrative character milestones, session RSVP, and campaign-specific Atlas knowledge/fog. Session scheduling remains player-global: availability is filled once per player and reused across every campaign in which that player has a current character.
 
-Multi-campaign management now supports true permanent deletion of non-default campaigns. Deletion removes table-specific state while preserving shared setting canon, player identities and global availability. The default campaign is intentionally protected.
+Multi-campaign management supports permanent deletion of any table as long as at least one table remains. Deletion removes table-specific state while preserving shared setting canon, player identities and global availability. There is no special default table; player access is determined only by explicit table membership.
 
 The free local semantic Codex search from V4 remains available and spoiler-safe; it does not require an API key or hosted AI service. Optional OpenAI-compatible answer generation can still be configured separately if desired.
 
@@ -550,6 +554,14 @@ The Docker image intentionally does not install `texlive-full`, because that ima
 - include the custom `.sty` / `.cls` file in the project, as you normally can in Overleaf.
 
 The wiki renderer is semantic rather than pixel-identical to the PDF. Your PDF preview is the exact place to verify TeX formatting; the player wiki intentionally reformats the same content into a responsive website.
+
+## Maintainer architecture (10.0)
+
+Seeker 10 keeps all established routes and player-facing behavior, but the web layer is no longer a single monolithic router. `app/main.py` is the composition root: it owns shared runtime helpers, security/auth context, application construction, and compatibility wiring. Mature endpoint declarations are grouped by concern in `app/route_runtime.py`, `app/route_public_access.py`, `app/route_studio.py`, `app/route_living.py`, `app/route_session_tools.py`, `app/route_gm_integrations.py`, and `app/route_integration_api.py`. Newer V7–V10 feature routers continue to use their explicit `register_*_routes` modules.
+
+The small `app/route_bridge.py` is intentionally one-way and exists to preserve mature handler contracts while the service layer is decomposed incrementally. Domain/storage modules do not import route modules. Settings and the handful of historical development/test seams that can be swapped at runtime are late-bound so local development, tests, and deployment behavior remain unchanged.
+
+Best-effort compatibility and cleanup paths no longer fail silently. They use `log_best_effort(...)` to write non-fatal diagnostic events; the operation still succeeds or falls back exactly as before, while the GM can inspect the issue in Campaign Workspace → Diagnostics.
 
 ## Tests
 

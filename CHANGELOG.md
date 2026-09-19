@@ -1,5 +1,113 @@
 # Changelog
 
+## 10.2.0 — Kiragon cinematic Atlas quality pass
+
+- Fixed the 2.5D Kiragon artwork rendering vertically inverted. Seeker Atlas coordinates use a top-left origin, so WebGL texture uploads now deliberately keep that orientation instead of applying `UNPACK_FLIP_Y_WEBGL`.
+- Reworked the terrain shader away from an embossed-image look: macro height normals are blended with authored detail normals, with soft self-shadowing, restrained ambient occlusion, warm key/cool fill separation and subtle atmospheric perspective.
+- Added roughness-aware, non-displaced ocean shading and coastline separation while keeping painted water art as the visual source of truth.
+- Improved cloud treatment: atmospheric cloud pixels remain excluded from displacement/terrain lighting, receive a subtle lifted shadow, and snow/ice terrain remains part of the relief model.
+- Regenerated Kiragon height, normal, AO and roughness assets with stronger mountain/ridge detail and less inflated continent-wide relief.
+- Tuned the constrained camera and geometry for a more top-down premium-map presentation: denser terrain mesh, gentler tilt, lower elevation exaggeration, increased camera distance and slightly fuller viewport fit.
+- Added regression coverage for texture orientation and the cinematic height/roughness/shadow rendering contract. Existing markers, notes, routes, regions, fog, overlays, permissions and the 2D fallback are unchanged.
+- Static/PWA generation: **10200**.
+
+## 10.1.1 — High-resolution Kiragon Atlas compatibility
+
+- Fixed the Kiragon 2.5D renderer rejecting the original **8192×5794** Seeker map simply because the bundled terrain pack was authored at **2048×1448**. Terrain/mask assets are now treated correctly as normalized UV data and only require a compatible aspect ratio.
+- Kept all Atlas interaction coordinates in the uploaded map's native resolution while using an independently capped WebGL backing buffer, avoiding a huge native 8192×5794 framebuffer and reducing GPU memory pressure.
+- The uploaded Kiragon artwork is used as the visible albedo and downsampled only for GPU upload; height, normal, water, cloud, label and AO maps may remain at their authored resolution.
+- Added aspect-ratio validation for terrain assets, preserving safety against accidentally applying the Kiragon terrain pack to an unrelated map while allowing equivalent higher/lower-resolution exports.
+- Oversized raster overlay layers are downsampled for GPU upload without changing their map-space geometry.
+- Improved Atlas failure diagnostics so the 3D toggle can expose the actual initialization error instead of describing every failure as a browser limitation.
+- Static/PWA generation: **10102**.
+
+## 10.1.0 — Kiragon displaced-perspective World Atlas
+
+- Rebuilt the optional Kiragon Atlas renderer from flat relief shading into a real subdivided **WebGL displacement mesh** driven by the supplied height map.
+- Added a constrained perspective camera that creates the miniature-world / Runeterra-style depth effect without turning the Atlas into a free-flying 3D engine.
+- Added explicit **cloud-aware geometry and lighting**: the cloud mask suppresses terrain displacement and AO/normal-map shading only where atmospheric clouds are painted; snow, ice and pale terrain remain genuine relief. Oceans remain at sea level.
+- Reprojected Seeker markers, party notes, route history, political/historical regions and campaign fog onto the displaced surface while preserving their existing normalized map coordinates and data model.
+- Added perspective-aware inverse mapping for placing new party notes, so clicking the tilted 3D surface still stores the correct original map coordinates.
+- Raster map layers now render through the same displaced WebGL mesh in 3D mode, avoiding the misalignment that a flat HTML overlay would create. The ordinary DOM layers remain unchanged in 2D mode.
+- Kept the original map image as an always-available progressive fallback. WebGL/GPU failures automatically leave the established 2D Atlas functional, and the 3D/2D preference remains per-map.
+- Added a bundled exact-size Kiragon albedo plus the height, normal, water, land, cloud, AO, roughness and label masks needed by the renderer.
+- Added regression coverage for displacement/perspective rendering contracts, cloud handling, coordinate reprojection, layer rendering and the 2D fallback.
+- Static/PWA generation: **10101**.
+
+## 10.0.1 — Foundry bridge & Forge interaction hotfix
+
+- Fixed the V10 same-origin request guard incorrectly rejecting the **Foundry Bridge** command/heartbeat POSTs when Foundry is hosted on a different domain. The token-authenticated `/api/v6/foundry/push/*` endpoints are now explicitly exempt from Seeker browser-CSRF origin checks while retaining their existing bridge-token authentication and CORS headers.
+- Restored Seeker → Foundry imports and queued command delivery for cross-origin Foundry worlds such as hosted Foundry instances.
+- Fixed the Homebrew Forge content-type palette so **Freeform** and the structured Freeform document buttons remain clickable while a source-linked entry is open. Switching type now starts a fresh unsaved entry rather than attempting to convert or corrupt the linked LaTeX source.
+- Added regression coverage for cross-origin Foundry polling and the source-linked Forge type-picker contract.
+- Static/PWA generation is **10001** so deployed browsers and installed PWAs immediately receive the repaired Forge script; Foundry Bridge package version is unchanged.
+
+## 10.0.0 — GM Suite consolidation
+
+- Preserved the established player-facing Seeker UI while reorganizing GM navigation around **Campaign Workspace**, with Source Studio promoted into the same core tool suite and specialist tools retained as advanced destinations.
+- Added owner-only **View As Player**, enforcing the selected player’s real campaign memberships, role permissions, knowledge visibility and spoiler filters while keeping a persistent escape banner for the owner.
+- Added a **Needs Attention** action center for pending player submissions, relationship suggestions, Foundry failures/conflicts, recent runtime errors and stale backups.
+- Added the universal **Campaign Object drawer** with relationships, knowledge, session appearances, source ownership, handouts and contextual actions for party reveals, live-session touches, handout creation, map placement and Foundry pushes.
+- Added a manual **GM cue/run-of-show queue** for prepared reveals, display changes, map states, Foundry actions and reminders; cues never execute without an explicit GM action.
+- Added one authenticated **Server-Sent Events** channel and converted high-frequency browser polling to event-driven updates with low-frequency compatibility fallbacks.
+- Added runtime/browser diagnostics with request IDs, slow-request tracking, 5xx/error capture, browser exception reporting and diagnostics surfaced in Campaign Workspace.
+- Added an incremental persistent media index and removed repeated full asset metadata reconstruction from normal asset-library reads.
+- Added an ordered storage bootstrap/migration registry without changing legacy table/data semantics.
+- Decomposed the historical 5,400-line HTTP router into ordered domain route modules (`route_public_access`, `route_studio`, `route_living`, `route_session_tools`, `route_gm_integrations`, and `route_integration_api`). `app.main` is now the compatibility/composition root rather than the home of every endpoint; existing URLs, handler names, permissions, and response contracts are unchanged.
+- Replaced the remaining silent broad best-effort exception paths with non-fatal diagnostic events, so optional cleanup/compatibility failures stay harmless to users but are visible in Diagnostics instead of disappearing.
+- Added a shared, opt-in UI primitive layer for dialogs, toasts, drawers, sheets, menus, tabs, forms, search, status chips, cards and tables.
+- Self-hosted CodeMirror and hardened browser writes, login attempts, security headers and SVG upload/serving behavior.
+- Fixed source-backed Homebrew cards so **Forge**, **Foundry** and **Open …** controls can never overlap.
+- Added Playwright desktop/mobile regression tests and CI coverage for Studio integration, shared dialogs and Homebrew control geometry.
+- Static/PWA generation: **10000**.
+
+# Seeker 9.0.5 — Shared dialogs & UI polish
+
+- Fixed the underlying reason Chronicle's **Add journal entry** looked broken: generic player-facing dialogs had markup and working actions, but their full modal presentation lived only in the Studio/admin stylesheet. The shared `wiki.css` now owns the dialog foundation.
+- Chronicle, Session, GM Prep, Session Console, World State, and Worldcraft generic dialogs now open as real fixed overlays with backdrop blur, bounded internal scrolling, reliable z-indexing, and background scroll lock.
+- On phones, the same dialogs become touch-friendly bottom sheets with a grab handle, single-column forms, safe-area padding, and sticky action controls.
+- Standardized dialog form controls, focus states, close buttons, destructive actions, journal scope cards, draft status, and toast notifications so these features no longer look like raw admin forms dropped into the page.
+- Added click-outside and Escape-to-close behavior plus automatic initial focus to the shared dialog controllers.
+- Added release tests that require shared modal CSS to exist on player-facing pages, verify accessible dialog markup, and verify the relevant controllers lock/unlock background scrolling and support Escape dismissal.
+- Static/PWA generation: **9005**. Foundry Bridge remains **1.11.0**.
+- Release verification: **245 automated tests pass** across all test modules; Python and browser/Foundry JavaScript pass syntax checks.
+
+# Seeker 9.0.4 — UI action integrity
+
+- Fixed **Add journal entry** end-to-end. GMs can now create/edit journal entries by explicitly choosing a player at the active table; players keep their existing private journal flow.
+- The full Chronicle now shows all table journals to GMs and keeps journal authorship/character ownership valid instead of exposing a button whose save path could only work for a personal invitation.
+- Fixed the same GM journal path on the live Session screen.
+- Removed the misleading GM-side **Submission** action from the player-contribution pane; that action is intentionally player-only.
+- Journal actions now use delegated click handling and can recreate their modal shell if page markup is incomplete, preventing a missing/late-bound node from leaving the button inert.
+- Added stricter release checks: page-local button binding, frontend API method/route contracts, and real GM/player Chronicle write-path tests for journals, arcs, and relationships.
+- Static/PWA generation: **9004**.
+
+# Seeker 9.0.3 — UI Reliability & Button Audit
+
+- Added a shared **UI Core** navigation fallback for Chronicle, Table App, Worldcraft, World State, Living Table, and Campaign Workspace tab systems. Feature-specific scripts still own rich behavior, but a failure in another module can no longer leave core tabs such as **Journal** or **Relationships** visibly clickable but inert.
+- Added hash-safe navigation for all of those tab systems and for Seeker Studio workspaces, including links such as `/admin#access`.
+- Audited every static template button. Three genuinely dead Studio controls were found and implemented: the top-right **⋯** menu, **＋ Map Layer**, and **＋ Discovery Fog**.
+- The Studio map sidebar now lists, edits, enables/disables, reveals/hides, and deletes map layers/fog regions. Layer upload and a quick rectangular discovery-fog editor are available directly in Studio; irregular polygons remain available in Worldcraft.
+- Added automated UI regression checks that fail the build when a visible static button has neither submit semantics nor a JavaScript binding, when a tab has no matching pane, when a literal internal link has no registered route, or when the shared UI fallback is omitted from a required surface.
+- Extended the audit to JavaScript-rendered controls: generated `data-*` action buttons must have a consuming handler and generated id-based buttons must be referenced by their module. The Session workflow step indicators were also changed from inert fake buttons into non-interactive status markers.
+- Explicitly marks navigation/tab controls as `type=button` to prevent accidental form submission as layouts evolve.
+- Static/PWA generation is **9003** and includes the UI Core in the offline shell.
+- Release verification: **237 automated tests pass**; Python compilation and the audited browser scripts pass syntax checks.
+
+# Seeker 9.0.2 — Landing Motion & Explicit Table Access
+
+- Rebuilt the home-screen archive motion around a dedicated `requestAnimationFrame` loop. Orbit rotation, the ambient glow, and the scroll cue no longer depend on CSS animation or IntersectionObserver timing, so the landing page cannot silently render as a static composition when generic motion rules interfere.
+- Keeps the existing landing composition intact while making the orbit markers visibly travel around the archive rings; the title/action entrance still runs after first paint.
+- Bumps the static/PWA cache generation to **9002** so browsers and installed apps fetch the repaired landing assets.
+- Removed the **default table** concept from current behavior and UI. The legacy `is_default` database column remains only for backwards-compatible schema reads and is cleared during migration.
+- New player invitations start with **no table membership**. A GM must explicitly assign them to one or more tables.
+- Players can only see and select tables they are members of. The character editor uses the same membership-filtered list, and creating/moving a character can no longer self-enroll a player into another table.
+- Removed Default badges and Make Default controls. Any table can be archived/deleted as long as Seeker is not being left with zero tables.
+- Added a one-time migration for old auto-default memberships: when a player already has another explicit table, the inherited legacy-default membership is removed automatically; players whose only table was the old one are preserved so an upgrade does not strand them unexpectedly.
+- Release verification: **228 automated tests pass** across all test modules; Python modules and browser/Foundry JavaScript pass syntax validation.
+
+# Changelog
+
 ## 8.0.1 — Campaign Workspace naming & object registry cleanup
 
 - Removed **“Seeker 8” / “Campaign OS”** as product-facing names. The integrated surface is now simply **Campaign Workspace**, which describes what it does; `8.0.1` remains only the software version and `/app/v8` remains the compatibility route.

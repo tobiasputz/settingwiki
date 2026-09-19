@@ -215,16 +215,9 @@ def create_player_invite(settings: Settings, label: str, expires_at: float | Non
             (label, nonce, 1, now, expires_at, max_devices, role),
         )
         row = conn.execute("SELECT * FROM player_invites WHERE id=?", (cur.lastrowid,)).fetchone()
-        # Multi-campaign Seeker keeps backward compatibility by placing new
-        # invitations in the default campaign. The campaign tables are created
-        # by init_feature_db(); storage-only tests/bootstraps may not have them yet.
-        try:
-            default_row = conn.execute("SELECT id FROM campaigns WHERE is_default=1 ORDER BY id LIMIT 1").fetchone()
-            if default_row:
-                conn.execute("INSERT OR IGNORE INTO campaign_memberships(campaign_id,invite_id,created_at) VALUES(?,?,?)",
-                             (int(default_row[0]), int(cur.lastrowid), now))
-        except sqlite3.OperationalError:
-            pass
+        # Invitations no longer imply table membership. The GM explicitly adds a
+        # player to one or more tables in Worldcraft; until then the invitation
+        # can authenticate but cannot access table-scoped campaign state.
     return _invite_payload(settings, row, now)
 
 

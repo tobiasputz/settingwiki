@@ -49,6 +49,8 @@ Welcome to the campaign.
 def test_player_agency_party_threads_and_note_ownership(tmp_path: Path):
     s=setup(tmp_path)
     a=create_player_invite(s,'Alice');b=create_player_invite(s,'Bob')
+    from app.campaigns import default_campaign_id, set_campaign_members
+    set_campaign_members(s,default_campaign_id(s),[a['id'],b['id']])
     thread=save_thread(s,{'title':'Who stole the crown?','editing':'party','visibility':'party'},invite_id=a['id'])
     # Party-owned thread itself is collaboratively editable.
     edited=save_thread(s,{**thread,'summary':'Bob added the witness clue.'},invite_id=b['id'])
@@ -72,6 +74,8 @@ def test_observer_is_read_only_player_can_author_and_cogm_is_not_owner(tmp_path:
     player_inv=create_player_invite(s,'Player',role='player')
     observer_inv=create_player_invite(s,'Observer',role='observer')
     cogm_inv=create_player_invite(s,'Co-GM',role='co-gm')
+    from app.campaigns import default_campaign_id, set_campaign_members
+    set_campaign_members(s,default_campaign_id(s),[player_inv['id'],observer_inv['id'],cogm_inv['id']])
 
     player=TestClient(main.app);observer=TestClient(main.app);cogm=TestClient(main.app)
     assert player.get(player_inv['invite_path'],follow_redirects=False).status_code==303
@@ -89,6 +93,8 @@ def test_archive_mode_freezes_campaign_writes_but_owner_can_unfreeze(tmp_path: P
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
     inv=create_player_invite(s,'Alice')
+    from app.campaigns import default_campaign_id, set_campaign_members
+    set_campaign_members(s,default_campaign_id(s),[inv['id']])
     player=TestClient(main.app); assert player.get(inv['invite_path'],follow_redirects=False).status_code==303
     set_setting(s,'campaign_archive_mode','1')
     assert player.get('/archive').status_code==200

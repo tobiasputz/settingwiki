@@ -971,11 +971,11 @@ def save_player_character(settings: Settings, p: dict, *, invite_id: int|None, a
         return p[key] if key in p else ((current or {}).get(key,default))
     campaign_id=resolve_campaign_id(settings,p.get('campaign_id') if p.get('campaign_id') is not None else ((current or {}).get('campaign_id')))
     if not admin and not invite_has_campaign(settings,invite_id,campaign_id):
-        from .campaigns import get_campaign
-        chosen=get_campaign(settings,campaign_id)
-        if not chosen or str(chosen.get("status") or "") != "active":
-            raise PermissionError("That campaign is not available for player characters.")
-    ensure_campaign_membership(settings,campaign_id,owner)
+        raise PermissionError("You can only create or move a character within a table you are already a member of.")
+    # A GM assigning a character to a table is an explicit membership action.
+    # Player edits never grant themselves access to a new table.
+    if admin:
+        ensure_campaign_membership(settings,campaign_id,owner)
     name=str(val("name","Unnamed hero") or "Unnamed hero").strip()[:160]
     vis=str(val("visibility","party") or "party"); vis=vis if vis in {"party","private"} else "party"
     status=str(val("status","active") or "active")[:40]

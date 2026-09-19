@@ -1,5 +1,5 @@
 const MODULE_ID = "seeker-bridge";
-const BRIDGE_VERSION = "1.10.1";
+const BRIDGE_VERSION = "1.11.0";
 const BUNDLED_SEEKER_ORIGIN = "__SEEKER_PUBLIC_ORIGIN__";
 
 function seekerSlugify(value) {
@@ -366,6 +366,9 @@ function buildPreparedItem(payload, endpoint = "") {
   const traitChoices = type === "weapon" ? globalThis.CONFIG?.PF2E?.weaponTraits
     : type === "feat" ? globalThis.CONFIG?.PF2E?.featTraits
     : type === "action" ? globalThis.CONFIG?.PF2E?.actionTraits
+    : type === "spell" ? globalThis.CONFIG?.PF2E?.spellTraits
+    : type === "background" ? globalThis.CONFIG?.PF2E?.backgroundTraits
+    : type === "class" ? globalThis.CONFIG?.PF2E?.classTraits
     : globalThis.CONFIG?.PF2E?.equipmentTraits;
   const system = {
     description: { value: description },
@@ -422,6 +425,63 @@ function buildPreparedItem(payload, endpoint = "") {
       striking: Math.max(0, Math.min(4, Math.trunc(numericOr(data.weapon_striking, 0)))),
       property: [],
     };
+  }
+  if (type === "background") {
+    delete system.level; delete system.quantity;
+    const boostWords = String(data.background_boosts || "").split(/[,;/]+/).map(x => seekerSlugify(x)).filter(Boolean);
+    const ability = new Set(["str","dex","con","int","wis","cha"]);
+    const alias = {strength:"str",dexterity:"dex",constitution:"con",intelligence:"int",wisdom:"wis",charisma:"cha"};
+    const picks = boostWords.map(x => alias[x] || x).filter(x => ability.has(x));
+    system.boosts = {
+      0: { value: picks.length ? [...new Set(picks)] : ["str","dex","con","int","wis","cha"], selected: picks.length === 1 ? picks[0] : null },
+      1: { value: ["str","dex","con","int","wis","cha"], selected: null },
+    };
+    const skill = choiceSlug(data.background_skill, globalThis.CONFIG?.PF2E?.skills);
+    system.trainedSkills = { value: skill ? [skill] : [] };
+    system.trainedLore = String(data.background_lore || "").trim();
+    system.items = {};
+    system.rules = [];
+    if (String(data.background_skill_feat || "").trim()) {
+      system.description.value += `<hr><p><strong>Granted Skill Feat</strong> ${escapeHtml(data.background_skill_feat)}</p>`;
+    }
+    if (String(data.background_special || "").trim()) system.description.value += `<p>${escapeHtml(data.background_special).replaceAll("\n","<br>")}</p>`;
+  }
+  if (type === "spell") {
+    delete system.quantity;
+    system.level = { value: Math.max(0, Math.min(10, Math.trunc(numericOr(data.spell_rank ?? data.level, 1)))) };
+    const traditions = slugList(data.spell_traditions).map(t => choiceSlug(t, globalThis.CONFIG?.PF2E?.magicTraditions || globalThis.CONFIG?.PF2E?.traditions)).filter(Boolean);
+    system.traits = { ...(system.traits || {}), value: validTraitList(data.traits, globalThis.CONFIG?.PF2E?.spellTraits), rarity: String(data.rarity || "common").toLowerCase() || "common", traditions: [...new Set(traditions)] };
+    const rawTime = String(data.spell_actions || data.action_cost || "2").trim();
+    const timeValue = /^[123]$/.test(rawTime) ? rawTime : rawTime === "reaction" ? "reaction" : rawTime === "free" ? "free" : rawTime || "2";
+    system.time = { value: timeValue };
+    system.range = { value: String(data.spell_range || "").trim() };
+    system.target = { value: String(data.spell_targets || "").trim() };
+    system.area = String(data.spell_area || "").trim() ? { type: "burst", value: null, details: String(data.spell_area).trim() } : null;
+    system.duration = { value: String(data.spell_duration || "").trim(), sustained: /sustain/i.test(String(data.spell_duration || "")) };
+    system.defense = { save: { statistic: String(data.spell_defense || "").toLowerCase().includes("fort") ? "fortitude" : String(data.spell_defense || "").toLowerCase().includes("ref") ? "reflex" : String(data.spell_defense || "").toLowerCase().includes("will") ? "will" : null, basic: /basic/i.test(String(data.spell_defense || "")) }, passive: null };
+    system.damage = {};
+    system.heightening = String(data.spell_heightened || "").trim() ? { type: "interval", interval: 1, damage: {} } : null;
+    if (String(data.spell_heightened || "").trim()) system.description.value += `<hr><p><strong>Heightened</strong> ${escapeHtml(data.spell_heightened).replaceAll("\n","<br>")}</p>`;
+    system.overlays = {};
+  }
+  if (type === "class") {
+    delete system.level; delete system.quantity;
+    const keyAbilities = String(data.class_key_ability || "").split(/[,;/]|\bor\b/i).map(x => seekerSlugify(x)).filter(Boolean);
+    const alias = {strength:"str",dexterity:"dex",constitution:"con",intelligence:"int",wisdom:"wis",charisma:"cha"};
+    system.keyAbility = { value: keyAbilities.map(x => alias[x] || x).filter(x => ["str","dex","con","int","wis","cha"].includes(x)) };
+    system.hp = Math.max(1, Math.trunc(numericOr(data.class_hp, 8)));
+    system.perception = String(data.class_perception || "trained").toLowerCase();
+    system.classDC = String(data.class_dc || "trained").toLowerCase();
+    system.savingThrows = { fortitude: "trained", reflex: "trained", will: "trained" };
+    const savesText = String(data.class_saves || "").toLowerCase();
+    for (const k of ["fortitude","reflex","will"]) for (const rank of ["legendary","master","expert","trained","untrained"]) if (savesText.includes(rank) && savesText.includes(k.replace("fortitude","fort"))) { system.savingThrows[k]=rank; break; }
+    system.attacks = { simple: "trained", martial: "untrained", advanced: "untrained", unarmed: "trained" };
+    system.defenses = { unarmored: "trained", light: "untrained", medium: "untrained", heavy: "untrained" };
+    system.trainedSkills = { value: [], additional: 0 };
+    system.rules = [];
+    if (String(data.class_skills || "").trim()) system.description.value += `<hr><p><strong>Skills</strong> ${escapeHtml(data.class_skills).replaceAll("\n","<br>")}</p>`;
+    if (String(data.class_proficiencies || "").trim()) system.description.value += `<p><strong>Proficiencies</strong> ${escapeHtml(data.class_proficiencies).replaceAll("\n","<br>")}</p>`;
+    if (String(data.class_progression || "").trim()) system.description.value += `<p><strong>Progression</strong> ${escapeHtml(data.class_progression).replaceAll("\n","<br>")}</p>`;
   }
   if (type === "feat" || type === "action") {
     const action = String(data.action_cost || data.homebrew_actions || "");
@@ -572,6 +632,40 @@ function buildPreparedActor(payload, endpoint = "") {
         con: { mod: numericOr(data.con_mod, 0) }, int: { mod: numericOr(data.int_mod, 0) },
         wis: { mod: numericOr(data.wis_mod, 0) }, cha: { mod: numericOr(data.cha_mod, 0) },
       },
+    },
+  };
+}
+function isPreparedHazard(payload) {
+  const data = payload?.data || {};
+  return String(payload?.prepared_kind || "").toLowerCase() === "homebrew" && String(data.homebrew_document || "").toLowerCase() === "hazard";
+}
+function buildPreparedHazard(payload, endpoint = "") {
+  const data = payload?.data || {};
+  const hp = Math.max(0, Math.trunc(numericOr(data.hazard_hp, data.hp || 0)));
+  const ac = Math.max(0, Math.trunc(numericOr(data.hazard_ac, data.ac || 10)));
+  const portrait = absoluteSeekerAsset(data.img, endpoint) || "icons/svg/hazard.svg";
+  const complexity = String(data.hazard_complexity || "simple").toLowerCase() === "complex";
+  return {
+    name: String(payload?.title || "Prepared hazard"), type: "hazard", img: portrait,
+    flags: { seeker: { managed: true, entityId: payload?.entity_id ?? null, preparedId: payload?.prepared_id ?? payload?.prepared_content_id ?? null } },
+    system: {
+      details: {
+        level: { value: Math.trunc(numericOr(data.level, 0)) },
+        isComplex: complexity,
+        description: htmlDescription(payload?.summary, data.description),
+        disable: String(data.hazard_disable || ""),
+        routine: String(data.hazard_routine || ""),
+        reset: String(data.hazard_reset || ""),
+      },
+      traits: { value: validTraitList(data.traits, globalThis.CONFIG?.PF2E?.hazardTraits), rarity: String(data.rarity || "common").toLowerCase() || "common" },
+      attributes: {
+        ac: { value: ac },
+        hp: { value: hp, max: hp, details: "", brokenThreshold: Math.max(0, Math.trunc(numericOr(data.hazard_bt, Math.floor(hp/2)))) },
+        hardness: Math.max(0, Math.trunc(numericOr(data.hazard_hardness, 0))),
+        stealth: { value: Math.trunc(numericOr(String(data.hazard_stealth || "").match(/\d+/)?.[0], 0)), details: String(data.hazard_stealth || data.hazard_notice || "") },
+        immunities: parsedIWR(data.immunities, "immunity"), weaknesses: parsedIWR(data.weaknesses, "weakness"), resistances: parsedIWR(data.resistances, "resistance"),
+      },
+      saves: { fortitude: { value: numericOr(data.hazard_fortitude, 0) }, reflex: { value: numericOr(data.hazard_reflex, 0) }, will: { value: numericOr(data.will, 0) } },
     },
   };
 }
@@ -1071,13 +1165,16 @@ async function syncManagedDocument(doc, payload, endpoint = "") {
     throw new Error("Seeker refused to update a Foundry document it does not own.");
   }
   const kind = String(payload?.prepared_kind || "item").toLowerCase();
-  if (doc.documentName === "Actor" || ["npc","monster"].includes(kind)) {
+  if (doc.documentName === "Actor" || ["npc","monster"].includes(kind) || isPreparedHazard(payload)) {
     if (doc.documentName !== "Actor") throw new Error("The linked document is not an Actor.");
-    const source = buildPreparedActor(payload, endpoint);
-    await doc.update({ name: source.name, img: source.img, prototypeToken: source.prototypeToken, system: source.system });
+    const hazard = isPreparedHazard(payload);
+    const source = hazard ? buildPreparedHazard(payload, endpoint) : buildPreparedActor(payload, endpoint);
+    if (hazard && String(doc.type) !== "hazard") throw new Error("The linked Actor is not a PF2e hazard.");
+    if (!hazard && String(doc.type) === "hazard") throw new Error("The linked Actor is a hazard; changing actor type is intentionally blocked.");
+    await doc.update({ name: source.name, img: source.img, ...(source.prototypeToken ? {prototypeToken: source.prototypeToken} : {}), system: source.system });
     const managedIds = (doc.items?.contents || []).filter(i => i?.flags?.seeker?.managedEmbedded).map(i => i.id).filter(Boolean);
-    if (managedIds.length) await doc.deleteEmbeddedDocuments("Item", managedIds);
-    const report = await populatePreparedActor(doc, payload);
+    if (!hazard && managedIds.length) await doc.deleteEmbeddedDocuments("Item", managedIds);
+    const report = hazard ? { abilities: 0, warnings: [] } : await populatePreparedActor(doc, payload);
     return { message: `${doc.name} synchronized from Seeker.`, report, uuid: doc.uuid, document_type: "Actor", entity_id: payload.entity_id };
   }
   if (doc.documentName !== "Item") throw new Error("The linked document is not an Item.");
@@ -1343,9 +1440,10 @@ async function runFoundryCommand(command, endpoint = "") {
   }
   if (type === "push_prepared_content") {
     const kind = String(payload.prepared_kind || "item").toLowerCase();
-    if (["npc", "monster"].includes(kind) || (kind === "homebrew" && (payload?.data?.hp || payload?.data?.ac))) {
-      const created = await Actor.create(buildPreparedActor(payload, endpoint));
-      const report = await populatePreparedActor(created, payload);
+    if (["npc", "monster"].includes(kind) || (kind === "homebrew" && (payload?.data?.hp || payload?.data?.ac)) || isPreparedHazard(payload)) {
+      const hazard = isPreparedHazard(payload);
+      const created = await Actor.create(hazard ? buildPreparedHazard(payload, endpoint) : buildPreparedActor(payload, endpoint));
+      const report = hazard ? { attacks: 0, abilities: 0, spells: 0, warnings: [] } : await populatePreparedActor(created, payload);
       const extras = [
         report.attacks ? `${report.attacks} strike${report.attacks === 1 ? "" : "s"}` : "",
         report.abilities ? `${report.abilities} abilit${report.abilities === 1 ? "y" : "ies"}` : "",

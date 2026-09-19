@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.storage import init_db, create_player_invite, set_setting
 from app.features import init_feature_db, save_player_character
-from app.campaigns import save_campaign, default_campaign_id, invite_has_campaign
+from app.campaigns import save_campaign, default_campaign_id, invite_has_campaign, set_campaign_members
 from app.scheduling import init_schedule_db, save_player_availability, list_player_availability, campaign_schedule, player_campaigns
 from app.latex import build_wiki
 
@@ -34,6 +34,7 @@ def future(days: int) -> str:
 def test_one_player_calendar_applies_to_every_campaign_character(tmp_path: Path):
     s=setup(tmp_path);alice=create_player_invite(s,'Alice');main=default_campaign_id(s)
     coast=save_campaign(s,{'name':'Ashen Coast','member_ids':[alice['id']]})['id']
+    set_campaign_members(s,main,[alice['id']])
     save_player_character(s,{'name':'Aster','campaign_id':main},invite_id=alice['id'])
     save_player_character(s,{'name':'Bram','campaign_id':coast},invite_id=alice['id'])
     day=future(5);save_player_availability(s,alice['id'],[{'date':day,'status':'available'}])
@@ -45,6 +46,7 @@ def test_one_player_calendar_applies_to_every_campaign_character(tmp_path: Path)
 
 def test_planner_distinguishes_green_soft_blocked_and_unknown(tmp_path: Path):
     s=setup(tmp_path);alice=create_player_invite(s,'Alice');bob=create_player_invite(s,'Bob');cid=default_campaign_id(s)
+    set_campaign_members(s,cid,[alice['id'],bob['id']])
     save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=alice['id'])
     save_player_character(s,{'name':'Borin','campaign_id':cid},invite_id=bob['id'])
     d1,d2,d3,d4=[future(n) for n in (2,3,4,5)]
@@ -63,6 +65,7 @@ def test_planner_distinguishes_green_soft_blocked_and_unknown(tmp_path: Path):
 
 def test_same_player_with_two_characters_counts_once(tmp_path: Path):
     s=setup(tmp_path);alice=create_player_invite(s,'Alice');cid=default_campaign_id(s)
+    set_campaign_members(s,cid,[alice['id']])
     save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=alice['id'])
     save_player_character(s,{'name':'Backup','campaign_id':cid},invite_id=alice['id'])
     day=future(1);save_player_availability(s,alice['id'],[{'date':day,'status':'available'}])
@@ -72,17 +75,22 @@ def test_same_player_with_two_characters_counts_once(tmp_path: Path):
     assert out['next_all_available'] is not None
 
 
-def test_character_assignment_can_self_join_active_campaign(tmp_path: Path):
+def test_character_assignment_cannot_self_join_active_campaign(tmp_path: Path):
     s=setup(tmp_path);alice=create_player_invite(s,'Alice');other=save_campaign(s,{'name':'Second Story','member_ids':[]})
     assert not invite_has_campaign(s,alice['id'],other['id'])
-    save_player_character(s,{'name':'Wayfarer','campaign_id':other['id']},invite_id=alice['id'])
-    assert invite_has_campaign(s,alice['id'],other['id'])
+    try:
+        save_player_character(s,{'name':'Wayfarer','campaign_id':other['id']},invite_id=alice['id'])
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError('character creation granted unauthorized table access')
+    assert not invite_has_campaign(s,alice['id'],other['id'])
 
 
 def test_schedule_http_player_save_and_gm_summary(tmp_path: Path,monkeypatch):
     import app.main as main
     s=setup(tmp_path);seed_wiki(s);set_setting(s,'player_access_mode','invite');monkeypatch.setattr(main,'settings',s)
-    alice=create_player_invite(s,'Alice');cid=default_campaign_id(s);save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=alice['id'])
+    alice=create_player_invite(s,'Alice');cid=default_campaign_id(s);set_campaign_members(s,cid,[alice['id']]);save_player_character(s,{'name':'Aster','campaign_id':cid},invite_id=alice['id'])
     day=future(6)
     player=TestClient(main.app);player.get(alice['invite_path'])
     page=player.get('/schedule');assert page.status_code==200 and 'Mark it once' in page.text

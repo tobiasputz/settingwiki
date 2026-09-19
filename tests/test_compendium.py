@@ -88,7 +88,7 @@ def test_studio_move_rewrites_tex_include_and_homebrew_leaves_main_codex(tmp_pat
 
 def test_bridge_has_first_class_action_item_support():
     bridge=(Path(__file__).resolve().parents[1]/'integrations/foundry-seeker-bridge/seeker-bridge.mjs').read_text(encoding='utf-8')
-    assert 'const BRIDGE_VERSION = "1.10.1"' in bridge
+    assert 'const BRIDGE_VERSION = "1.11.0"' in bridge
     assert 'kind === "action" ? "action"' in bridge
     assert 'Item.create(' in bridge and 'createEmbeddedDocuments("Item"' in bridge
 

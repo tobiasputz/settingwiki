@@ -12,7 +12,10 @@ NON_MONSTER_KINDS = {"item", "feat", "action", "homebrew"}
 HOME_BREW_SECTIONS = {
     "ancestry": "Ancestries",
     "archetype": "Archetypes",
-    "class": "Class Feats",
+    "class": "Classes & Class Feats",
+    "background": "Backgrounds",
+    "spell": "Spells",
+    "hazard": "Hazards",
     "general": "General & Skill Feats",
     "actions": "Actions & Activities",
     "items": "Items & Equipment",
@@ -22,6 +25,9 @@ HOME_BREW_SOURCE_TITLES = {
     "ancestry": "Ancestries",
     "archetype": "Archetypes",
     "class": "Classes",
+    "background": "Backgrounds",
+    "spell": "Spells",
+    "hazard": "Hazards",
     "general": "General Homebrew",
     "actions": "Actions & Activities",
     "items": "Items & Equipment",
@@ -158,12 +164,12 @@ def classify_homebrew(row: dict) -> dict:
     traits = _traits(payload)
     traits_low = {t.casefold() for t in traits}
 
-    if kind == "homebrew" and document in {"feat", "action", "equipment", "item", "weapon", "armor", "consumable", "ancestry", "archetype"}:
+    if kind == "homebrew" and document in {"feat", "action", "equipment", "item", "weapon", "armor", "consumable", "ancestry", "archetype", "class", "background", "spell", "hazard"}:
         if document == "action":
             effective = "action"
         elif document == "feat":
             effective = "feat"
-        elif document in {"ancestry", "archetype"}:
+        elif document in {"ancestry", "archetype", "class", "background", "spell", "hazard"}:
             effective = document
         else:
             effective = "item"
@@ -172,7 +178,7 @@ def classify_homebrew(row: dict) -> dict:
 
     if explicit in HOME_BREW_SECTIONS:
         section = explicit
-    elif effective in {"ancestry", "archetype"}:
+    elif effective in {"ancestry", "archetype", "class", "background", "spell", "hazard"}:
         section = effective
     elif effective == "action":
         section = "actions"
@@ -194,6 +200,10 @@ def classify_homebrew(row: dict) -> dict:
     if not group:
         if effective == "ancestry": group = str(row.get("title") or payload.get("ancestry_trait") or "").strip()
         elif effective == "archetype": group = str(row.get("title") or payload.get("archetype_name") or "").strip()
+        elif effective == "class": group = str(row.get("title") or payload.get("class_name") or "").strip()
+        elif effective == "background": group = "Backgrounds"
+        elif effective == "spell": group = str(payload.get("spell_category") or "Spells").strip().title()
+        elif effective == "hazard": group = str(payload.get("hazard_complexity") or "Hazards").strip().title()
         elif section == "ancestry": group = str(payload.get("ancestry_trait") or "").strip()
         elif section == "archetype": group = str(payload.get("archetype_name") or "").strip()
         elif section == "class": group = str(payload.get("class_name") or "").strip()
@@ -230,7 +240,7 @@ def group_homebrew(rows: list[dict], *, include_drafts: bool = False) -> list[di
             continue
         row["library"] = meta
         grouped.setdefault(meta["section"], {}).setdefault(meta["group"], []).append(row)
-    order = ["ancestry", "archetype", "class", "general", "actions", "items", "other"]
+    order = ["ancestry", "archetype", "class", "background", "spell", "hazard", "general", "actions", "items", "other"]
     result=[]
     for section in order:
         groups=grouped.get(section, {})
@@ -341,11 +351,57 @@ def _bundle_latex_snippet(row: dict, document: str) -> str:
     return "\n\n".join(x for x in out if x is not None).strip()+"\n"
 
 
+
+def _field_lines(payload: dict, fields: list[tuple[str, str]]) -> list[str]:
+    out=[]
+    for label,key in fields:
+        value=payload.get(key)
+        if isinstance(value,list): value=", ".join(str(x).strip() for x in value if str(x).strip())
+        value=str(value or "").strip()
+        if value: out.append(r"\textbf{"+label+":} "+latex_escape(value)+r"\\")
+    return out
+
+
+def _structured_document_latex(row: dict, document: str) -> str:
+    payload=dict(row.get("payload") or {})
+    title=latex_escape(row.get("title") or document.title())
+    description=str(payload.get("description") or row.get("summary") or "").strip()
+    out=[f"\\section{{{title}}}"]
+    if document=="background":
+        out.extend(_field_lines(payload,[("Ability Boosts","background_boosts"),("Trained Skill","background_skill"),("Lore Skill","background_lore"),("Skill Feat","background_skill_feat"),("Special","background_special")]))
+    elif document=="spell":
+        rank=str(payload.get("spell_rank") or payload.get("level") or "").strip()
+        if rank: out.append(r"\textbf{Rank:} "+latex_escape(rank)+r"\\")
+        out.extend(_field_lines(payload,[("Category","spell_category"),("Traditions","spell_traditions"),("Cast","spell_cast"),("Range","spell_range"),("Targets","spell_targets"),("Area","spell_area"),("Duration","spell_duration"),("Defense","spell_defense"),("Heightened","spell_heightened")]))
+        traits=str(payload.get("traits") or "").strip()
+        if traits: out.insert(1,r"\textbf{Traits:} "+latex_escape(traits)+r"\\")
+    elif document=="hazard":
+        level=str(payload.get("level") or "").strip()
+        if level: out.append(r"\textbf{Level:} "+latex_escape(level)+r"\\")
+        out.extend(_field_lines(payload,[("Complexity","hazard_complexity"),("Stealth","hazard_stealth"),("Description / Notice","hazard_notice"),("Disable","hazard_disable"),("AC","hazard_ac"),("Hardness","hazard_hardness"),("HP","hazard_hp"),("BT","hazard_bt"),("Saving Throws","hazard_saves"),("Routine","hazard_routine"),("Reset","hazard_reset")]))
+    elif document=="class":
+        out.extend(_field_lines(payload,[("Hit Points","class_hp"),("Key Ability","class_key_ability"),("Perception","class_perception"),("Class DC","class_dc"),("Saving Throws","class_saves"),("Skills","class_skills"),("Proficiencies","class_proficiencies"),("Progression","class_progression")]))
+    if description:
+        out.extend(["",latex_escape(description).replace("\n","\n\n")])
+    if document=="class":
+        rules=payload.get("bundle_feats") if isinstance(payload.get("bundle_feats"),list) else []
+        if rules:
+            out.extend(["",r"\subsection{Class Feats}"])
+            current=None
+            for rule in sorted(rules,key=lambda x:(int(x.get("level") or 0),str(x.get("title") or "").casefold())):
+                level=int(rule.get("level") or 0)
+                if level!=current:
+                    current=level; out.append(f"\\subsubsection{{Level {level}}}")
+                out.append(_bundle_rule_latex(rule,default_category="class").rstrip())
+    return "\n\n".join(x for x in out if x is not None).strip()+"\n"
+
 def homebrew_latex_snippet(row: dict) -> str:
     payload=dict(row.get("payload") or {})
     document=str(payload.get("homebrew_document") or "").strip().lower()
     if document in {"ancestry", "archetype"}:
         return _bundle_latex_snippet(row, document)
+    if document in {"background", "spell", "hazard", "class"}:
+        return _structured_document_latex(row, document)
     meta=classify_homebrew(row)
     kind=meta["effective_kind"]
     title=latex_escape(row.get("title") or "Untitled")

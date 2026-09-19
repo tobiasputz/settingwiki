@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .v10 import log_best_effort
 from .storage import connect, get_setting, set_setting, list_revisions, restore_revision
 from .living import create_portable_archive, validate_portable_archive_file
 
@@ -283,7 +284,7 @@ def normalize_foundry_sheet(sheet: Any) -> dict:
 
 
 def _foundry_module_version() -> str:
-    return '1.10.1'
+    return '1.11.0'
 
 
 def _validate_foundry_token(settings: Settings, campaign_id: int, token: str) -> None:
@@ -300,23 +301,43 @@ def _command_row(raw: dict) -> dict:
 
 
 def list_foundry_prepared_content(settings: Settings, campaign_id: int) -> list[dict]:
+    # Campaign creatures/NPC prep remains campaign-scoped. Forge Homebrew is a
+    # table-independent rules library and is projected into every campaign.
     rows=_rows(settings,'SELECT * FROM foundry_prepared_content WHERE campaign_id=? ORDER BY updated_at DESC,id DESC',(int(campaign_id),))
+    out=[]
     for row in rows:
         row['payload']=_json(row.pop('payload_json','{}'),{})
-    return rows
+        if row['payload'].get('global_homebrew_id'):
+            # Retained as a rollback-safe migration shadow; the global master is
+            # returned below instead so the UI never shows two copies.
+            continue
+        out.append(row)
+    try:
+        from .homebrew_global import list_global_homebrew
+        out.extend(list_global_homebrew(settings,int(campaign_id)))
+    except Exception as exc:
+        log_best_effort(settings,"foundry","prepared_content.global_homebrew",exc,campaign_id=int(campaign_id),level="debug")
+    out.sort(key=lambda r:(-float(r.get('updated_at') or 0),-int(r.get('id') or 0)))
+    return out
 
 
 def save_foundry_prepared_content(settings: Settings, campaign_id: int, payload: dict) -> dict:
     kind=str(payload.get('kind') or 'item').strip().lower()
     if kind not in {'item','feat','action','monster','npc','homebrew'}:
         raise ValueError('Unsupported prep content kind.')
+    content_payload=payload.get('payload') if isinstance(payload.get('payload'),dict) else {}
+    try:
+        from .homebrew_global import is_global_homebrew_payload, save_global_homebrew
+        if is_global_homebrew_payload(kind,content_payload,int(payload.get('id') or 0)):
+            return save_global_homebrew(settings,{**payload,'kind':kind,'payload':content_payload},int(campaign_id))
+    except ImportError:
+        pass
     target_type=str(payload.get('target_type') or 'world').strip().lower()
     if target_type not in {'world','actor'}:
         raise ValueError('target_type must be world or actor.')
     title=str(payload.get('title') or '').strip()[:180]
     if not title:
         raise ValueError('A title is required.')
-    content_payload=payload.get('payload') if isinstance(payload.get('payload'),dict) else {}
     row=(
         int(payload.get('id') or 0), int(campaign_id), kind, title,
         str(payload.get('subtitle') or '')[:180], target_type,
@@ -339,6 +360,12 @@ def save_foundry_prepared_content(settings: Settings, campaign_id: int, payload:
 
 
 def delete_foundry_prepared_content(settings: Settings, campaign_id: int, item_id: int) -> None:
+    try:
+        from .homebrew_global import GLOBAL_HOME_BREW_ID_BASE, delete_global_homebrew
+        if int(item_id)>=GLOBAL_HOME_BREW_ID_BASE:
+            delete_global_homebrew(settings,int(item_id));return
+    except ImportError:
+        pass
     with connect(settings) as conn:
         conn.execute('DELETE FROM foundry_prepared_content WHERE campaign_id=? AND id=?',(int(campaign_id),int(item_id)))
 
@@ -684,13 +711,13 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     query=urllib.parse.parse_qsl(parts.query,keep_blank_values=True)
     query=[(k,v) for k,v in query if k.lower()!='wait']+[('wait','true')]
     webhook_url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,parts.path,urllib.parse.urlencode(query),parts.fragment))
-    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/8.0.1'}, method='POST')
+    req = urllib.request.Request(webhook_url, data=body, headers={'Content-Type': 'application/json', 'User-Agent': 'Seeker/10.2.0'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             status=int(resp.status)
             raw=b''
             try: raw=resp.read()
-            except Exception: pass
+            except Exception as exc: log_best_effort(settings,"discord","discord.response_read",exc,campaign_id=int(campaign_id) if campaign_id is not None else None,level="debug")
             created={}
             if raw:
                 try: created=json.loads(raw.decode('utf-8'))
@@ -710,7 +737,7 @@ def discord_post(settings: Settings, campaign_id: int, content: str, *, username
     except urllib.error.HTTPError as exc:
         detail=''
         try: detail=exc.read().decode('utf-8','replace')[:500]
-        except Exception: pass
+        except Exception as read_exc: log_best_effort(settings,"discord","discord.error_body_read",read_exc,campaign_id=int(campaign_id) if campaign_id is not None else None,level="debug")
         raise ValueError(f'Discord rejected the webhook ({exc.code}){": "+detail if detail else "."}') from exc
     except Exception as exc:
         raise ValueError(f'Could not reach Discord: {exc}') from exc
@@ -1118,7 +1145,7 @@ def continuity_v6(settings: Settings, campaign_id: int, wiki: dict) -> dict:
             if c['trigger_kind']=='date':
                 try:
                     if dt.date.fromisoformat(str(c['trigger_value'])[:10]) < dt.date.today(): issues.append({'severity':'warning','title':c['title'],'message':'A dated consequence is overdue.','href':'/gm/prep'})
-                except Exception: pass
+                except Exception as exc: log_best_effort(settings,"continuity","consequence.invalid_date",exc,campaign_id=cid,meta={"consequence_id":int(c['id']) if 'id' in c.keys() else None})
         hidden={str(r['target_key']) for r in conn.execute("SELECT target_key FROM lore_reveals WHERE campaign_id=? AND target_type='page' AND state='hidden'",(cid,)).fetchall()}
         for h in conn.execute("SELECT id,title,body FROM handouts WHERE campaign_id=?",(cid,)).fetchall():
             text=(str(h['title'])+' '+str(h['body'])).casefold()
@@ -1295,7 +1322,7 @@ def campaign_keepsake(settings: Settings, campaign_id: int, out: Path) -> Path:
             try:
                 path=path.resolve();base=base.resolve()
                 if path.is_file() and base in path.parents:return path,arc
-            except Exception:pass
+            except Exception as exc: log_best_effort(settings,"archive","keepsake.asset_resolve",exc,campaign_id=int(campaign_id),path=str(path),level="debug")
         return None
     with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,allowZip64=True) as z:
         z.writestr('campaign-chronicle.html',''.join(parts));z.writestr('campaign-data.json',json.dumps(manifest,indent=2,ensure_ascii=False))

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .v10 import log_best_effort
 from .storage import connect, get_setting, set_setting
 
 LIVING_SCHEMA = r'''
@@ -830,7 +831,7 @@ def media_usage(settings:Settings,ref:str)->dict:
             try:
                 rows=conn.execute(f'SELECT {key} AS k FROM {table} WHERE {col}=?',(ref,)).fetchall()
                 uses.extend({'kind':'metadata','table':table,'key':r['k'],'field':col} for r in rows)
-            except Exception:pass
+            except Exception as exc: log_best_effort(settings,"media","media_usage.metadata_lookup",exc,path=ref,meta={"table":table,"column":col},level="debug")
     return {'ref':ref,'count':len(uses),'uses':uses}
 
 
@@ -849,7 +850,7 @@ def replace_media_reference(settings:Settings,old_ref:str,new_ref:str)->dict:
     with connect(settings) as conn:
         for table,col in [('entity_styles','crest_ref'),('entity_styles','ambient_audio_ref'),('handouts','image_ref'),('timeline_events','image_ref')]:
             try:conn.execute(f'UPDATE {table} SET {col}=? WHERE {col}=?',(new_ref,old_ref))
-            except Exception:pass
+            except Exception as exc: log_best_effort(settings,"media","media_replace.metadata_update",exc,path=old_ref,meta={"table":table,"column":col},level="debug")
     return {'ok':True,'source_files':touched,'old_ref':old_ref,'new_ref':new_ref}
 
 
@@ -970,11 +971,11 @@ def continuity_report(settings:Settings,wiki:dict)->dict:
         try:
             for a in conn.execute('SELECT alias,page_slug FROM page_aliases').fetchall():
                 if a['page_slug'] not in pages:issues.append({'severity':'info','title':a['alias'],'message':f"Alias targets missing lore: {a['page_slug']}",'href':'/admin/campaign'})
-        except Exception:pass
+        except Exception as exc: log_best_effort(settings,"continuity","continuity.alias_scan",exc,level="debug")
         try:
             for k in conn.execute("SELECT invite_id,target_type,target_key,state FROM player_knowledge WHERE state!='unknown'").fetchall():
                 if k['target_type']=='page' and k['target_key'] not in pages:issues.append({'severity':'info','title':'Player knowledge','message':f"Knowledge state targets missing lore: {k['target_key']}",'href':'/admin/living#knowledge'})
-        except Exception:pass
+        except Exception as exc: log_best_effort(settings,"continuity","continuity.knowledge_scan",exc,level="debug")
     for p in pages.values():
         vals=[]
         for m in re.finditer(r'\bAge\s*:\s*(\d{1,4}).{0,30}?(?:as of\s*)?(\d{2,4})\s*(?:p\.?C\.?|PC|AC)',str(p.get('plain_text') or ''),re.I):vals.append((int(m.group(1)),int(m.group(2))))
