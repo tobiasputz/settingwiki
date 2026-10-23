@@ -1,0 +1,31 @@
+/* Seeker World Ledger — additive styles, existing design tokens retained. */
+.world-ledger{margin-block:20px}.world-ledger>p{color:#b4a99a;line-height:1.6}
+.world-ledger-summary{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0 20px}
+.world-ledger-summary span{border:1px solid #514536;border-radius:99px;padding:5px 11px;font-size:12px;color:#ceb99b}
+.world-event-list{display:grid;gap:9px}.world-event-row{display:flex;justify-content:space-between;gap:14px;align-items:start;border:1px solid #3e382e;border-radius:10px;background:#181714;padding:15px}
+.world-event-row strong,.world-known-event strong{display:block;font:400 20px/1.3 Georgia,serif;color:#eee2d0;margin:7px 0 4px}
+.world-event-row p,.world-known-event p{margin:5px 0 7px;line-height:1.55;color:#b2a99a;white-space:pre-wrap;overflow-wrap:anywhere}
+.world-event-row small,.world-known-event small{color:#c2aa86}.world-event-meta{display:flex;gap:9px;flex-wrap:wrap;align-items:center;color:#918577;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.world-status{border:1px solid #544735;border-radius:8px;padding:2px 7px}.world-status.published{border-color:#46775b;color:#b3dfbb}.world-status.archived{color:#82796c}
+.world-event-form{display:grid;gap:14px;background:#181713;border:1px solid #6a563c;border-radius:12px;padding:18px;margin:15px 0}.world-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.world-event-form label{display:grid;gap:6px;font-size:12px;color:#c5b59b}.world-event-form input,.world-event-form select,.world-event-form textarea{max-width:100%;min-width:0;padding:10px 12px;border:1px solid #5a4c3c;border-radius:8px;background:#11110f;color:#eae2d8;font:14px/1.5 inherit;box-sizing:border-box}
+.world-event-form input:focus,.world-event-form select:focus,.world-event-form textarea:focus{outline:2px solid #b79661;outline-offset:2px}
+.world-public-fields{display:grid;gap:10px;border-top:1px solid #493d2d;padding-top:14px}.world-public-fields small{display:block;color:#aaa093;line-height:1.6;margin-top:4px}.world-form-actions{display:flex;gap:8px;flex-wrap:wrap}
+#worldEventNotice{background:#243529;border:1px solid #52795a;border-radius:8px;padding:10px}#worldEventNotice.error{background:#422721;border-color:#94564b}
+.world-known-event{border-top:1px solid #4b4031;padding:16px 0}.world-known-event:first-child{border-top:0}
+.world-journey{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.world-journey a,.world-journey button{border:1px solid #63543d;border-radius:7px;background:#201e18;color:#e3d2b9;text-decoration:none;padding:10px 14px;cursor:pointer;min-height:44px}.world-journey a:hover,.world-journey button:hover{border-color:#c49e65;background:#2d271d}
+.atlas-relief-quality{display:flex;align-items:center;gap:7px;color:#bba889;font-size:12px}.atlas-relief-quality select{min-height:32px;border:1px solid #65553a;color:#e8dcc8;background:#181914;border-radius:5px}
+@media(max-width:740px){.world-fields{grid-template-columns:1fr}.world-event-row{flex-direction:column}.world-event-row button{align-self:end}}
+
+.atlas-world-events{margin:14px 0;padding:12px;border:1px solid #64513b;border-radius:9px;background:#191814}.atlas-world-events h3{font-size:15px;margin:0 0 9px}.atlas-world-events article{padding:9px 0;border-top:1px solid #3a3229}.atlas-world-events article:first-of-type{border:0}.atlas-world-events small{display:block;color:#c1a67d}.atlas-world-events strong{color:#f1e5d3}
+
+/* Calm Codex mode keeps the source content unchanged and honors reading preferences. */
+.codex-reader-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 2px}
+.codex-reader-toolbar button{border:1px solid #554832;border-radius:7px;color:#d8c6a8;background:#171713;padding:8px 12px;min-height:38px;cursor:pointer;font:12px var(--sans)}
+.codex-reader-toolbar button:hover{border-color:#be9b65}
+.codex-reader-toolbar span{color:#a99c8c;min-width:3em;text-align:center;font:12px var(--sans)}
+.reading-shell .lore-prose{font-size:calc(18px * var(--reader-scale,1))}
+.reading-shell.reader-focus{grid-template-columns:minmax(0,1fr)}
+.reader-focus .codex-sidebar{display:none}
+.reader-focus .lore-article{max-width:850px}
+.reader-focus .reading-progress{left:0}
+@media (max-width:760px){.codex-reader-toolbar button{min-height:44px}.reader-focus .lore-article{padding-inline:18px}}
