@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 
 import json
 import time
@@ -124,7 +125,7 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
             compact.append({**e,'sync':syncs.get(int(e['id']))})
         wf=workflow(settings,cid,int(session['id'])) if session else None
         return {
-            'version':'10.2.0','campaign':get_campaign(settings,cid) or {},'modules':module_settings(settings,cid),
+            'version':'10.3.0','campaign':get_campaign(settings,cid) or {},'modules':module_settings(settings,cid),
             'session':session,'workflow':wf,'sessions':list_sessions(settings,public=False,campaign_id=cid),
             'entities':compact,'codex_candidates':_codex_candidates(wiki,entities),'table':_table_payload(cid,session),'maps':list_maps(settings,public=False),
             'handouts':list_handouts(settings,admin=True,campaign_id=cid),'threads':list_threads(settings,admin=True,campaign_id=cid),
@@ -211,7 +212,7 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         if not target.exists() or target.suffix.lower() not in {'.tex','.sty','.cls'}:raise HTTPException(404,'Source file not found.')
         text=target.read_text(encoding='utf-8',errors='replace')
         from .v8 import source_structure
-        return {'path':path,'text':text,'structure':source_structure(text),'revisions':revisions(settings,active_campaign_id(request),'source',path,30)}
+        return {'path':path,'text':text,'source_hash':hashlib.sha256(text.encode('utf-8')).hexdigest(),'structure':source_structure(text),'revisions':revisions(settings,active_campaign_id(request),'source',path,30)}
 
     @app.put('/api/v8/source')
     def v8_source_save(request:Request,payload:dict=Body(...)):
@@ -219,6 +220,13 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         if not path:raise HTTPException(400,'Source path is required.')
         target=safe_project_path(settings,path)
         if target.suffix.lower() not in {'.tex','.sty','.cls'}:raise HTTPException(400,'Source Studio only writes LaTeX source files.')
+        # Optimistic source locking: do not overwrite another GM's newer edit.
+        # Older clients without a hash keep their previous behavior.
+        expected_hash=payload.get('expected_hash')
+        if expected_hash is not None:
+            current_text=target.read_text(encoding='utf-8',errors='replace') if target.is_file() else ''
+            if hashlib.sha256(current_text.encode('utf-8')).hexdigest()!=str(expected_hash):
+                raise HTTPException(409,'Source changed since it was opened. Copy your work, reload, and reconcile the changes before saving.')
         snapshot_source(settings,cid,path,label=str(payload.get('label') or 'Before Source Studio edit'),created_by=requester_label(request))
         result=save_text_file(settings,path,text)
         build=None
@@ -267,7 +275,20 @@ def register_v8_routes(app, settings: Settings, templates, helpers: dict[str, Ca
         update=None
         if payload.get('publish') and summary:
             update=add_session_update(settings,{'campaign_id':cid,'session_id':session_id,'title':f"Session {s.get('session_number') or ''} · {s.get('title') or 'Chronicle'}".strip(' ·'),'body':summary,'target_type':'session','target_key':str(session_id),'visibility':'players'})
-        return {'ok':True,'session':ended,'workflow':wf,'chronicle_update':update}
+        # Session closeout feeds the Living World as an *unpublished* draft.
+        # Do not copy private GM text to any player endpoint or republish the
+        # Chronicle implicitly. Repeated closeout calls must not duplicate it.
+        world_draft=None
+        if summary:
+            from .world_state import events_for_gm, write_event
+            existing_world=next((event for event in events_for_gm(settings,cid,session_id=session_id)
+                                 if event['kind']=='consequence' and event['title'].startswith('Session closeout · ')),None)
+            if not existing_world:
+                world_draft=write_event(settings,cid,{'session_id':session_id,'kind':'consequence',
+                    'title':'Session closeout · '+str(s.get('title') or session_id),
+                    'gm_notes':summary,'status':'draft'})
+            else: world_draft=existing_world
+        return {'ok':True,'session':ended,'workflow':wf,'chronicle_update':update,'world_draft':world_draft}
 
     @app.post('/api/v8/session/{session_id}/touch')
     def v8_session_touch(request:Request,session_id:int,payload:dict=Body(...)):

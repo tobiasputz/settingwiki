@@ -14,7 +14,7 @@ def test_atlas_template_has_progressive_relief_fallback():
     text=(ROOT/'templates'/'map.html').read_text(encoding='utf-8')
     assert 'atlasReliefCanvas' in text
     assert 'data-map-relief' in text
-    assert 'atlas-relief.js?v=10200' in text
+    assert 'atlas-relief.js?v=10300' in text
     assert 'id="atlasImage"' in text  # original image remains the fallback/interaction surface
 
 

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Campaign · {{ campaign.name or wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v8.css?v=10200">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v8.css?v=10300">{% endblock %}
 {% block body %}
 <main class="v8-player-portal">
   <header class="v8-player-hero"><span class="eyebrow">{{ campaign.name or wiki.title }}</span><h1>Your campaign</h1><p>What your character knows, what the party has discovered, and what is happening next.</p></header>
@@ -12,5 +12,8 @@
     <article class="v8-panel"><header><div><span class="eyebrow">CHRONICLE</span><h2>Recent sessions</h2></div><a href="/campaign">Open →</a></header>{% for s in sessions[-5:]|reverse %}<a class="v8-player-row" href="/campaign"><strong>{{ s.title }}</strong><small>{{ s.session_date }} · {{ s.status|title }}</small></a>{% else %}<p>No recorded sessions yet.</p>{% endfor %}</article>
   </section>
   <nav class="v8-player-actions"><a href="/">⌂ Codex</a><a href="/#atlas">⌖ Atlas</a><a href="/campaign">◇ Chronicle</a><a href="/homebrew">◆ Homebrew</a></nav>
+  <section class="world-player-history" style="max-width:960px;margin:22px auto;padding:0 18px"><h2>World updates</h2><div id="worldKnownEvents" aria-live="polite">Loading world updates…</div></section>
 </main>
 {% endblock %}
+
+{% block scripts %}<script src="/static/world-state.js?v=10300"></script>{% endblock %}

@@ -119,6 +119,7 @@ from .bootstrap import initialize_storage
 from .realtime import BUS
 from .v10 import indexed_assets, log_best_effort, log_diagnostic, refresh_asset_index
 from .v10_api import register_v10_routes
+from .route_world_state import register_world_state_routes
 
 settings = load_settings()
 BUILD_LOCK = threading.Lock()
@@ -1828,7 +1829,7 @@ def _validate_public_remote_url(raw:str) -> str:
 def _download_remote_foundry_image(raw_url:str,campaign_id:int,kind:str='art') -> dict:
     url=_validate_public_remote_url(raw_url)
     temp=Path(tempfile.gettempdir())/f'seeker-foundry-art-{secrets.token_hex(8)}.img'
-    req=UrlRequest(url,headers={'User-Agent':'Seeker/10.2.0 (+Foundry Workshop)','Accept':'image/*'})
+    req=UrlRequest(url,headers={'User-Agent':'Seeker/10.3.0 (+Foundry Workshop)','Accept':'image/*'})
     class _SafeImageRedirect(HTTPRedirectHandler):
         def redirect_request(self,request,fp,code,msg,headers,newurl):
             return super().redirect_request(request,fp,code,msg,headers,_validate_public_remote_url(newurl))
@@ -2590,3 +2591,11 @@ register_v10_routes(app,settings,{
 })
 
 # Route `handout_creator_artwork` moved to app.route_studio.
+
+# World consequence ledger (GM-only drafts, explicitly published player projection).
+register_world_state_routes(app,settings,{
+    "settings_provider":lambda:settings,
+    "active_campaign_id":_active_campaign_id,
+    "require_gm":require_gm,
+    "player_allowed":player_allowed,
+})

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Campaign Workspace · {{ campaign.name or wiki.title }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/v8.css?v=10200">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v8.css?v=10300"><link rel="stylesheet" href="/static/world-state.css?v=10300">{% endblock %}
 {% block body %}
 <main class="v8-shell" data-v8-root>
   <header class="v8-hero">
@@ -8,6 +8,12 @@
     <div class="v8-hero-stats"><div><small>TRACKED OBJECTS</small><strong>{{ entity_count }}</strong></div><div><small>SESSION</small><strong>{{ session.title if session else 'None prepared' }}</strong></div><div><small>FOUNDRY</small><strong class="{{ 'ok' if foundry.received_at else 'muted' }}">{{ 'Live' if foundry.received_at else 'Waiting' }}</strong></div>{% if owner_mode %}<button type="button" class="v8-button ghost v10-view-as" id="v10ViewAs">◉ View as player</button>{% endif %}</div>
   </header>
 
+  <nav class="world-journey" aria-label="Campaign lifecycle">
+    <button type="button" data-journey-tab="world">① Create world</button>
+    <button type="button" data-journey-tab="session">② Prepare & run</button>
+    <button type="button" data-journey-tab="world" data-journey-focus="worldConsequenceHost">③ Record consequences</button>
+    <a href="/timeline">④ Review Chronicle</a>
+  </nav>
   <nav class="v8-workspace-nav" aria-label="Campaign workspaces">
     <button type="button" class="active" data-v8-tab="dashboard">✦ <span>Dashboard</span></button>
     <button type="button" data-v8-tab="session">◉ <span>Session</span></button>
@@ -58,6 +64,7 @@
   <section class="v8-pane" data-v8-pane="world">
     <header class="v8-section-head"><div><span class="eyebrow">WORLD STATE</span><h2>Timeline, maps & assets</h2><p>Track consequences over time, preserve map reveal states, and reuse campaign art without hunting through upload folders.</p></div><div class="v8-head-actions"><div class="v8-search"><span>⌕</span><input id="v9UniversalSearch" placeholder="Search everything: sessions, NPCs, feats, handouts…"></div></div></header>
     <div id="v9SearchResults" class="v9-search-results"></div>
+    <div id="worldConsequenceHost"><div class="v8-loading">Open World to review campaign consequences…</div></div>
     <div class="v9-world-grid"><section class="v8-panel"><header><div><span class="eyebrow">CAMPAIGN TIMELINE</span><h3>Events & consequences</h3></div><a class="v8-button ghost small" href="/timeline">Full timeline</a></header><div id="v9Timeline"></div></section><section class="v8-panel"><header><div><span class="eyebrow">MAP STATES</span><h3>Reveal snapshots</h3></div><a class="v8-button ghost small" href="/#atlas">Open Atlas</a></header><div id="v9MapStates"></div></section><section class="v8-panel v9-assets-panel"><header><div><span class="eyebrow">ASSET LIBRARY</span><h3>Artwork & reuse</h3></div><button class="v8-button ghost small" id="v9ReloadAssets">Refresh</button></header><div id="v9Assets"></div></section></div>
   </section>
 
@@ -79,4 +86,4 @@
 <div class="v8-modal" id="v8ObjectPicker" aria-hidden="true"><div class="v8-modal-card v8-picker-card"><header><div><small>TRACK A CODEX PAGE</small><strong>Add something meaningful to Campaign Objects</strong></div><button type="button" data-v8-picker-close>×</button></header><div class="v8-picker-body"><div class="v8-search"><span>⌕</span><input id="v8ObjectPickerSearch" placeholder="Search Codex pages"></div><label class="v8-picker-kind"><small>OBJECT TYPE</small><select id="v8ObjectPickerKind"><option value="lore">Lore / other</option><option value="npc">NPC / person</option><option value="place">Place</option><option value="faction">Faction</option><option value="organization">Organization</option><option value="item">Item</option><option value="monster">Creature</option></select></label><div id="v8ObjectPickerList" class="v8-picker-list"></div></div><footer><span>Tracking a page does not alter its LaTeX or move it in the Codex.</span><button class="v8-button ghost" type="button" data-v8-picker-close>Close</button></footer></div></div>
 <div class="v8-toast" id="v8Toast"></div>
 {% endblock %}
-{% block scripts %}<script src="/static/v8.js?v=10200"></script><script src="/static/v9.js?v=10200"></script>{% endblock %}
+{% block scripts %}<script src="/static/v8.js?v=10300"></script><script src="/static/v9.js?v=10300"></script><script src="/static/world-state.js?v=10300"></script>{% endblock %}

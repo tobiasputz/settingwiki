@@ -1,5 +1,16 @@
 # Changelog
 
+## 10.3.0 — Living World, Codex reading and Atlas controls
+
+- Added a player-safe world consequence ledger with explicit GM approval, session/entity/map/marker linking, and per-campaign isolation.
+- Added a World workspace authoring interface, location history in the GM Atlas drawer, object-to-consequence links and player portal world updates.
+- Added Codex focus mode, adjustable reading size and locally stored reading position with optional resume.
+- Added adaptive 2.5D detail modes (Auto, High and Eco), including an additional lightweight far-zoom albedo texture, lower-cost low-detail shading and WebGL context-loss fallback.
+- Source Studio now uses an optimistic content SHA-256 check when saving edits to prevent common stale-tab overwrites.
+- Foundry bridge UI distinguishes fresh heartbeats from stale cached state.
+- Added tests for publication privacy, cross-campaign separation, unauthorized edits and stale source writes.
+- No changes to Foundry Bridge protocol; existing session, Homebrew and LaTeX data remain authoritative.
+
 ## 10.2.0 — Kiragon cinematic Atlas quality pass
 
 - Fixed the 2.5D Kiragon artwork rendering vertically inverted. Seeker Atlas coordinates use a top-left origin, so WebGL texture uploads now deliberately keep that orientation instead of applying `UNPACK_FLIP_Y_WEBGL`.

@@ -70,6 +70,7 @@
     uniform float u_label_start;
     uniform float u_label_end;
     uniform float u_grid;
+    uniform float u_quality;
 
     vec3 mapColor(vec2 uv) {
       return texture2D(u_albedo, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
@@ -164,7 +165,7 @@
       vec3 lightDir = normalize(vec3(-0.50, -0.58, 0.82));
       float ndl = dot(normal, lightDir);
       float diffuse = smoothstep(0.08, 0.95, ndl * 0.5 + 0.5);
-      float shadow = terrainShadow(uv, height) * land;
+      float shadow = u_quality > 0.5 ? terrainShadow(uv, height) * land : 0.0;
       float reliefMask = clamp(land * u_strength, 0.0, 1.2);
       float lightValue = mix(0.89, 1.10, diffuse);
       lightValue *= mix(1.0, 0.88, shadow * 0.58);
@@ -355,6 +356,7 @@
       this.profile = profile || {};
       this.effects = effects || {};
       this.zoom = 1;
+      this.quality = 'auto';
       this.enabled = true;
       this.ready = false;
       this.raf = 0;
@@ -628,6 +630,9 @@
       // It is downsampled only for GPU upload; masks continue to sample in UVs.
       const albedo = textureSource(this.image, this.maxTextureDimension);
       this.terrainTextures = [albedo, height, normal, label, material].map((img, unit) => makeTexture(gl, textureSource(img, this.maxTextureDimension), unit));
+      // An additional 2K albedo saves bandwidth at world-scale zoom; close
+      // inspection automatically uses the higher-resolution uploaded artwork.
+      this.lowDetailTexture = makeTexture(gl, textureSource(this.image, Math.min(2048, this.maxTextureDimension)), 0);
       const p = this.terrainProgram;
       gl.useProgram(p);
       ['u_albedo', 'u_height', 'u_normal', 'u_label', 'u_material'].forEach((name, unit) => {
@@ -649,6 +654,7 @@
         this.ready = false;
         this.root.classList.remove('atlas-relief-ready');
         this.root.classList.add('atlas-relief-failed');
+        this.canvas.dispatchEvent(new CustomEvent('seeker:terrain-lost'));
       }, {once: true});
       return true;
     }
@@ -662,6 +668,15 @@
     setZoom(value) {
       this.zoom = Math.max(0.1, Number(value) || 1);
       if (this.enabled && this.ready) this.draw(performance.now());
+    }
+
+    setQuality(value) {
+      this.quality = ['auto', 'quality', 'eco'].includes(value) ? value : 'auto';
+      if (this.ready) this.draw(performance.now());
+    }
+
+    highQuality() {
+      return this.quality === 'quality' || (this.quality === 'auto' && this.zoom >= 1.45);
     }
 
     setEffects(effects) {
@@ -681,7 +696,9 @@
       gl.uniform1f(gl.getUniformLocation(p, 'u_strength'), this.terrainStrength());
       gl.uniform1f(gl.getUniformLocation(p, 'u_label_declutter'), this.effects.label_declutter === false ? 0 : 1);
       gl.uniform1f(gl.getUniformLocation(p, 'u_grid'), this.effects.grid ? 1 : 0);
+      gl.uniform1f(gl.getUniformLocation(p, 'u_quality'), this.highQuality() ? 1 : 0);
       this.terrainTextures.forEach((t, unit) => {
+        if (unit === 0 && !this.highQuality()) t = this.lowDetailTexture;
         gl.activeTexture(gl.TEXTURE0 + unit);
         gl.bindTexture(gl.TEXTURE_2D, t);
       });
@@ -725,7 +742,7 @@
       if (this.raf || this.reducedMotion) return;
       const tick = now => {
         this.raf = requestAnimationFrame(tick);
-        if (!this.enabled || !this.ready || document.hidden || now - this.lastFrame < 80) return; // ~12.5fps; water motion is intentionally slow
+        if (!this.enabled || !this.ready || document.hidden || now - this.lastFrame < (this.highQuality() ? 80 : 125)) return; // adaptive 8–12.5fps; static 2D remains immediate
         this.lastFrame = now;
         this.draw(now);
       };

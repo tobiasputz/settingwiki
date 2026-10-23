@@ -21,6 +21,7 @@ from .v8 import init_v8_db
 from .homebrew_global import init_global_homebrew
 from .v9 import init_v9_db
 from .v10 import init_v10_db
+from .world_state import init_world_state_db
 
 INITIALIZERS = (
     ("core", "Legacy/core storage", init_db),
@@ -41,6 +42,7 @@ def initialize_storage(settings: Settings) -> None:
     for _, _, initializer in INITIALIZERS:
         initializer(settings)
     init_v10_db(settings)
+    init_world_state_db(settings)
     now = time.time()
     with connect(settings) as conn:
         for version, description, _ in INITIALIZERS:

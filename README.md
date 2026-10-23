@@ -1,4 +1,6 @@
-# Seeker — Campaign Workspace (10.2.0)
+# Seeker — Campaign Workspace (10.3.0)
+
+**10.3.0 — Living World & polish:** Adds an explicitly reviewed, campaign-scoped consequence ledger linked to sessions, people and map locations, a safe player-visible projection, a GM event composer in the World workspace, location history in the Atlas drawer and optional Codex focus/reading controls. Atlas rendering now offers adaptive detail modes (Auto / High / Eco), preserves uploaded high-resolution imagery when zoomed and recovers to its 2D fallback on WebGL context loss. Source Studio rejects stale saves from parallel editors. The existing LaTeX authoring, Foundry ownership, campaign/session and spoiler-permission models are preserved; existing `.data` is intentionally excluded from release archives. Static/PWA cache generation is 10300.
 
 **10.2.0 — Kiragon cinematic World Atlas:** fixes the vertically inverted 3D artwork and replaces the first-pass embossed relief with a more restrained Runeterra-inspired rendering stack: multi-scale height/normal lighting, soft terrain self-shadow, flatter roughness-aware water, stronger coast definition, atmospheric distance, cloud-aware lift/shadow, improved terrain masks, a gentler perspective camera, and denser displacement geometry. The original Atlas coordinates, markers, fog, routes, layers, player permissions and 2D fallback are unchanged. High-resolution 8192×5794 Kiragon uploads continue to use the bundled masks in normalized UV space. Static/PWA generation is 10200.
 
